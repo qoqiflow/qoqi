@@ -28,9 +28,7 @@ function Brand() {
           <path d="M78 0H100V139A11 11 0 0 1 78 139Z" />
         </g>
       </svg>
-      <span>
-        qoqi <span className="text-muted-foreground font-medium">flow</span>
-      </span>
+      <span>flow</span>
     </NavLink>
   );
 }
