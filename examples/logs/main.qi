@@ -1,0 +1,293 @@
+// A report on the access log of a web server.
+//
+//     qoqi run examples/logs                      the sample next to this file
+//     qoqi run examples/logs /var/log/access.log  a log of your own
+//
+// Each line is read with a regular expression into a struct, or into the
+// reason it could not be: a log has lines nobody planned for, and one of
+// them must not cost the report.
+
+import std.regex.{Regex};
+import std.time.{Date};
+import std.format.{Align};
+
+// One request, as the server noted it.
+struct Hit {
+    client: String;
+    user: String?;  // null for a visitor who is not signed in
+    at: Date;
+    method: String;
+    path: String;   // without what follows the ?
+    status: Int;
+    bytes: Int;
+    seconds: Float;
+}
+
+// How a server sums up what happened, by the first digit of the status.
+enum Outcome { Ok, Redirect, ClientError, ServerError }
+
+impl Outcome {
+    fn label() -> String {
+        return match self {
+            case Outcome.Ok: "2xx ok";
+            case Outcome.Redirect: "3xx not modified, moved";
+            case Outcome.ClientError: "4xx refused, not found";
+            case Outcome.ServerError: "5xx the server failed";
+        };
+    }
+}
+
+impl Hit {
+    fn outcome() -> Outcome {
+        if self.status >= 500 {
+            return Outcome.ServerError;
+        }
+
+        if self.status >= 400 {
+            return Outcome.ClientError;
+        }
+
+        if self.status >= 300 {
+            return Outcome.Redirect;
+        }
+
+        return Outcome.Ok;
+    }
+
+    // "/api/orders/881" and "/api/orders/17" are the same place to a
+    // person reading a report.
+    fn route(numbers: Regex) -> String {
+        return numbers.replace(self.path, "/:id");
+    }
+}
+
+// Why a line is not a request.
+enum Problem {
+    Shape,         // not what the server writes
+    Date(String),  // a date that is not one
+}
+
+struct BadLine {
+    number: Int;
+    problem: Problem;
+    text: String;
+}
+
+impl BadLine {
+    fn describe() -> String {
+        return match self.problem {
+            case Problem.Shape: "line ${self.number}: not a log line: ${self.text.first(40)}...";
+            case Problem.Date(date): "line ${self.number}: no such date: ${date}";
+        };
+    }
+}
+
+// The pattern is compiled once and handed around.
+struct Reader {
+    line: Regex;
+}
+
+fn reader() -> Reader {
+    // client, identity, user, [date], "method path protocol", status, bytes, seconds
+    let pattern = "^(\\S+) \\S+ (\\S+) \\[([^\\]]+)\\] \"([A-Z]+) (\\S+) [^\"]*\" (\\d{3}) (\\d+) ([\\d.]+)$";
+    return Reader { line: regex.must(pattern) };
+}
+
+impl Reader {
+    fn read(number: Int, text: String) -> Result<Hit, BadLine> {
+        let found = self.line.find(text);
+
+        if found == null {
+            return Err(BadLine { number: number, problem: Problem.Shape, text: text });
+        }
+
+        let parts = found.groups;
+        let at = time.parse(parts[2]);
+
+        if at == null {
+            return Err(BadLine {
+                number: number,
+                problem: Problem.Date(parts[2]),
+                text: text,
+            });
+        }
+
+        let user: String? = null;
+
+        if parts[1] != "-" {
+            user = parts[1];
+        }
+
+        return Ok(Hit {
+            client: parts[0],
+            user: user,
+            at: at,
+            method: parts[3],
+            path: parts[4].split("?")[0],
+            // The pattern only lets digits through
+            status: parts[5].parseInt() ?? 0,
+            bytes: parts[6].parseInt() ?? 0,
+            seconds: parts[7].parseFloat() ?? 0.0,
+        });
+    }
+}
+
+struct Log {
+    hits: [Hit];
+    bad: [BadLine];
+}
+
+fn load(text: String) -> Log {
+    let lines = reader();
+    let log = Log { hits: [], bad: [] };
+
+    for i, line in text.lines() {
+        if line.isBlank() {
+            continue;
+        }
+
+        match lines.read(i + 1, line) {
+            case Ok(hit): {
+                log.hits.push(hit);
+            }
+
+            case Err(bad): {
+                log.bad.push(bad);
+            }
+        }
+    }
+
+    return log;
+}
+
+fn heading(title: String) {
+    println("");
+    println(title);
+    println("=".repeat(title.len()));
+}
+
+fn report(log: Log) {
+    let hits = log.hits;
+    let count = hits.len();
+
+    if count == 0 {
+        println("no requests");
+        return;
+    }
+
+    let first = hits[0].at;
+    let last = hits[count - 1].at;
+    let clients = hits.map(hit -> hit.client) |> set.of();
+    let bytes = hits.sumOf(hit -> hit.bytes);
+
+    heading("Access log, ${first.format("dddd D MMMM YYYY")}");
+    println("${format.plural(count, "request", "requests")} from ${format.plural(clients.len(), "client", "clients")}, ${first.format("HH:mm")} to ${last.format("HH:mm")}");
+    println("${format.bytes(bytes)} sent, ${format.bytes(bytes / count)} on average");
+
+    heading("By outcome");
+
+    for outcome in [Outcome.Ok, Outcome.Redirect, Outcome.ClientError, Outcome.ServerError] {
+        let n = hits.count(hit -> hit.outcome() == outcome);
+
+        println(
+            format.pad(outcome.label(), 26, Align.Left),
+            format.pad(toString(n), 3, Align.Right),
+            " " + format.bar(n, count, 30),
+        );
+    }
+
+    heading("By hour");
+    let hours = hits.countBy(hit -> hit.at.format("HH:00"));
+    let busiest = hours.values().largest() ?? 1;
+
+    for hour in hours.sortedKeys() {
+        let n = hours.getOr(hour, 0);
+        println(hour, format.pad(toString(n), 3, Align.Right), " " + format.bar(n, busiest, 30));
+    }
+
+    heading("Busiest routes");
+    let numbers = regex.must("/\\d+");
+    let routes = hits.groupBy(hit -> hit.route(numbers));
+    let rows: [[String]] = [];
+
+    let mostVisited = routes.keys().sortedBy(route -> -(routes.get(route) ?? []).len()).take(5);
+
+    for route in mostVisited {
+        let there = routes.get(route) ?? [];
+        let slowest = there.fold(0.0, (worst, hit) -> worst.max(hit.seconds));
+        let failed = there.count(hit -> hit.outcome() == Outcome.ServerError);
+
+        rows.push([
+            route,
+            toString(there.len()),
+            format.duration((slowest * 1000.0).round()),
+            toString(failed),
+        ]);
+    }
+
+    print(format.table(["route", "hits", "slowest", "failed"], rows));
+
+    heading("Signed in");
+    let users = dict.empty<[Hit]>();
+
+    for hit in hits {
+        let user = hit.user;
+
+        if user != null {
+            let theirs = users.get(user);
+
+            if theirs == null {
+                users.set(user, [hit]);
+            } else {
+                theirs.push(hit);
+            }
+        }
+    }
+
+    users.each(fn(user: String, theirs: [Hit]) {
+        let writes = theirs.count(hit -> hit.method != "GET");
+        println("${user}: ${format.plural(theirs.len(), "request", "requests")}, ${writes} of them changing something");
+    });
+
+    heading("Worth a look");
+
+    let suspects = hits.filter(hit -> hit.outcome() == Outcome.ClientError).groupBy(
+        hit -> hit.client,
+    );
+
+    suspects.each(fn(client: String, refused: [Hit]) {
+        if refused.len() >= 3 {
+            let paths = refused.map(hit -> hit.path).join(", ");
+            println("${client} was refused ${refused.len()} times in a row: ${paths}");
+        }
+    });
+
+    for hit in hits.filter(hit -> hit.seconds >= 1.0) {
+        println("${hit.method} ${hit.path} took ${format.fixed(hit.seconds, 1)}s at ${hit.at.format("HH:mm:ss")} (status ${hit.status})");
+    }
+
+    if log.bad.len() > 0 {
+        heading("Lines left out");
+
+        for bad in log.bad {
+            println(bad.describe());
+        }
+    }
+}
+
+fn main() -> Int {
+    // Without an argument: the log that comes with the program
+    let file = os.args().first() ?? path.inside(path.dir(os.program()), "access.log");
+
+    match io.readFile(file) {
+        case Ok(text): {
+            report(load(text));
+            return 0;
+        }
+
+        case Err(error): {
+            io.printError(error.describe() + "\n");
+            return 1;
+        }
+    }
+}

@@ -1,0 +1,11 @@
+// What a module does not declare with 'pub' stays inside it.
+
+import game.physics.body;
+import game.physics.body.{atLeastOne};
+
+fn main() -> Int {
+    let b = body.new(1, 2);
+    let n = body.atLeastOne(0);
+    let c = body.nwe(1, 2);
+    return 0;
+}

@@ -1,0 +1,10 @@
+// What the compiler says about optionals used wrongly.
+
+fn main() -> Int {
+    let count = 3;
+    let name: String? = "ada";
+    println(count!);
+    println(name.upper());
+    println(name.map(n -> n.len()).frobnicate());
+    return 0;
+}

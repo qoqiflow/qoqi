@@ -1,0 +1,5 @@
+[ERROR] E2017: cannot read 'name' of User?: the value may be null
+null_safety.qi:11:24
+Suggestion: Test it against null first, or provide a fallback with '??'
+[ERROR] E2017: cannot call 'len' on String?: the value may be null
+null_safety.qi:15:16

@@ -1,0 +1,9 @@
+import textkit.format.pad;
+
+pub fn invited() -> [String] {
+    return ["ada", "grace", "linus"];
+}
+
+pub fn count(names: [String]) -> String {
+    return pad.left(toString(names.len()), 5);
+}

@@ -1,0 +1,90 @@
+// Parts of arrays and texts taken with a range between the brackets:
+// items[1..3], items[1..], items[..2], and ranges kept in a variable.
+
+struct Page {
+    number: Int;
+    lines: [String];
+}
+
+// A sort that splits its array in two halves and merges them back
+fn sorted(numbers: [Int]) -> [Int] {
+    if numbers.len() < 2 {
+        return numbers;
+    }
+
+    let middle = numbers.len() / 2;
+    let left = sorted(numbers[..middle]);
+    let right = sorted(numbers[middle..]);
+    let merged: [Int] = [];
+    let i = 0;
+    let j = 0;
+
+    while i < left.len() && j < right.len() {
+        if left[i] <= right[j] {
+            merged.push(left[i]);
+            i++;
+        } else {
+            merged.push(right[j]);
+            j++;
+        }
+    }
+
+    return merged.concat(left[i..]).concat(right[j..]);
+}
+
+// The lines of a text, so many to a page
+fn pages(lines: [String], size: Int) -> [Page] {
+    let out: [Page] = [];
+
+    for start in (0..lines.len()).step(size) {
+        out.push(Page { number: out.len() + 1, lines: lines[start..start + size] });
+    }
+
+    return out;
+}
+
+fn initials(name: String) -> String {
+    let words = name.split(" ").filter(word -> word != "");
+    return words.map(word -> word[..1].upper()).join("");
+}
+
+fn main() -> Int {
+    println(sorted([5, 3, 9, 1, 4, 8, 2, 7, 6]));
+    println(sorted([]), sorted([42]));
+
+    let rows = ["name,age", "ada,36", "alan,41", "grace,85"];
+    let header = rows[0].split(",");
+    println("columns:", header);
+
+    for row in rows[1..] {
+        let cells = row.split(",");
+        println("  ${cells[0][..1].upper()}${cells[0][1..]} is ${cells[1]}");
+    }
+
+    let text = "one\ntwo\nthree\nfour\nfive\nsix\nseven";
+
+    for page in pages(text.split("\n"), 3) {
+        println("page ${page.number}: ${page.lines.join(", ")}");
+    }
+
+    println(initials("grace brewster  murray hopper"));
+
+    // Inclusive ranges, steps, and ranges kept as values
+    let digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    let evens = (0..10).step(2);
+    let backwards = (9..=0).step(-1);
+    println(digits[2..=4], digits[evens], digits[backwards][..3]);
+
+    // Positions outside are left out; an empty part is empty
+    println(digits[8..20], digits[-3..2], digits[5..5], "short"[3..100], "short"[9..]);
+
+    // Characters, not bytes
+    let word = "déjà vu";
+    println(word[..4], word[5..], word[(0..7).step(3)]);
+
+    // A part is a new array: changing it leaves the whole as it was
+    let firstThree = digits[..3];
+    firstThree[0] = 100;
+    println(firstThree, digits[..3]);
+    return 0;
+}

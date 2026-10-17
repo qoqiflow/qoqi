@@ -1,0 +1,94 @@
+// A method named by its type is a function that takes the value first:
+// String.trim is fn(String) -> String, Point.plus is
+// fn(Point, Point) -> Point. Handed to map, fold and sorted, it saves
+// writing the function that calls it.
+
+trait Priced {
+    fn price() -> Int;
+}
+
+struct Item {
+    name: String;
+    cents: Int;
+}
+
+struct Bundle {
+    items: [Item];
+    discount: Int;
+}
+
+impl Priced for Item {
+    fn price() -> Int {
+        return self.cents;
+    }
+}
+
+impl Priced for Bundle {
+    fn price() -> Int {
+        return self.items.map(Item.price).sum() - self.discount;
+    }
+}
+
+impl Item {
+    fn cheaper(other: Item) -> Bool {
+        return self.cents < other.cents;
+    }
+
+    fn label() -> String {
+        return "${self.name} ${self.cents}";
+    }
+}
+
+enum Size {
+    Small,
+    Large,
+}
+
+impl Size {
+    fn letter() -> String {
+        return match self {
+            case Small: "S";
+            case Large: "L";
+        };
+    }
+}
+
+struct Money {
+    cents: Int;
+}
+
+impl Money {
+    fn plus(other: Money) -> Money {
+        return Money { cents: self.cents + other.cents };
+    }
+}
+
+fn main() -> Int {
+    let lines = ["  tea ", "bread  ", " jam"];
+    let names = lines.map(String.trim);
+    println(names, names.map(String.upper), names.map(String.len));
+
+    let items = [
+        Item { name: "tea", cents: 350 },
+        Item { name: "bread", cents: 220 },
+        Item { name: "jam", cents: 410 },
+    ];
+
+    println(items.sorted(Item.cheaper).map(Item.label));
+
+    // A trait's method, for whatever implements it
+    let basket: [Priced] = [items[0], Bundle { items: items[1..], discount: 30 }];
+    println(basket.map(Priced.price));
+
+    // Folding with a method that takes another value
+    let total = [Money { cents: 100 }, Money { cents: 250 }].fold(Money { cents: 0 }, Money.plus);
+    println(total.cents, [Small, Large, Small].map(Size.letter).join(""));
+
+    // Called directly, the value first
+    println(Item.label(items[2]), Int.abs(-7), [-2, 3, -4].map(Int.abs));
+
+    // Kept in a variable, like any function
+    let shout: fn(String) -> String = String.upper;
+    println(shout("done"));
+    return 0;
+}

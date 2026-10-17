@@ -1,0 +1,186 @@
+// The orders of a shop, as flows: each order holds the goods, has the
+// payment made by a flow of its own, then books a van. If anything fails
+// after the goods are held, they are released; if the van cannot come
+// after the money was taken, the money goes back first.
+//
+// The world here is a few lines printed: the warehouse, the bank, the
+// vans and the mail are steps, and each says what it would do.
+//
+//     qoqi serve examples/flows/shop.qi
+//     qoqi start Order order:1 '{"cart": {"id": "1", "customer": "ada@example.com", "amount": 4200, "city": "Lyon"}}'
+//
+// See README.md for more to try.
+
+import std.flow;
+import std.flow.{Flow, Settled};
+import std.time;
+
+pub struct Cart {
+    id: String;
+    customer: String;
+    amount: Int;  // in cents
+    city: String;
+}
+
+enum Outcome {
+    Paid(String),
+    Refused(String),
+}
+
+pub enum Problem {
+    Refused(String),
+    NoVan(String),
+    Unpaid(String),
+}
+
+// --- The payment ---
+
+// The payment of a cart: the card is authorized, then captured once the
+// bank has settled, which takes a moment. Cancelled, it voids its
+// authorization.
+struct Payment {
+    cart: Cart;
+}
+
+impl Flow<Outcome> for Payment {
+    fn run() -> Outcome {
+        match authorize(self.cart) {
+            case Err(reason): {
+                return Outcome.Refused(reason);
+            }
+
+            case Ok(authorization): {
+                // The bank settles
+                wait time.after(3.seconds());
+
+                match capture(authorization, self.cart.amount) {
+                    case Done(reference): {
+                        return Outcome.Paid(reference);
+                    }
+
+                    case Unknown: {
+                        // Stopped while the capture was on its way: the bank
+                        // says whether it went through
+                        return lookup(authorization);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Asks the bank to hold the amount on the card. A cart whose id ends
+// with 7 finds the bank busy the first time.
+pub step fn authorize(cart: Cart) -> Result<String, String> {
+    if cart.amount > 100000 {
+        println("[bank] refuses ${cart.amount} cents for ${cart.id}");
+        return Err("over the card's limit");
+    }
+
+    if cart.id.endsWith("7") && flow.attempt() == 1 {
+        println("[bank] is busy, ask again later");
+        flow.retry("the bank is busy", 2.seconds());
+    }
+
+    let authorization = "auth-${cart.id}";
+    println("[bank] holds ${cart.amount} cents for ${cart.id}");
+    flow.undo(voidAuthorization, authorization);
+    return Ok(authorization);
+}
+
+pub step fn voidAuthorization(authorization: String) -> Result<Void, String> {
+    println("[bank] voids ${authorization}");
+    return Ok(null);
+}
+
+// Takes the money: never run twice by the runtime. Stopped while it ran,
+// the flow is told Unknown, and asks the bank. The bank answers within
+// the minute.
+pub step fn capture(authorization: String, amount: Int) -> Settled<String> within 1.minutes() {
+    println("[bank] captures ${amount} cents on ${authorization}");
+    return Settled.Done("pay-" + authorization);
+}
+
+step fn lookup(authorization: String) -> Outcome {
+    println("[bank] looks up what became of ${authorization}");
+    return Outcome.Paid("pay-" + authorization);
+}
+
+// --- The order ---
+
+pub struct Order {
+    cart: Cart;
+}
+
+impl Flow<Result<String, Problem>> for Order {
+    fn run() -> Result<String, Problem> {
+        let hold = reserve(self.cart);
+        let payment = flow.start("payment:${self.cart.id}", Payment { cart: self.cart });
+
+        match wait payment {
+            case Err(cancelled): {
+                return Err(Problem.Unpaid(cancelled.reason));
+            }
+
+            case Ok(outcome): {
+                match outcome {
+                    case Refused(reason): {
+                        return Err(Problem.Refused(reason));
+                    }
+
+                    case Paid(reference): {
+                        // The payment is the child's; undoing it is the order's choice
+                        flow.undo(refund, reference);
+
+                        let van = book(self.cart, hold)?;
+
+                        notify(
+                            self.cart.customer,
+                            "your order ${self.cart.id} leaves today with ${van}",
+                        );
+
+                        return Ok(van);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Holds the goods of a cart in the warehouse, to be released should the
+// order fail.
+step fn reserve(cart: Cart) -> String {
+    let hold = "hold-${cart.id}";
+    println("[warehouse] holds the goods of ${cart.id} as ${hold}");
+    flow.undo(release, hold);
+    return hold;
+}
+
+pub step fn release(hold: String) -> Result<Void, Problem> {
+    println("[warehouse] releases ${hold}");
+    return Ok(null);
+}
+
+pub step fn refund(reference: String) -> Result<Void, Problem> {
+    println("[bank] refunds ${reference}");
+    return Ok(null);
+}
+
+// Books a van for the goods held. No van goes to Atlantis.
+step fn book(cart: Cart, hold: String) -> Result<String, Problem> {
+    if cart.city == "Atlantis" {
+        println("[vans] nothing goes to ${cart.city}");
+        return Err(Problem.NoVan("no van goes to ${cart.city}"));
+    }
+
+    println("[vans] van-3 takes ${hold} to ${cart.city}");
+    return Ok("van-3");
+}
+
+step fn notify(customer: String, text: String) {
+    println("[mail] to ${customer}: ${text}");
+}
+
+fn main() {
+    println("The flows of this program are served by: qoqi serve examples/flows/shop.qi");
+}

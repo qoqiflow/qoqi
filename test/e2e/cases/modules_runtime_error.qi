@@ -1,0 +1,12 @@
+// A runtime error inside a module names the module's file and function.
+
+import game.util.list.{List, newList};
+import game.util.pick;
+
+fn main() -> Int {
+    let numbers: List<Int> = newList<Int>();
+    numbers.add(4);
+    numbers.add(5);
+    println(pick.nth(numbers, 1));
+    return pick.nth(numbers, 3);
+}

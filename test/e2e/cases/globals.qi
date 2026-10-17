@@ -1,0 +1,71 @@
+// Variables outside functions: made before main starts, in the order they
+// are written, and seen by every function of the file.
+
+struct Ticket {
+    id: Int;
+    title: String;
+}
+
+// The next number to hand out, and what was handed out
+let nextId = 1;
+let issued: [Ticket] = [];
+
+// Results already worked out, by their argument
+let known = dict.empty<Int>();
+let calls = 0;
+
+// One made from another: made after it, whatever comes first in main
+let limit = 3;
+let warning = "at most ${limit} open tickets";
+
+fn issue(title: String) -> Ticket? {
+    if issued.len() >= limit {
+        return null;
+    }
+
+    let ticket = Ticket { id: nextId, title };
+    nextId += 1;
+    issued.push(ticket);
+    return ticket;
+}
+
+fn fib(n: Int) -> Int {
+    calls++;
+
+    if n < 2 {
+        return n;
+    }
+
+    let key = "${n}";
+    let found = known.get(key);
+
+    if found != null {
+        return found;
+    }
+
+    let value = fib(n - 1) + fib(n - 2);
+    known.set(key, value);
+    return value;
+}
+
+fn main() -> Int {
+    limit = 10;
+    println(warning);
+
+    for title in ["printer", "network", "coffee"] {
+        let ticket = issue(title);
+        println(ticket?.id, ticket?.title);
+    }
+
+    println(issued.map(t -> t.id), nextId);
+    println(fib(40), calls, known.len());
+
+    // A function value sees them as well
+    let reissue = fn() -> Int {
+        issued.clear();
+        return nextId;
+    };
+
+    println(reissue(), issued.len(), issue("chair")?.id);
+    return 0;
+}

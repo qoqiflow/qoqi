@@ -1,0 +1,3 @@
+[WARNING] E2023: unreachable code: the statement before it always leaves this block
+unreachable_warning.qi:9:5
+unreachable_warning.qi:15:5

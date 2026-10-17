@@ -1,0 +1,6 @@
+now at (2, 3)
+said: Say("hello there")
+skipped 'move x 1': 'x' is no number
+skipped 'move 1 -4': the second number has to be a number, and not below 0
+skipped 'jump': move takes two numbers
+now at (3, 4)

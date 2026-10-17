@@ -1,0 +1,174 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Qoqi",
+  "scopeName": "source.qoqi",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#import" },
+    { "include": "#declaration" },
+    { "include": "#text" },
+    { "include": "#number" },
+    { "include": "#keyword" },
+    { "include": "#constant" },
+    { "include": "#type" },
+    { "include": "#call" },
+    { "include": "#operator" },
+    { "include": "#member" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.double-slash.qoqi",
+      "match": "//.*$"
+    },
+    "import": {
+      "match": "\\b(import)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)(?:\\s+(as)\\s+([A-Za-z_][A-Za-z0-9_]*))?",
+      "captures": {
+        "1": { "name": "keyword.control.import.qoqi" },
+        "2": { "name": "entity.name.namespace.qoqi" },
+        "3": { "name": "keyword.control.import.qoqi" },
+        "4": { "name": "entity.name.namespace.qoqi" }
+      }
+    },
+    "declaration": {
+      "patterns": [
+        {
+          "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.function.qoqi" },
+            "2": { "name": "entity.name.function.qoqi" }
+          }
+        },
+        {
+          "match": "\\b(struct|enum|trait)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.qoqi" },
+            "2": { "name": "entity.name.type.qoqi" }
+          }
+        },
+        {
+          "match": "\\b(let|const)\\s+([a-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.qoqi" },
+            "2": { "name": "variable.other.qoqi" }
+          }
+        }
+      ]
+    },
+    "text": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.qoqi",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [{ "include": "#escape" }, { "include": "#insertion" }]
+        },
+        {
+          "name": "string.quoted.double.qoqi",
+          "begin": "\"",
+          "end": "\"|$",
+          "patterns": [{ "include": "#escape" }, { "include": "#insertion" }]
+        }
+      ]
+    },
+    "escape": {
+      "name": "constant.character.escape.qoqi",
+      "match": "\\\\."
+    },
+    "insertion": {
+      "name": "meta.embedded.line.qoqi",
+      "begin": "\\$\\{",
+      "end": "\\}",
+      "beginCaptures": { "0": { "name": "punctuation.section.embedded.begin.qoqi" } },
+      "endCaptures": { "0": { "name": "punctuation.section.embedded.end.qoqi" } },
+      "contentName": "source.qoqi",
+      "patterns": [{ "include": "#braces" }, { "include": "$self" }]
+    },
+    "braces": {
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [{ "include": "#braces" }, { "include": "$self" }]
+    },
+    "number": {
+      "patterns": [
+        { "name": "constant.numeric.float.qoqi", "match": "\\b\\d+\\.\\d+\\b" },
+        { "name": "constant.numeric.integer.qoqi", "match": "\\b\\d+\\b" }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        {
+          "name": "keyword.control.qoqi",
+          "match": "\\b(if|else|default|while|for|break|continue|return)\\b|(?<![.\\w])\\bwait\\b(?=\\s+(?:[A-Za-z_\\d\"]))|(?<![.\\w])\\b(?:match|case|in|defer)\\b(?!\\s*(?:[.,;:)\\]}?]|=(?!=)|[+*/%]=?|-=|\\+\\+|--|->|==|!=|&&|\\|\\|))"
+        },
+        {
+          "name": "storage.type.qoqi",
+          "match": "\\b(fn|let|const)\\b|(?<![.\\w])\\bstep\\b(?=\\s+fn\\b)|(?<![.\\w])\\b(?:struct|enum|trait|impl)\\b(?!\\s*(?:[.,;:)\\]}?]|=(?!=)|[+*/%]=?|-=|\\+\\+|--|->|==|!=|&&|\\|\\|))"
+        },
+        {
+          "name": "storage.modifier.qoqi",
+          "match": "(?<![.\\w])\\b(?:pub|extern)\\b(?!\\s*(?:[.,;:)\\]}?]|=(?!=)|[+*/%]=?|-=|\\+\\+|--|->|==|!=|&&|\\|\\|))"
+        },
+        {
+          "name": "storage.modifier.qoqi",
+          "match": "\\bstatic\\b(?=\\s+fn\\b)|\\bpriv\\b(?=\\s+[A-Za-z_][A-Za-z0-9_]*\\s*:)"
+        },
+        {
+          "name": "keyword.control.import.qoqi",
+          "match": "\\b(import)\\b"
+        },
+        {
+          "name": "keyword.operator.word.qoqi",
+          "match": "(?<![.\\w])\\b(?:as|is)\\b(?!\\s*(?:[.,;:)\\]}?]|=(?!=)|[+*/%]=?|-=|\\+\\+|--|->|==|!=|&&|\\|\\|))"
+        },
+        {
+          "name": "variable.language.self.qoqi",
+          "match": "\\bself\\b"
+        }
+      ]
+    },
+    "constant": {
+      "name": "constant.language.qoqi",
+      "match": "\\b(true|false|null)\\b"
+    },
+    "type": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.qoqi",
+          "match": "\\b(Int|Float|String|Bool|Void|Any|Self)\\b"
+        },
+        {
+          "name": "entity.name.type.qoqi",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "call": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.qoqi",
+          "match": "\\b(print|println|toString|push|panic)\\b(?=\\s*\\()"
+        },
+        {
+          "name": "entity.name.function.call.qoqi",
+          "match": "\\b[a-z_][A-Za-z0-9_]*\\b(?=\\s*(<[^<>()]*>)?\\s*\\()"
+        }
+      ]
+    },
+    "operator": {
+      "patterns": [
+        { "name": "keyword.operator.arrow.qoqi", "match": "->" },
+        { "name": "keyword.operator.optional.qoqi", "match": "\\?\\?|\\?\\.|\\?" },
+        { "name": "keyword.operator.comparison.qoqi", "match": "==|!=|<=|>=|<|>" },
+        { "name": "keyword.operator.pipe.qoqi", "match": "\\|>" },
+        { "name": "keyword.operator.logical.qoqi", "match": "&&|\\|\\||!" },
+        { "name": "keyword.operator.assignment.qoqi", "match": "\\+=|-=|\\*=|/=|%=|=" },
+        { "name": "keyword.operator.arithmetic.qoqi", "match": "\\+\\+|--|\\+|-|\\*|/|%" },
+        { "name": "keyword.operator.pipe.qoqi", "match": "\\|" }
+      ]
+    },
+    "member": {
+      "match": "(?<=\\.)[a-z_][A-Za-z0-9_]*\\b",
+      "name": "variable.other.property.qoqi"
+    }
+  }
+}

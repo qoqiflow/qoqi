@@ -1,0 +1,314 @@
+// Failing, saying why, and carrying on.
+//
+// There are two ways for something to go wrong, and they are handled
+// differently.
+//
+// A failure that is part of the job, such as a file that is not there or
+// input that makes no sense, is returned: a function that can fail that
+// way gives a Result, which is either the value or the reason there is
+// none. Whoever calls it has to look, and the compiler checks that they do.
+//
+//     match io.readFile("notes.txt") {
+//         case Ok(text): { println(text); }
+//         case Err(reason): { println("cannot read it:", reason); }
+//     }
+//
+// A failure that should never happen, a mistake in the program, stops the
+// program: an index outside an array, a division by zero, or a call of the
+// builtin panic. Nothing has to handle those. `attempt` is for the few
+// places that must survive them anyway: it runs a function and turns such
+// a stop into a Result.
+
+import std.strings;
+import std.arrays;
+import std.ops.{Show};
+
+// The value a function produced, or the reason it could not.
+pub enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+impl<T, E> Result<T, E> {
+    pub fn isOk() -> Bool {
+        return match self {
+            case Ok(_): true;
+            case Err(_): false;
+        };
+    }
+
+    pub fn isErr() -> Bool {
+        return !self.isOk();
+    }
+
+    // The value, or null if there is none.
+    pub fn value() -> T? {
+        return match self {
+            case Ok(value): value;
+            case Err(_): null;
+        };
+    }
+
+    // The reason, or null if there was a value.
+    pub fn reason() -> E? {
+        return match self {
+            case Ok(_): null;
+            case Err(reason): reason;
+        };
+    }
+
+    // The value, or `fallback` if there is none: io.readFile(path).or("").
+    pub fn or(fallback: T) -> T {
+        return match self {
+            case Ok(value): value;
+            case Err(_): fallback;
+        };
+    }
+
+    // The value, or what `make` makes of the reason when there is none.
+    // Unlike or, the fallback is only worked out if it is needed:
+    //
+    //     let notes = io.readFile(path).orElse(error -> "(${error.describe()})");
+    pub fn orElse(make: fn(E) -> T) -> T {
+        return match self {
+            case Ok(value): value;
+            case Err(reason): make(reason);
+        };
+    }
+
+    // The value turned into another; a reason is passed on unchanged.
+    pub fn map<U>(convert: fn(T) -> U) -> Result<U, E> {
+        return match self {
+            case Ok(value): Ok(convert(value));
+            case Err(reason): Err(reason);
+        };
+    }
+
+    // The reason turned into another; a value is passed on unchanged.
+    pub fn mapErr<F>(convert: fn(E) -> F) -> Result<T, F> {
+        return match self {
+            case Ok(value): Ok(value);
+            case Err(reason): Err(convert(reason));
+        };
+    }
+
+    // A next step that can fail too: it runs only if there is a value, and
+    // the first reason met is the one that comes out.
+    pub fn then<U>(step: fn(T) -> Result<U, E>) -> Result<U, E> {
+        return match self {
+            case Ok(value): step(value);
+            case Err(reason): Err(reason);
+        };
+    }
+
+    // The value. Stops the program with `message` if there is none: for
+    // where a failure would be a mistake in the program.
+    pub fn expect(message: String) -> T {
+        match self {
+            case Ok(value): {
+                return value;
+            }
+
+            case Err(reason): {
+                panic(message + ":", reason);
+            }
+        }
+    }
+}
+
+// The values of all the results, in their order, or the first failure
+// among them:
+//
+//     let ports = result.collect(texts.map(parsePort))?;    // [Int], or the first bad one
+pub fn collect<T, E>(items: [Result<T, E>]) -> Result<[T], E> {
+    let values: [T] = [];
+
+    for item in items {
+        match item {
+            case Ok(value): {
+                values.push(value);
+            }
+
+            case Err(reason): {
+                return Err(reason);
+            }
+        }
+    }
+
+    return Ok(values);
+}
+
+// --- Failures that stop the program ---
+
+// What sort of failure stopped a function.
+pub enum Kind {
+    Panic,       // the program called panic
+    Bounds,      // an index outside an array or a text
+    Cast,        // `value as Type` on a value of another type
+    Arithmetic,  // a division by zero, a number too large for an Int
+    Depth,       // calls nested deeper than the limit
+    Memory,      // more memory than the limit
+    Library,     // a function of the standard library refused its arguments
+    Other,
+}
+
+// A place in the program.
+pub struct Location {
+    function: String;
+    file: String;
+    line: Int;
+    column: Int;
+}
+
+impl Location {
+    // On one line: main.qi:12:5 in function 'load'
+    pub fn describe() -> String {
+        return "${self.file}:${self.line}:${self.column} in function '${self.function}'";
+    }
+}
+
+// The calls in progress at this point, innermost first: the function that
+// asks, the one that called it, and so on up to main. `skip` leaves out
+// that many of the innermost: stack(0) starts at the function calling
+// stack, stack(1) at its caller.
+//
+// It is what gives an error returned as a value a trace of its own:
+//
+//     struct ParseError { message: String; stack: [Location]; }
+//     fn bad(message: String) -> ParseError {
+//         return ParseError { message: message, stack: result.stack(1) };
+//     }
+pub fn stack(skip: Int) -> [Location] {
+    // The first call listed is this function itself
+    return locations(callers(), 4 * (skip + 1));
+}
+
+// A trace over several lines: the message, where, and the calls that led
+// there. For an error type of your own that keeps a stack.
+pub fn trace(message: String, stack: [Location]) -> String {
+    let lines = [message];
+
+    for i, call in stack {
+        if i == 0 {
+            lines.push("  at " + call.describe());
+        } else {
+            lines.push("  called from " + call.describe());
+        }
+    }
+
+    return lines.join("\n");
+}
+
+// The places listed by the runtime, from the entry `from`: four entries
+// per call, function, file, line and column.
+fn locations(parts: [String], from: Int) -> [Location] {
+    let out: [Location] = [];
+    let i = from;
+
+    while i + 3 < parts.len() {
+        out.push(Location {
+            function: parts[i],
+            file: parts[i + 1],
+            line: parts[i + 2].parseInt() ?? 0,
+            column: parts[i + 3].parseInt() ?? 0,
+        });
+
+        i += 4;
+    }
+
+    return out;
+}
+
+// A failure that stopped a function run by `attempt`.
+pub struct Failure {
+    kind: Kind;
+    message: String;
+    at: Location;       // where it happened
+    stack: [Location];  // the calls in progress, innermost first; stack[0] is `at`
+}
+
+// A failure is written as describe writes it, on one line.
+impl Show for Failure {
+    fn show() -> String {
+        return self.describe();
+    }
+}
+
+impl Failure {
+    // On one line: index out of bounds: 7 (length 3), at main.qi:12:5 in function 'load'
+    pub fn describe() -> String {
+        return "${self.message}, at ${self.at.describe()}";
+    }
+
+    // Over several lines, with the calls that led there.
+    pub fn trace() -> String {
+        return trace(self.message, self.stack);
+    }
+}
+
+// Runs a function. If it stops, by a panic or by any other failure that
+// would end the program, the program goes on and the failure is returned.
+//
+//     match attempt(fn() -> Int { return risky(); }) {
+//         case Ok(n): { ... }
+//         case Err(failure): { println(failure.describe()); }
+//     }
+//
+// It is for boundaries: a loop that must outlive the jobs it runs, a tool
+// that runs tests. A failure that is expected is better returned as a
+// Result by the function that meets it.
+pub fn attempt<T>(action: fn() -> T) -> Result<T, Failure> {
+    if protect(action) {
+        return Ok(outcome() as T);
+    }
+
+    return Err(caught());
+}
+
+// Runs a function for what it does, not for a value. Null if it
+// completed, the failure if it stopped.
+pub fn guard(action: fn() -> Void) -> Failure? {
+    if protect(action) {
+        return null;
+    }
+
+    return caught();
+}
+
+// The failure the runtime kept from the last protected call.
+fn caught() -> Failure {
+    return failureOf(failure());
+}
+
+// A failure as the runtime lists one: its kind, its message, then four
+// entries per call: function, file, line, column. For the library.
+pub fn failureOf(parts: [String]) -> Failure {
+    let stack = locations(parts, 2);
+    let at = Location { function: "", file: "", line: 0, column: 0 };
+
+    if stack.len() > 0 {
+        at = stack[0];
+    }
+
+    return Failure { kind: kindOf(parts[0]), message: parts[1], at: at, stack: stack };
+}
+
+fn kindOf(name: String) -> Kind {
+    return match name {
+        case "panic": Kind.Panic;
+        case "bounds": Kind.Bounds;
+        case "cast": Kind.Cast;
+        case "arithmetic": Kind.Arithmetic;
+        case "depth": Kind.Depth;
+        case "memory": Kind.Memory;
+        case "library": Kind.Library;
+        default: Kind.Other;
+    };
+}
+
+// Provided by the runtime: run a function without letting its failure end
+// the program, then give what it returned or how it failed.
+extern fn protect(action: Any) -> Bool;
+extern fn outcome() -> Any;
+extern fn failure() -> [String];
+extern fn callers() -> [String];

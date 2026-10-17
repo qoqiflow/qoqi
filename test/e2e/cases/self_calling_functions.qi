@@ -1,0 +1,68 @@
+// A function written in a function, with its types, calls itself: a walk
+// through a tree, a count of paths kept in what it closes over.
+
+struct Folder {
+    name: String;
+    files: Int;
+    folders: [Folder];
+}
+
+fn report(root: Folder) -> [String] {
+    let lines: [String] = [];
+
+    // Sees its own name, and what is around it
+    let walk = fn(folder: Folder, depth: Int) -> Int {
+        let total = folder.files;
+
+        for inner in folder.folders {
+            total += walk(inner, depth + 1);
+        }
+
+        lines.push("${"  ".repeat(depth)}${folder.name}: ${total}");
+        return total;
+    };
+
+    walk(root, 0);
+    return lines;
+}
+
+fn main() -> Int {
+    let root = Folder {
+        name: "home",
+        files: 2,
+        folders: [
+            Folder { name: "music", files: 40, folders: [] },
+            Folder {
+                name: "code",
+                files: 3,
+                folders: [Folder { name: "qoqi", files: 120, folders: [] }],
+            },
+        ],
+    };
+
+    for line in report(root) {
+        println(line);
+    }
+
+    // Ways to climb n steps one or two at a time, each worked out once
+    let known = map.empty<Int, Int>();
+
+    let ways = fn(n: Int) -> Int {
+        if n <= 1 {
+            return 1;
+        }
+
+        let found = known[n];
+
+        if found != null {
+            return found;
+        }
+
+        let count = ways(n - 1) + ways(n - 2);
+        known[n] = count;
+        return count;
+    };
+
+    println(ways(10), ways(60), known.len());
+    return 0;
+}

@@ -1,0 +1,19 @@
+{
+  "format": "qoqi.flow.lock/1",
+  "version": "sha256:0236b20cb430e400b20c0c70832b95a0293da2d16f200b14f28d4f8a66134c6e",
+  "flows": {
+    "Expense": {
+      "asking": {
+        "approver": "String",
+        "loop.end#1": "Int",
+        "round": "Int",
+        "self": "Expense",
+        "self.amount": "Int",
+        "self.answers": "std.flow.Inbox<Answer>",
+        "self.author": "String",
+        "self.id": "String",
+        "self.patience": "Int"
+      }
+    }
+  }
+}

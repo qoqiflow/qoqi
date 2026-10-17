@@ -1,0 +1,53 @@
+import game.physics.body;
+import game.physics.body.{Body};
+import game.util.list.{List, newList};
+
+pub struct Thing {
+    name: String;
+    body: Body;
+    speed: Int;
+}
+
+pub struct World {
+    width: Int;
+    things: List<Thing>;
+}
+
+pub fn create(width: Int) -> World {
+    return World { width: width, things: newList<Thing>() };
+}
+
+impl World {
+    pub fn spawn(name: String, x: Int, size: Int, speed: Int) -> Thing {
+        let thing = Thing { name: name, body: body.new(x, size), speed: speed };
+        self.things.add(thing);
+        return thing;
+    }
+
+    pub fn step() {
+        for thing in self.things.items {
+            thing.body.move(thing.speed);
+            self.keepInside(thing);
+        }
+    }
+
+    pub fn count() -> Int {
+        return self.things.size();
+    }
+
+    pub fn names() -> [String] {
+        let names = self.things.map<String>(fn(t: Thing) -> String {
+            return t.name;
+        });
+
+        return names.items;
+    }
+
+    // Not pub: only this module bounces things off the edges
+    fn keepInside(thing: Thing) {
+        if thing.body.left() < 0 || thing.body.right() > self.width {
+            thing.speed = -thing.speed;
+            thing.body.move(thing.speed);
+        }
+    }
+}

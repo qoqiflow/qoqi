@@ -1,0 +1,22 @@
+// Two tasks that each wait for the other to speak first: the program
+// cannot go on, and says where instead of hanging.
+
+import std.task;
+import std.task.{Channel};
+
+fn greeter(name: String, hears: Channel<String>, says: Channel<String>) {
+    task.run(fn() {
+        let heard = wait hears.receive() ?? "nothing";
+        println("${name} heard ${heard}");
+        wait says.send("hello from ${name}");
+    });
+}
+
+fn main() -> Int {
+    let toAda = task.channel<String>(0);
+    let toBob = task.channel<String>(0);
+    greeter("ada", toAda, toBob);
+    greeter("bob", toBob, toAda);
+    println("waiting for them to finish");
+    return 0;
+}

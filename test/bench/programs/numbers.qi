@@ -1,0 +1,78 @@
+// Numbers: loops of arithmetic with constants in them, on Int and on Float.
+
+// The longest Collatz sequence of a start below the limit
+fn collatz(limit: Int) -> (Int, Int) {
+    let best = 1;
+    let longest = 1;
+
+    for start in 1..limit {
+        let n = start;
+        let steps = 1;
+
+        while n != 1 {
+            if n % 2 == 0 {
+                n = n / 2;
+            } else {
+                n = n * 3 + 1;
+            }
+
+            steps += 1;
+        }
+
+        if steps > longest {
+            best = start;
+            longest = steps;
+        }
+    }
+
+    return (best, longest);
+}
+
+// A checksum of pseudo-random numbers, the way a hash mixes its input
+fn checksum(count: Int) -> Int {
+    let state = 1;
+    let sum = 0;
+
+    for i in 0..count {
+        state = state * 48271 % 2147483647;
+        sum = (sum + (state >> 8) * 31 + i) % 1000000007;
+    }
+
+    return sum;
+}
+
+// How many points of a grid the Mandelbrot iteration keeps bounded
+fn mandelbrot(size: Int, depth: Int) -> Int {
+    let inside = 0;
+
+    for row in 0..size {
+        for column in 0..size {
+            let cr = column.toFloat() * 3.0 / size.toFloat() - 2.0;
+            let ci = row.toFloat() * 2.0 / size.toFloat() - 1.0;
+            let zr = 0.0;
+            let zi = 0.0;
+            let i = 0;
+
+            while i < depth && zr * zr + zi * zi < 4.0 {
+                let next = zr * zr - zi * zi + cr;
+                zi = 2.0 * zr * zi + ci;
+                zr = next;
+                i += 1;
+            }
+
+            if i == depth {
+                inside += 1;
+            }
+        }
+    }
+
+    return inside;
+}
+
+fn main() -> Int {
+    let (best, longest) = collatz(30000);
+    println("collatz", best, longest);
+    println("checksum", checksum(200000));
+    println("mandelbrot", mandelbrot(80, 100));
+    return 0;
+}

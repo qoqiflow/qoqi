@@ -1,0 +1,3 @@
+ada 750 Ok(650) Err("ada has 650, not 5000")
+bob 40 1 3
+ada's account

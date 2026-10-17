@@ -1,0 +1,588 @@
+// Versions numbered the semantic way, major.minor.patch, and the
+// constraints a project writes on the versions it accepts, in the syntax
+// of Composer and npm.
+//
+//     let v = semver.parse("v1.4.2").expect("a version");
+//     let wanted = semver.constraint("^1.2 || ^2.0").expect("a constraint");
+//     wanted.allows(v)                        // true
+//     semver.highest(versions, wanted)        // the newest that fits, or null
+
+import std.result.{Result};
+import std.ops.{Ordered, Equal, Show};
+import std.strings;
+import std.arrays;
+
+// Why a text is not a version or a constraint.
+pub struct ParseError {
+    text: String;
+    message: String;
+}
+
+impl ParseError {
+    pub fn describe() -> String {
+        return "\"${self.text}\" ${self.message}";
+    }
+}
+
+// An error prints as what describe says.
+impl Show for ParseError {
+    fn show() -> String {
+        return self.describe();
+    }
+}
+
+// A version: 1.4.2, 2.0.0-beta.3, 1.0.0+build.7.
+//
+// The build part is kept but plays no part in comparing: 1.0.0+a and
+// 1.0.0+b are the same version.
+pub struct Version {
+    major: Int;
+    minor: Int;
+    patch: Int;
+    pre: [String] = [];
+    build: String = "";
+}
+
+impl Version {
+    // A version before its release: 1.0.0-rc.1.
+    pub fn isPrerelease() -> Bool {
+        return !self.pre.isEmpty();
+    }
+
+    // The next version of each kind, without what follows the patch.
+    pub fn nextMajor() -> Version {
+        return Version { major: self.major + 1, minor: 0, patch: 0 };
+    }
+
+    pub fn nextMinor() -> Version {
+        return Version { major: self.major, minor: self.minor + 1, patch: 0 };
+    }
+
+    pub fn nextPatch() -> Version {
+        return Version { major: self.major, minor: self.minor, patch: self.patch + 1 };
+    }
+
+    // The version without its pre-release and build parts.
+    pub fn release() -> Version {
+        return Version { major: self.major, minor: self.minor, patch: self.patch };
+    }
+}
+
+impl Ordered for Version {
+    // By the numbers, then a pre-release before its release, then the
+    // parts of the pre-release one by one: numbers below words, numbers
+    // by value, words by their letters, the shorter list first.
+    fn compare(other: Version) -> Int {
+        if self.major != other.major {
+            return self.major - other.major;
+        }
+
+        if self.minor != other.minor {
+            return self.minor - other.minor;
+        }
+
+        if self.patch != other.patch {
+            return self.patch - other.patch;
+        }
+
+        if self.pre.isEmpty() || other.pre.isEmpty() {
+            return other.pre.len() - self.pre.len();
+        }
+
+        for i, part in self.pre {
+            if i >= other.pre.len() {
+                return 1;
+            }
+
+            let order = comparePart(part, other.pre[i]);
+
+            if order != 0 {
+                return order;
+            }
+        }
+
+        return self.pre.len() - other.pre.len();
+    }
+}
+
+impl Equal for Version {
+    fn equals(other: Version) -> Bool {
+        return self.compare(other) == 0;
+    }
+}
+
+impl Show for Version {
+    fn show() -> String {
+        let text = "${self.major}.${self.minor}.${self.patch}";
+
+        if self.isPrerelease() {
+            text += "-" + self.pre.join(".");
+        }
+
+        if self.build != "" {
+            text += "+" + self.build;
+        }
+
+        return text;
+    }
+}
+
+fn comparePart(a: String, b: String) -> Int {
+    let x = a.parseInt();
+    let y = b.parseInt();
+
+    if x != null && y != null {
+        return x - y;
+    }
+
+    if x != null {
+        return -1;
+    }
+
+    if y != null {
+        return 1;
+    }
+
+    if a < b {
+        return -1;
+    }
+
+    if a > b {
+        return 1;
+    }
+
+    return 0;
+}
+
+// A version as written in a tag or a project file. A "v" in front is
+// allowed, and missing parts count as 0: "v2" is 2.0.0, "1.4" is 1.4.0.
+pub fn parse(text: String) -> Result<Version, ParseError> {
+    let found = numbers(text.trim())?;
+
+    if found.wild {
+        return Err(ParseError {
+            text: text,
+            message: "has a wildcard where a version is expected",
+        });
+    }
+
+    return Ok(found.version);
+}
+
+// What is read of a version in a constraint: its numbers, how many of
+// them were written, and whether the last was a wildcard (1.2.*).
+struct Partial {
+    version: Version;
+    written: Int;
+    wild: Bool;
+}
+
+fn numbers(text: String) -> Result<Partial, ParseError> {
+    let rest = text;
+
+    if rest.startsWith("v") || rest.startsWith("V") {
+        rest = rest.from(1);
+    }
+
+    let build = "";
+    let plus = rest.indexOf("+");
+
+    if plus != null {
+        build = rest.from(plus + 1);
+        rest = rest.substring(0, plus);
+
+        if build == "" || !build.split(".").all(isIdentifier) {
+            return Err(ParseError {
+                text: text,
+                message: "has an empty or malformed build part",
+            });
+        }
+    }
+
+    let pre: [String] = [];
+    let dash = rest.indexOf("-");
+
+    if dash != null {
+        pre = rest.from(dash + 1).split(".");
+        rest = rest.substring(0, dash);
+
+        if !pre.all(isIdentifier) {
+            return Err(ParseError {
+                text: text,
+                message: "has an empty or malformed pre-release part",
+            });
+        }
+
+        // A number in it is written without zeros in front, as in the
+        // numbers of the version
+        let padded = pre.find(part -> part.len() > 1 && part.startsWith("0") && part.isDigits());
+
+        if padded != null {
+            return Err(ParseError {
+                text: text,
+                message: "has \"${padded}\" in its pre-release part: a number has no zeros in front",
+            });
+        }
+    }
+
+    let parts = rest.split(".");
+
+    if rest == "" || parts.len() > 3 {
+        return Err(ParseError {
+            text: text,
+            message: "is not a version: write it as 1.2.3",
+        });
+    }
+
+    let values = [0, 0, 0];
+    let written = 0;
+    let wild = false;
+
+    for i, part in parts {
+        if part == "*" || part == "x" || part == "X" {
+            if i != parts.len() - 1 || !pre.isEmpty() {
+                return Err(ParseError {
+                    text: text,
+                    message: "has a wildcard that is not its last part",
+                });
+            }
+
+            wild = true;
+            continue;
+        }
+
+        let n = part.parseInt();
+
+        if n == null || n < 0 || part.startsWith("+") || part.startsWith("-") {
+            return Err(ParseError {
+                text: text,
+                message: "has \"${part}\" where a number is expected",
+            });
+        }
+
+        if part.len() > 1 && part.startsWith("0") {
+            return Err(ParseError {
+                text: text,
+                message: "has \"${part}\" where a number is expected: a number has no zeros in front",
+            });
+        }
+
+        values[i] = n;
+        written++;
+    }
+
+    let version = Version {
+        major: values[0],
+        minor: values[1],
+        patch: values[2],
+        pre: pre,
+        build: build,
+    };
+
+    return Ok(Partial { version: version, written: written, wild: wild });
+}
+
+fn isIdentifier(part: String) -> Bool {
+    if part == "" {
+        return false;
+    }
+
+    for char in part {
+        let letter = (char >= "a" && char <= "z") || (char >= "A" && char <= "Z");
+        let digit = char >= "0" && char <= "9";
+
+        if !letter && !digit && char != "-" {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// How one bound compares a version to its own.
+pub enum Comparison {
+    Above,    // >
+    AtLeast,  // >=
+    Below,    // <
+    AtMost,   // <=
+    Exactly,  // =
+    Not,      // !=
+}
+
+// One condition on a version: >= 1.2.0.
+pub struct Bound {
+    comparison: Comparison;
+    version: Version;
+}
+
+impl Bound {
+    pub fn allows(version: Version) -> Bool {
+        let order = version.compare(self.version);
+
+        return match self.comparison {
+            case Comparison.Above: order > 0;
+            case Comparison.AtLeast: order >= 0;
+            case Comparison.Below: order < 0;
+            case Comparison.AtMost: order <= 0;
+            case Comparison.Exactly: order == 0;
+            case Comparison.Not: order != 0;
+        };
+    }
+}
+
+impl Show for Bound {
+    fn show() -> String {
+        let sign = match self.comparison {
+            case Comparison.Above: ">";
+            case Comparison.AtLeast: ">=";
+            case Comparison.Below: "<";
+            case Comparison.AtMost: "<=";
+            case Comparison.Exactly: "=";
+            case Comparison.Not: "!=";
+        };
+
+        return "${sign}${self.version}";
+    }
+}
+
+// The versions a project accepts: any of several ranges, each a set of
+// bounds that all have to hold.
+//
+// A pre-release is accepted only by a range that names a pre-release of
+// the same major.minor.patch, so that ^1.0 never picks up 2.0.0-beta.1
+// nor 1.3.0-rc.1 by surprise.
+pub struct Constraint {
+    text: String;
+    ranges: [[Bound]];
+}
+
+impl Constraint {
+    pub fn allows(version: Version) -> Bool {
+        return self.ranges.any(range -> rangeAllows(range, version));
+    }
+
+    // Whether every version is accepted: *.
+    pub fn isAny() -> Bool {
+        return self.ranges.any(range -> range.isEmpty());
+    }
+}
+
+impl Show for Constraint {
+    fn show() -> String {
+        return self.text;
+    }
+}
+
+fn rangeAllows(range: [Bound], version: Version) -> Bool {
+    if !range.all(bound -> bound.allows(version)) {
+        return false;
+    }
+
+    if !version.isPrerelease() {
+        return true;
+    }
+
+    let release = version.release();
+    return range.any(bound -> bound.version.isPrerelease() && bound.version.release() == release);
+}
+
+// A constraint as Composer writes it:
+//
+//     1.2.3  =1.2.3          that version
+//     >=1.2  <2.0  !=1.5.0   comparisons; several in one range all hold
+//     >=1.2, <2.0            the same, with a comma
+//     1.2.*  1.*  *          any version that starts so
+//     ~1.2                   >=1.2.0 <2.0.0: the last number written may grow
+//     ~1.2.3                 >=1.2.3 <1.3.0
+//     ^1.2.3                 >=1.2.3 <2.0.0: no change that breaks
+//     ^0.3.1                 >=0.3.1 <0.4.0: before 1.0 the minor breaks
+//     1.0 - 2.1              >=1.0.0 <2.2.0: both ends included
+//     ^1.0 || ^2.0           either range; | is the same as ||
+pub fn constraint(text: String) -> Result<Constraint, ParseError> {
+    let ranges: [[Bound]] = [];
+
+    for alternative in text.replace("||", "|").split("|") {
+        let words = alternative.replace(",", " ").split(" ").filter(word -> word != "");
+
+        if words.isEmpty() {
+            return Err(ParseError { text: text, message: "has an empty alternative" });
+        }
+
+        ranges.push(range(text, glueComparisons(words)).mapErr(error -> wrapped(text, error))?);
+    }
+
+    return Ok(Constraint { text: text.trim(), ranges: ranges });
+}
+
+// An error about a part of a constraint, said of the whole.
+fn wrapped(text: String, error: ParseError) -> ParseError {
+    if error.text == text {
+        return error;
+    }
+
+    return ParseError { text: text, message: "is not a constraint: ${error.describe()}" };
+}
+
+// ">= 1.2" is read as ">=1.2": a comparison alone is joined to the
+// version after it.
+fn glueComparisons(words: [String]) -> [String] {
+    let glued: [String] = [];
+    let waiting = "";
+
+    for word in words {
+        if [">", ">=", "<", "<=", "=", "==", "!=", "~", "^"].contains(word) {
+            waiting += word;
+        } else {
+            glued.push(waiting + word);
+            waiting = "";
+        }
+    }
+
+    if waiting != "" {
+        glued.push(waiting);
+    }
+
+    return glued;
+}
+
+fn range(text: String, words: [String]) -> Result<[Bound], ParseError> {
+    // A hyphen range: 1.0 - 2.1
+    if words.len() == 3 && words[1] == "-" {
+        let low = numbers(words[0])?;
+        let high = numbers(words[2])?;
+
+        let upper = if high.written == 3 {
+            Bound { comparison: Comparison.AtMost, version: high.version }
+        } else {
+            Bound { comparison: Comparison.Below, version: following(high) }
+        };
+
+        return Ok([Bound { comparison: Comparison.AtLeast, version: low.version }, upper]);
+    }
+
+    let bounds: [Bound] = [];
+
+    for word in words {
+        bounds = bounds.concat(boundsOf(text, word)?);
+    }
+
+    return Ok(bounds);
+}
+
+// The version after all those a partial version stands for: 1.2 stands
+// for 1.2.x, followed by 1.3.0.
+fn following(partial: Partial) -> Version {
+    return match partial.written {
+        case 0: Version { major: 1000000000, minor: 0, patch: 0 };
+        case 1: partial.version.nextMajor();
+        case 2: partial.version.nextMinor();
+        default: partial.version.nextPatch();
+    };
+}
+
+fn boundsOf(text: String, word: String) -> Result<[Bound], ParseError> {
+    for (sign, comparison) in [
+        (">=", Comparison.AtLeast),
+        ("<=", Comparison.AtMost),
+        ("!=", Comparison.Not),
+        ("==", Comparison.Exactly),
+    ] {
+        if word.startsWith(sign) {
+            return Ok([Bound { comparison: comparison, version: exact(text, word.from(2))? }]);
+        }
+    }
+
+    for (sign, comparison) in [(">", Comparison.Above), ("<", Comparison.Below)] {
+        if word.startsWith(sign) {
+            return Ok([Bound { comparison: comparison, version: exact(text, word.from(1))? }]);
+        }
+    }
+
+    if word.startsWith("^") {
+        let partial = numbers(word.from(1))?;
+        let low = Bound { comparison: Comparison.AtLeast, version: partial.version };
+        let v = partial.version;
+
+        // The first number that is not 0 is the one that breaks
+        let high = if v.major > 0 || partial.written == 1 {
+            v.nextMajor()
+        } else if v.minor > 0 || partial.written == 2 {
+            v.nextMinor()
+        } else {
+            v.nextPatch()
+        };
+
+        return Ok([low, Bound { comparison: Comparison.Below, version: high }]);
+    }
+
+    if word.startsWith("~") {
+        let partial = numbers(word.from(1))?;
+        let low = Bound { comparison: Comparison.AtLeast, version: partial.version };
+
+        // ~1 and ~1.2 let the minor grow, ~1.2.3 only the patch
+        let high = if partial.written == 3 {
+            partial.version.nextMinor()
+        } else {
+            partial.version.nextMajor()
+        };
+
+        return Ok([low, Bound { comparison: Comparison.Below, version: high }]);
+    }
+
+    let plain = if word.startsWith("=") { word.from(1) } else { word };
+    let partial = numbers(plain)?;
+
+    if partial.written == 0 {
+        // * accepts everything
+        return Ok([]);
+    }
+
+    if partial.wild || partial.written < 3 {
+        // 1.2.* and 1.2 both stand for every 1.2.x
+        let low = Bound { comparison: Comparison.AtLeast, version: partial.version };
+
+        return Ok([low, Bound { comparison: Comparison.Below, version: following(partial) }]);
+    }
+
+    return Ok([Bound { comparison: Comparison.Exactly, version: partial.version }]);
+}
+
+// The version after a comparison: written out, with no wildcard. Missing
+// parts are 0: >=1.2 is >=1.2.0.
+fn exact(text: String, word: String) -> Result<Version, ParseError> {
+    let partial = numbers(word)?;
+
+    if partial.wild {
+        return Err(ParseError { text: text, message: "has a wildcard after a comparison" });
+    }
+
+    return Ok(partial.version);
+}
+
+// The newest of the versions the constraint accepts, or null.
+pub fn highest(versions: [Version], wanted: Constraint) -> Version? {
+    let best: Version? = null;
+
+    for version in versions {
+        if wanted.allows(version) && (best == null || version > best) {
+            best = version;
+        }
+    }
+
+    return best;
+}
+
+// The versions, oldest first.
+pub fn sorted(versions: [Version]) -> [Version] {
+    return versions.sorted((a, b) -> a < b);
+}
+
+// The constraint a new requirement is written with: ^1.4 for 1.4.2,
+// ^0.3.1 for 0.3.1, where a minor can break.
+pub fn caret(version: Version) -> String {
+    if version.major == 0 {
+        return "^${version.major}.${version.minor}.${version.patch}";
+    }
+
+    return "^${version.major}.${version.minor}";
+}

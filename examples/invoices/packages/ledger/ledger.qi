@@ -1,0 +1,105 @@
+// The lines of an invoice, and what they add up to with their taxes.
+//
+// Tax rates are in tenths of a percent, so that 5.5% is a whole number:
+// 55. Each rate is worked out on the sum of its lines, as an invoice
+// shows it, not line by line.
+
+import money;
+import money.{Money};
+
+pub struct Line {
+    description: String;
+    quantity: Int;
+    price: Money;
+    taxRate: Int;  // in tenths of a percent: 200 is 20%
+}
+
+impl Line {
+    pub fn amount() -> Money {
+        return self.price.times(self.quantity);
+    }
+}
+
+// The tax of one rate.
+pub struct Tax {
+    rate: Int;
+    base: Money;
+    amount: Money;
+}
+
+impl Tax {
+    // The rate as it is written: 20%, 5.5%.
+    pub fn label() -> String {
+        if self.rate % 10 == 0 {
+            return "${self.rate / 10}%";
+        }
+
+        return "${self.rate / 10}.${self.rate % 10}%";
+    }
+}
+
+pub struct Ledger {
+    currency: String;
+    lines: [Line] = [];
+}
+
+pub fn open(currency: String) -> Ledger {
+    return Ledger { currency: currency };
+}
+
+// A rate as written, "20" or "5.5", in tenths of a percent.
+pub fn rate(text: String) -> Result<Int, String> {
+    let (whole, tenth) = text.trim().cut(".") ?? (text.trim(), "0");
+    let units = whole.parseInt();
+    let tenths = tenth.parseInt();
+
+    if units == null || tenths == null || tenth.len() != 1 || units < 0 || units > 100 {
+        return Err("\"${text}\" is not a tax rate");
+    }
+
+    return Ok(units * 10 + tenths);
+}
+
+impl Ledger {
+    pub fn add(line: Line) -> Result<Void, String> {
+        if line.price.currency != self.currency {
+            return Err("${line.description} is in ${line.price.currency}, the invoice in ${self.currency}");
+        }
+
+        if line.quantity <= 0 {
+            return Err("${line.description} has a quantity of ${line.quantity}");
+        }
+
+        self.lines.push(line);
+        return Ok();
+    }
+
+    pub fn subtotal() -> Money {
+        return self.lines.fold(money.zero(self.currency), (sum, line) -> sum + line.amount());
+    }
+
+    // One tax per rate, the lowest rate first.
+    pub fn taxes() -> [Tax] {
+        let rates = self.lines.map(line -> line.taxRate).sortedNumbers();
+        let taxes: [Tax] = [];
+
+        for rate in rates {
+            if taxes.any(tax -> tax.rate == rate) {
+                continue;
+            }
+
+            let base = self.lines.filter(line -> line.taxRate == rate).fold(
+                money.zero(self.currency),
+                (sum, line) -> sum + line.amount(),
+            );
+
+            taxes.push(Tax { rate: rate, base: base, amount: base.share(rate, 1000) });
+        }
+
+        return taxes;
+    }
+
+    pub fn total() -> Money {
+        return self.taxes().fold(self.subtotal(), (sum, tax) -> sum + tax.amount);
+    }
+}

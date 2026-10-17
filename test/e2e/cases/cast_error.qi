@@ -1,0 +1,27 @@
+// A cast is verified when it runs, down to the elements of an array.
+struct Box<T> {
+    value: T;
+}
+
+fn sum(values: Any) -> Int {
+    let total = 0;
+
+    for n in values as [Int] {
+        total = total + n;
+    }
+
+    return total;
+}
+
+fn main() -> Int {
+    println(sum([1, 2, 3]));
+
+    let boxed: Any = Box<String> { value: "text" };
+    let text = boxed as Box<String>;
+    println(text.value);
+
+    let mixed: [Any] = [1, 2, "three"];
+    println(sum(mixed));
+    println("never printed");
+    return 0;
+}

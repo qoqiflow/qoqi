@@ -1,0 +1,84 @@
+// The tests of the approvals. Run them with:  qoqi test examples/flows
+//
+// Days of nobody answering pass in a moment: the trial's clock moves
+// when the test says so, and an answer is a message the test sends.
+
+import std.flow;
+import std.test;
+import std.time;
+import approvals;
+import approvals.{Expense, Answer, Decision};
+
+fn expense(id: String) -> Expense {
+    return Expense {
+        id: id,
+        author: "lin",
+        amount: 1200,
+        patience: 2.days(),
+        answers: flow.inbox<Answer>(1),
+    };
+}
+
+fn testAnAnswerEndsIt() {
+    let trial = flow.test(expense("1"));
+
+    trial.go();
+    test.equal(trial.status(), "waiting");
+
+    trial.advance(5.hours());
+    trial.send("answers", Answer { approved: true, why: "" });
+    test.equal("${trial.result()}", "Approved(\"grace\")");
+}
+
+// Nobody answers: grace for two days, then ada, then the board.
+fn testNoAnswerGoesUp() {
+    let asked: [String] = [];
+    let trial = flow.test(expense("2"));
+
+    trial.replace(approvals.ask, fn(approver: String, id: String, amount: Int, round: Int) {
+        asked.push(approver);
+    });
+
+    trial.go();
+    test.equal(asked, ["grace"]);
+
+    trial.advance(2.days());
+    test.equal(asked, ["grace", "ada"]);
+
+    trial.advance(2.days());
+    trial.advance(2.days());
+    test.equal(asked, ["grace", "ada", "the board"]);
+    test.equal("${trial.result()}", "Unanswered");
+}
+
+// The answer comes to the second manager.
+fn testARefusalSaysWhy() {
+    let trial = flow.test(expense("3"));
+
+    trial.go();
+    trial.advance(2.days());
+    trial.send("answers", Answer { approved: false, why: "not a business trip" });
+    test.equal("${trial.result()}", "Refused(\"ada\", \"not a business trip\")");
+    test.equal(trial.calls(approvals.tell), 1);
+}
+
+fn testEveryCrash() {
+    flow.test(expense("4")).everyCrash(fn(t: flow.Trial<Decision>) {
+        t.go();
+        t.advance(2.days());
+        t.send("answers", Answer { approved: true, why: "" });
+    });
+}
+
+// Withdrawn while a manager thinks it over: the manager is told, and the
+// expense ends withdrawn, not stopped.
+fn testAWithdrawnExpense() {
+    let trial = flow.test(expense("5"));
+
+    trial.go();
+    trial.advance(1.hours());
+    trial.cancel("paid already by card");
+    test.equal(trial.status(), "done");
+    test.equal("${trial.result()}", "Withdrawn(\"paid already by card\")");
+    test.equal(trial.calls(approvals.tell), 1);
+}

@@ -1,0 +1,28 @@
+{"name":"qoqi","version":4,"stable":false,"license":null,"tags":["vm","typed"],"build":{"heap_mb":256,"flags":[],"matrix":[[1,2],[3]]}}
+{
+  "name": "qoqi",
+  "version": 4,
+  "stable": false,
+  "license": null,
+  "tags": [
+    "vm",
+    "typed"
+  ],
+  "build": {
+    "heap_mb": 256,
+    "flags": [],
+    "matrix": [
+      [1,2],
+      [3]
+    ]
+  }
+}
+object 17 266
+["name"] -> the text qoqi
+["build", "heap_mb"] -> the number 256
+["build", "matrix"] -> a value of kind array holding 6
+["build", "debug"] -> no key debug
+["name", "length"] -> not an object
+[] -> a value of kind object holding 17
+Some(9) None
+true false true true

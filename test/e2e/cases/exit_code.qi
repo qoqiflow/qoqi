@@ -1,0 +1,5 @@
+// An Int returned by main becomes the process exit code.
+fn main() -> Int {
+    println("leaving with 3");
+    return 3;
+}

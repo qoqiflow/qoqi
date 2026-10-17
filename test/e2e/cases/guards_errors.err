@@ -1,0 +1,4 @@
+[ERROR] E1003: 'n' cannot be named here: nothing runs only when this test holds
+guards_errors.qi:8:22
+[ERROR] E1001: undefined identifier 'm'
+guards_errors.qi:14:17

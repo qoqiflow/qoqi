@@ -1,0 +1,56 @@
+// The library without imports: modules by their name, collections and
+// traits by theirs. A variable named like a module hides it where it is.
+
+struct Score {
+    player: String;
+    points: Int;
+}
+
+impl Ordered for Score {
+    fn compare(other: Score) -> Int {
+        return self.points - other.points;
+    }
+}
+
+impl Show for Score {
+    fn show() -> String {
+        return "${self.player} (${self.points})";
+    }
+}
+
+fn best<T: Ordered>(items: [T]) -> T? {
+    return ops.largest(items);
+}
+
+fn tally(lines: [String]) -> Dict<Int> {
+    let totals = dict.empty<Int>();
+
+    for line in lines {
+        let (player, points) = (line.split(":")[0], line.split(":")[1].parseInt() ?? 0);
+        totals.update(player, 0, total -> total + points);
+    }
+
+    return totals;
+}
+
+fn main() -> Int {
+    let totals = tally(["ada:3", "bob:5", "ada:4", "cy:1"]);
+
+    let scores = totals.sortedKeys().map(
+        name -> Score { player: name, points: totals.getOr(name, 0) },
+    );
+
+    println(scores, best(scores)!);
+
+    let players: Set<String> = set.of(totals.keys());
+    let order: List<String> = list.of(players.items().sorted((a, b) -> a < b));
+    println(players.len(), order.toArray());
+
+    // Here path is a text: the module is hidden, its methods are the text's
+    let path = "scores/2026/october.txt";
+    println(path.split("/").len());
+
+    let checked: Result<Int, String> = math.pi > 3.0 ? Ok(4) : Err("no");
+    println(checked, json.int(totals.getOr("ada", 0)).stringify());
+    return 0;
+}

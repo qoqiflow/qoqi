@@ -1,0 +1,20 @@
+ok
+insufficient funds
+unknown account
+ok
+insufficient funds
+ada: -42
+  1. deposit 200 => +200
+  2. interest 10% => ~interest 10%
+  3. withdraw 120 (fee 1) => -121
+  4. withdraw 140 (fee 1) => -141
+  largest deposit: 200
+bob: 290
+  1. deposit 30 => +30
+  2. deposit 120 => +120
+  3. deposit 140 => +140
+  largest deposit: 140
+eve: 0
+  no deposits
+accounts: 3 rich: 1 total: 248 rejected: 3
+fees collected: 2

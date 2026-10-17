@@ -1,0 +1,19 @@
+// What the compiler says about the names of a test that leaves when it
+// fails, used where they do not exist.
+
+fn main() -> Int {
+    let found: Result<Int, String> = Ok(1);
+
+    // The block does not always leave: n would not exist after it
+    if !(found is Ok(n)) {
+        println("not found");
+    }
+
+    // Inside the block the test did not hold: nothing is named
+    if !(found is Ok(m)) {
+        println(m);
+        return 1;
+    }
+
+    return 0;
+}

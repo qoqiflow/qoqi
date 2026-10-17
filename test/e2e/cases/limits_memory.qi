@@ -1,0 +1,21 @@
+// An array of a million and a half numbers: building it has to take time
+// proportional to its size, not to its square.
+
+fn main() -> Int {
+    let numbers: [Int] = [];
+    let i = 0;
+
+    while i < 1500000 {
+        numbers.push(i);
+        i++;
+    }
+
+    let total = 0;
+
+    for n in numbers {
+        total += n;
+    }
+
+    println(numbers.len(), total);
+    return 0;
+}

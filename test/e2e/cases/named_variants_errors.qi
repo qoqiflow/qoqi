@@ -1,0 +1,19 @@
+// What the compiler says about variants built or matched by names.
+
+enum Shape {
+    Circle { radius: Float },
+    Square(Float),
+}
+
+fn main() -> Int {
+    let a = Circle {};
+    let b = Circle { radius: 1.0, color: "red" };
+    let c = Square { side: 2.0 };
+
+    match a {
+        case Circle { diameter }: {}
+        default: {}
+    }
+
+    return 0;
+}

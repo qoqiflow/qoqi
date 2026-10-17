@@ -1,0 +1,8 @@
+// An extern function is one the runtime provides. Declaring one it does
+// not have is an error when the program is compiled, not when it runs.
+
+extern fn launchRocket(countdown: Int) -> Bool;
+
+fn main() -> Int {
+    return 0;
+}

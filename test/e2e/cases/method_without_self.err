@@ -1,0 +1,2 @@
+[WARNING] E8011: method 'symbol' does not use self
+method_without_self.qi:9:5

@@ -1,0 +1,177 @@
+// Folders and the files in them.
+//
+// Reading and writing the content of a file is in std.io. Like there,
+// whatever can fail for reasons outside the program returns a Result
+// whose reason is an io.Error: its kind for the program, the rest for a
+// person.
+//
+//     match fs.list("notes") {
+//         case Ok(entries): {
+//             for entry in entries { println(entry.name, entry.size); }
+//         }
+//         case Err(error): { println(error.describe()); }
+//     }
+
+import std.io;
+import std.io.{Error};
+import std.result.{Result};
+import std.path;
+import std.arrays;
+
+pub enum Kind { File, Dir }
+
+// What is known about a file or a folder.
+pub struct Entry {
+    name: String;   // its last part: "todo.txt"
+    path: String;   // where it is: "notes/todo.txt"
+    kind: Kind;
+    size: Int;      // in bytes; 0 for a folder
+    modified: Int;  // when it last changed, in milliseconds since 1970, as time.now
+}
+
+impl Entry {
+    pub fn isFile() -> Bool {
+        return self.kind == Kind.File;
+    }
+
+    pub fn isDir() -> Bool {
+        return self.kind == Kind.Dir;
+    }
+}
+
+pub extern fn isDir(path: String) -> Bool;
+pub extern fn isFile(path: String) -> Bool;
+
+// What is known about one file or folder, or why it cannot be said.
+pub fn info(path: String) -> Result<Entry, Error> {
+    let entry = describe(path);
+
+    if entry == null {
+        return Err(io.failure("inspect", path));
+    }
+
+    return Ok(entry);
+}
+
+// What a folder holds, sorted by name. Not what its folders hold.
+pub fn list(folder: String) -> Result<[Entry], Error> {
+    let found = names(folder);
+
+    if found == null {
+        return Err(io.failure("list", folder));
+    }
+
+    let entries: [Entry] = [];
+
+    for name in found {
+        // Gone between being listed and being looked at: leave it out
+        let entry = describe(path.inside(folder, name));
+
+        if entry != null {
+            entries.push(entry);
+        }
+    }
+
+    return Ok(entries);
+}
+
+// The path of every file under a folder, however deep, sorted.
+pub fn walk(folder: String) -> Result<[String], Error> {
+    let found = tree(folder);
+
+    if found == null {
+        return Err(io.failure("walk", folder));
+    }
+
+    return Ok(found);
+}
+
+// The files under a folder whose name fits a pattern: fs.find("src", "*.qi").
+pub fn find(folder: String, pattern: String) -> Result<[String], Error> {
+    let fits = fn(file: String) -> Bool {
+        return path.matches(pattern, path.base(file));
+    };
+
+    return Ok((walk(folder)?).filter(fits));
+}
+
+// Creates a folder, and those above it that are missing. One that is
+// already there is not a failure. Gives the path.
+pub fn makeDir(folder: String) -> Result<String, Error> {
+    return done(makeFolder(folder), "create", folder);
+}
+
+// Deletes a file, or a folder with everything in it. Nothing there is not
+// a failure. Gives the path.
+pub fn removeAll(target: String) -> Result<String, Error> {
+    return done(removeTree(target), "remove", target);
+}
+
+// Gives a file or a folder another name or place. Gives the new path.
+pub fn rename(from: String, to: String) -> Result<String, Error> {
+    return done(move(from, to), "rename", from).map(old -> to);
+}
+
+// Copies a file, replacing what was at the new path. Gives the new path.
+pub fn copy(from: String, to: String) -> Result<String, Error> {
+    return done(duplicate(from, to), "copy", from).map(source -> to);
+}
+
+// The folder relative paths are taken from.
+pub extern fn currentDir() -> String;
+
+// Where the system keeps files that need not last.
+pub extern fn tempDir() -> String;
+
+// A new, empty folder for the program's own use; its name starts with
+// the prefix. The program removes it when done: fs.removeAll.
+pub fn makeTempDir(prefix: String) -> Result<String, Error> {
+    let created = newTempDir(prefix);
+
+    if created == null {
+        return Err(io.failure("create", prefix));
+    }
+
+    return Ok(created);
+}
+
+fn done(worked: Bool, operation: String, target: String) -> Result<String, Error> {
+    if worked {
+        return Ok(target);
+    }
+
+    // One call further from the program than io.failure expects
+    let error = io.failure(operation, target);
+    error.stack = error.stack.slice(1, error.stack.len());
+    return Err(error);
+}
+
+fn describe(target: String) -> Entry? {
+    let facts = stat(target)?;
+    let kind = Kind.File;
+    let size = facts[0];
+
+    // What the system gives as the size of a folder is the room its list
+    // of names takes, which says nothing to a program
+    if isDir(target) {
+        kind = Kind.Dir;
+        size = 0;
+    }
+
+    return Entry {
+        name: path.base(target),
+        path: target,
+        kind: kind,
+        size: size,
+        modified: facts[1],
+    };
+}
+
+extern fn names(folder: String) -> [String]?;
+extern fn tree(folder: String) -> [String]?;
+extern fn stat(path: String) -> [Int]?;
+extern fn makeFolder(path: String) -> Bool;
+extern fn removeTree(path: String) -> Bool;
+extern fn move(from: String, to: String) -> Bool;
+extern fn duplicate(from: String, to: String) -> Bool;
+extern fn newTempDir(prefix: String) -> String?;

@@ -1,0 +1,52 @@
+name: Release
+
+# A tag such as v0.1.0 builds qoqi for every system and publishes the
+# binaries with the release, where install.sh finds them.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: make build test
+      - name: Build the binaries
+        env:
+          CGO_ENABLED: "0"
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            # Named as the machine calls itself (uname -m): x86_64, not Go's amd64
+            label="$arch"
+            if [ "$arch" = amd64 ]; then label=x86_64; fi
+            name="qoqi-${os}-${label}"
+            binary=qoqi
+            if [ "$os" = windows ]; then binary=qoqi.exe; fi
+            mkdir "dist/$name"
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "dist/$name/$binary" ./cmd/qoqi
+            cp README.md LICENSE "dist/$name/"
+            if [ "$os" = windows ]; then
+              (cd dist && zip -qr "$name.zip" "$name")
+            else
+              tar -C dist -czf "dist/$name.tar.gz" "$name"
+            fi
+          done
+          (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --generate-notes \
+            dist/*.tar.gz dist/*.zip dist/checksums.txt

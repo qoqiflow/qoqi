@@ -1,0 +1,6 @@
+[ERROR] E2042: field 'balance' of bank.account.Account is private to module 'bank.account'
+private_fields_errors.qi:6:16
+[ERROR] E2042: field 'balance' of bank.account.Account is private to module 'bank.account'
+private_fields_errors.qi:7:8
+[ERROR] E2042: field 'balance' of bank.account.Account is private to module 'bank.account'
+private_fields_errors.qi:8:51

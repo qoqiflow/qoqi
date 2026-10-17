@@ -1,0 +1,8 @@
+pub trait Shape {
+    fn left() -> Int;
+    fn right() -> Int;
+}
+
+pub fn overlaps(a: Shape, b: Shape) -> Bool {
+    return a.left() < b.right() && b.left() < a.right();
+}

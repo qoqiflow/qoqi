@@ -1,0 +1,425 @@
+// Programs that wait for days: a flow keeps what it is doing in a store
+// while it waits, and goes on where it was, minutes or months later.
+//
+//     struct Reminder {
+//         user: User;
+//     }
+//
+//     impl Flow<Void> for Reminder {
+//         fn run() {
+//             wait time.after(3.days());
+//
+//             if !hasLoggedIn(self.user) {
+//                 sendReminder(self.user);
+//             }
+//         }
+//     }
+//
+//     step fn sendReminder(user: User) { ... }
+//
+// A flow reaches outside the program only through a `step fn`: a file,
+// the network, a database, another program are steps, or a mistake the
+// compiler points at. What a step is given and what it returns are data.
+// See docs/flow.md.
+
+import std.sql;
+import std.sql.{Tx};
+import std.task.{Waitable};
+import std.time.{Duration};
+
+// A process: its fields are the state of each instance, `run` what an
+// instance carries out, T what it gives at the end.
+pub trait Flow<T> {
+    fn run() -> T;
+}
+
+// The key of the step that asks: the same each time this step of this
+// instance runs, and no other step of any instance has it. Given to a
+// payment provider as an idempotency key, it makes a second attempt the
+// first one. Asked outside a step, it stops the program.
+pub extern fn key() -> String;
+
+// Which attempt of its step this is: 1 the first time, 2 when the step
+// runs again because the process stopped before what it returned was
+// kept. A step whose provider cannot take a key asks it first then.
+pub extern fn attempt() -> Int;
+
+// The database the flows are kept in, for a step that writes there and
+// nowhere else: a transaction, the same each time the step asks, which
+// the runtime commits with what the step returns. The step's rows and its
+// result are kept together or not at all: a step stopped half way runs
+// again from nothing, and one that ended never runs again, without a key
+// in its rows.
+//
+//     step fn settle(invoice: Invoice) -> Result<Receipt, sql.Error> {
+//         let store = flow.store()?;
+//         store.exec("INSERT INTO receipts (invoice, cents) VALUES (?, ?)", [Value.Text(invoice.id), Value.Int(invoice.cents)])?;
+//         return Ok(Receipt { invoice: invoice.id });
+//     }
+//
+// A step that gives no result (it stopped the program, or asked to be
+// run again) leaves nothing written. Asked outside a step, it stops the
+// program; a flow that asks for it outside one is told it reaches a
+// database. A step may wait for the world between its statements: on
+// SQLite, whose one writer the store shares, nothing is held meanwhile,
+// and the step runs again if what it read changed before it ended.
+pub fn store() -> Result<Tx, sql.Error> {
+    return sql.storeOfStep();
+}
+
+// What a step that is never run twice gives: what it returned, or Unknown
+// when the process stopped while it ran and nothing says whether the
+// world was told. The match on it has to say what Unknown means. Such a
+// step says how long it may take, after its signature:
+//
+//     step fn wire(to: Account, amount: Int) -> Settled<Result<Wire, Refusal>> within 2.hours() { ... }
+pub enum Settled<T> {
+    Done(T),
+    Unknown,
+}
+
+// Says, from inside a step, that the world did not answer (a network
+// down for a moment, a server that said "try later"): the step ends here,
+// and the runtime runs it again under the same key once `after` has
+// passed, as its next attempt: flow.retry("busy", 2.seconds()). Not an
+// answer: an answer, Err included, is what the step returns.
+pub fn retry(reason: String, after: Duration = 1.seconds()) {
+    askAgain(reason, after.inMilliseconds());
+}
+
+extern fn askAgain(reason: String, after: Int);
+
+// What `stage polling;` is written as: the instance passes the stage. A
+// program does not call it by hand.
+pub extern fn passStage(name: String);
+
+// What a step its queue carries out is written as, `step fn charge(...)
+// -> Charge by billing;`: it is sent to the queue, its parameters named
+// so, and what the application answers is what it returns. A program
+// does not call them by hand.
+// The step's own call reads what it was given, so it is these the step
+// calls, with how long it may take in milliseconds.
+pub extern fn deliver(queue: String, params: String, within: Int) -> Any;
+
+// What `within d` is written as in a step in Qoqi, as its first line:
+// how long it may take.
+pub extern fn limit(within: Int);
+pub extern fn deliverUndone(queue: String, params: String, within: Int, undo: Any) -> Any;
+
+// What `within d` is given as: d is a Duration, 2.hours(). A number alone
+// is not one, and is told so.
+pub fn lengthOf(within: Duration) -> Int {
+    return within.inMilliseconds();
+}
+
+// Says, next to an effect, which step undoes it, and with what, should
+// the flow end in failure: an Err returned by run, or a cancellation.
+// Written in the step that does the thing, it is kept with what the step
+// returns, in the same write; written in run, with the next write. The
+// undos run as steps, the last noted first, once run has failed; a flow
+// that ends well forgets them. An undo that returns an Err has not
+// undone: the instance stops, for a person.
+//
+//     step fn reserve(cart: Cart) -> Result<Hold, Problem> {
+//         let hold = warehouse.hold(cart, flow.key())?;
+//         flow.undo(release, hold);
+//         return Ok(hold);
+//     }
+pub fn undo<A, R, E>(step: fn(A) -> Result<R, E>, argument: A) {
+    noteUndo(step, argument);
+}
+
+extern fn noteUndo(step: Any, argument: Any);
+
+// --- Instances of other flows ---
+
+// How an instance ended that did not end with a value of its own: it was
+// cancelled, for this reason.
+pub struct Cancelled {
+    reason: String;
+}
+
+// An instance of a flow, started by flow.start. `wait` on it gives what
+// its run returned, once it has ended, or how it was cancelled.
+pub struct Instance<T> {
+    priv name: String;
+}
+
+impl<T> Instance<T> {
+    // Its name: what it was started under.
+    pub fn name() -> String {
+        return self.name;
+    }
+}
+
+// Starts an instance of a flow under a name, as a child of the flow that
+// asks: should this one fail, it cancels the child first, and the child's
+// undos run before its own. The name is the instance: a name taken gives
+// the instance that has it, ended or not, whatever it was started with,
+// so that a flow taken up again starts nothing twice.
+//
+//     let payment = flow.start("payment:${cart.id}", Payment { invoice: invoice });
+//     match wait payment {
+//         case Ok(outcome): { ... }
+//         case Err(cancelled): { ... }
+//     }
+pub fn start<T>(name: String, instance: Flow<T>) -> Instance<T> {
+    startInstance(name, instance, false);
+    return Instance<T> { name: name };
+}
+
+// Starts an instance as flow.start does, meant to outlive the flow that
+// asks: it is no one's child.
+pub fn detach<T>(name: String, instance: Flow<T>) -> Instance<T> {
+    startInstance(name, instance, true);
+    return Instance<T> { name: name };
+}
+
+impl<T> Waitable<Result<T, Cancelled>> for Instance<T> {
+    fn ready() -> Bool {
+        return instanceEnded(self.name);
+    }
+
+    fn peek() -> Result<T, Cancelled> {
+        return instanceResult(self.name) as Result<T, Cancelled>;
+    }
+
+    fn take() -> Result<T, Cancelled> {
+        return self.peek();
+    }
+
+    fn watch() {
+        watchInstance(self.name);
+    }
+}
+
+extern fn startInstance(name: String, instance: Any, detached: Bool);
+extern fn instanceEnded(name: String) -> Bool;
+extern fn instanceResult(name: String) -> Any;
+extern fn watchInstance(name: String);
+
+// --- Cancelled, as the flow sees it ---
+
+// The cancellation of the instance, to wait for: a flow that writes
+// `case let reason = flow.cancelled():` in a wait match ends its own way
+// when it is cancelled. The reason comes at its next wait match, every one
+// of which in its run has the case; until then and after, its tasks go on
+// and its steps leave, until run returns. A flow that does not is stopped
+// where it is, and its undos run.
+//
+//     wait match {
+//         case let d = self.decisions.receive(): { return d; }
+//         case let reason = flow.cancelled(): { return Decision.Refused(reason); }
+//     }
+pub fn cancelled() -> Cancellation {
+    return Cancellation { asked: true };
+}
+
+// The cancellation of the instance that waits for it.
+pub struct Cancellation {
+    priv asked: Bool;
+}
+
+impl Waitable<String> for Cancellation {
+    fn ready() -> Bool {
+        return cancelReady();
+    }
+
+    fn peek() -> String {
+        return cancelReason(false);
+    }
+
+    fn take() -> String {
+        return cancelReason(true);
+    }
+
+    fn watch() {
+        watchInstance("cancel:");
+    }
+}
+
+extern fn cancelReady() -> Bool;
+extern fn cancelReason(take: Bool) -> String;
+
+// --- Messages from outside ---
+
+// What a flow is told from outside, a field of it: a person's decision, a
+// provider's webhook, a command. Sent through the daemon (qoqi send,
+// POST /api/instances/{id}/inboxes/{name}), kept in its store until the
+// instance takes it, at most `capacity` waiting there.
+//
+//     struct Approval {
+//         expense: Expense;
+//         decisions: Inbox<Decision> = flow.inbox<Decision>(1);
+//     }
+//
+//     wait match {
+//         case let d = self.decisions.receive(): { return d; }
+//         case time.after(2.days()): { ... }
+//     }
+pub struct Inbox<T> {
+    priv name: String;
+    priv capacity: Int;
+}
+
+// An inbox that holds that many messages not taken yet. The runtime names
+// it after its field when the instance starts.
+pub fn inbox<T>(capacity: Int) -> Inbox<T> {
+    return Inbox<T> { name: "", capacity: capacity };
+}
+
+impl<T> Inbox<T> {
+    // The next message: `wait self.decisions.receive()` gives it, once
+    // one has come, in the order they came.
+    pub fn receive() -> NextMessage<T> {
+        return NextMessage<T> { inbox: self.name };
+    }
+}
+
+// The next message of an inbox, to wait for.
+pub struct NextMessage<T> {
+    priv inbox: String;
+}
+
+impl<T> Waitable<T> for NextMessage<T> {
+    fn ready() -> Bool {
+        return inboxReady(self.inbox);
+    }
+
+    fn peek() -> T {
+        return inboxPeek(self.inbox) as T;
+    }
+
+    fn take() -> T {
+        return inboxTake(self.inbox) as T;
+    }
+
+    fn watch() {
+        watchInstance("inbox:" + self.inbox);
+    }
+}
+
+extern fn inboxReady(inbox: String) -> Bool;
+extern fn inboxPeek(inbox: String) -> Any;
+extern fn inboxTake(inbox: String) -> Any;
+
+// --- Trials ---
+
+// A trial: an instance of a flow run by the test that makes it, on a
+// store in memory and a clock of its own. `go` runs it until it waits,
+// `advance` moves its clock on, `replace` gives a step a function in its
+// place, and `everyCrash` runs a scenario again with the process stopped
+// at each of the writes the instance makes, and checks that it ends the
+// same and that no step never run twice ran twice.
+//
+//     fn testAPaymentIsTakenOnce() {
+//         let trial = flow.test(Payment { invoice: "A1", amount: 3 });
+//         trial.replace(charge, fn(id: String, amount: Int) -> Int { return amount * 100; });
+//         trial.go();
+//         test.equal(trial.status(), "waiting");
+//         trial.advance(2.days());
+//         test.equal(trial.result(), "paid 300");
+//     }
+pub struct Trial<T> {
+    priv id: Int;
+    priv kept: [Any];  // the functions given to replace, alive as long as the trial
+}
+
+// A trial of an instance, not started yet.
+pub fn test<T>(instance: Flow<T>) -> Trial<T> {
+    let none: [Any] = [];
+    return Trial<T> { id: trialStart(instance), kept: none };
+}
+
+impl<T> Trial<T> {
+    // In this trial, the step is this function instead, given what the
+    // step is given and returning what it returns.
+    pub fn replace(step: Any, by: Any) -> Trial<T> {
+        trialReplace(self.id, step, by);
+        self.kept.push(by);
+        return self;
+    }
+
+    // Runs the instance until it waits for the clock, or ends.
+    pub fn go() -> Trial<T> {
+        trialGo(self.id);
+        return self;
+    }
+
+    // Moves the clock on, then runs what that wakes.
+    pub fn advance(length: Duration) -> Trial<T> {
+        trialAdvance(self.id, length.inMilliseconds());
+        return self;
+    }
+
+    // How many times a step has run, attempts again included.
+    pub fn calls(step: Any) -> Int {
+        return trialCalls(self.id, step);
+    }
+
+    // What run returned, or null while it has not.
+    pub fn result() -> T? {
+        return trialResult(self.id) as T?;
+    }
+
+    // Sends the instance a message on one of its inboxes, as the world
+    // would from outside, then runs what that wakes.
+    pub fn send(inbox: String, message: Any) -> Trial<T> {
+        trialSend(self.id, inbox, message);
+        return self;
+    }
+
+    // Cancels the instance, as a person would from outside: it ends
+    // failed, once what it gave flow.undo has run.
+    pub fn cancel(reason: String) -> Trial<T> {
+        trialCancel(self.id, reason);
+        return self;
+    }
+
+    // "waiting", "running", "done", "failed" or "stopped".
+    pub fn status() -> String {
+        return trialStatus(self.id);
+    }
+
+    // Why it stopped, if it did.
+    pub fn stopped() -> String? {
+        return trialStopped(self.id);
+    }
+
+    // Runs a scenario once as it is, then once for each write the
+    // instance made, the process stopped at that write and the instance
+    // taken up again: every run has to end the same, and no step never run
+    // twice may have run twice. The program stops, saying where, if not.
+    pub fn everyCrash(scenario: fn(Trial<T>) -> Void) {
+        let clean = self.failingAt(0);
+        scenario(clean);
+
+        for write in 1..=trialWrites(clean.id) {
+            let stopped = self.failingAt(write);
+            scenario(stopped);
+            let wrong = trialCompare(clean.id, stopped.id, write);
+
+            if wrong != null {
+                panic(wrong);
+            }
+        }
+    }
+
+    fn failingAt(write: Int) -> Trial<T> {
+        return Trial<T> { id: trialCopy(self.id, write), kept: self.kept };
+    }
+}
+
+extern fn trialStart(instance: Any) -> Int;
+extern fn trialReplace(trial: Int, step: Any, by: Any);
+extern fn trialGo(trial: Int);
+extern fn trialAdvance(trial: Int, milliseconds: Int);
+extern fn trialCalls(trial: Int, step: Any) -> Int;
+extern fn trialResult(trial: Int) -> Any;
+extern fn trialStatus(trial: Int) -> String;
+extern fn trialStopped(trial: Int) -> String?;
+extern fn trialWrites(trial: Int) -> Int;
+extern fn trialCopy(trial: Int, failAt: Int) -> Int;
+extern fn trialCompare(clean: Int, other: Int, write: Int) -> String?;
+extern fn trialCancel(trial: Int, reason: String);
+extern fn trialSend(trial: Int, inbox: String, message: Any);

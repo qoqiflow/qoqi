@@ -1,0 +1,22 @@
+// A method that does not use self is valid, and runs: the compiler only
+// says it could be a static function of the type.
+
+struct Unit {
+    name: String;
+}
+
+impl Unit {
+    fn symbol() -> String {
+        return "m";
+    }
+
+    fn label() -> String {
+        return "${self.name} (${self.symbol()})";
+    }
+}
+
+fn main() -> Int {
+    let metre = Unit { name: "metre" };
+    println(metre.label(), metre.symbol());
+    return 0;
+}

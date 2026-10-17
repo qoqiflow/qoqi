@@ -1,0 +1,11 @@
+// A runtime error stops the program and reports where it happened.
+fn pick(items: [Int], index: Int) -> Int {
+    return items[index];
+}
+
+fn main() -> Int {
+    println("before");
+    let value = pick([1, 2, 3], 7);
+    println("never printed", value);
+    return 0;
+}

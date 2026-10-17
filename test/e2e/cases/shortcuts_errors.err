@@ -1,0 +1,45 @@
+[ERROR] E2034: '?' passes a failure on to the caller, and this function returns Int, not a Result
+shortcuts_errors.qi:16:23
+Make the function return Result<..., String>, or handle the failure here with a match or orElse
+[ERROR] E2034: '?' would pass on a failure of type String, and this function returns failures of type Int
+shortcuts_errors.qi:20:33
+Turn one into the other first: value.mapErr(convert)?
+[ERROR] E2034: '?' on a value that may be null returns null to the caller, and this function returns Int
+shortcuts_errors.qi:24:27
+Make the function return Int?, give a fallback with '??', or test against null
+[ERROR] E2034: '?' is for a Result or a value that may be null, and this is a Int
+shortcuts_errors.qi:28:13
+Remove the '?'
+[ERROR] E2035: '?.' is for a value that may be null, and this User never is
+shortcuts_errors.qi:32:16
+Use '.' here
+[ERROR] E2035: '?.' is for a value that may be null, and a std.result.Result<User, String> never is
+shortcuts_errors.qi:36:18
+To go on with its value and pass a failure on to the caller, write (value?).member; to look at both cases, use a match
+[ERROR] E2017: cannot read 'name' of User?: the value may be null
+shortcuts_errors.qi:40:22
+Test it against null first, or provide a fallback with '??'
+[ERROR] E2014: (Int, String) holds 2 values: there is none at position 2
+shortcuts_errors.qi:44:22
+Positions count from 0: the last one is .1
+[ERROR] E2014: a tuple has no 'first'
+shortcuts_errors.qi:45:21
+Read a value by its position, as in pair.0, or name them all: let (first, second) = pair;
+[ERROR] E2001: (Int, String) holds 2 values, and 3 are named here
+shortcuts_errors.qi:46:5
+Name every value, with '_' for those that are not needed
+[ERROR] E2022: a tuple cannot be changed once made
+shortcuts_errors.qi:47:12
+Make a new tuple with the value changed, or use a struct, whose fields can be assigned
+[ERROR] E2030: nothing here says what type value 2 of this tuple has
+shortcuts_errors.qi:52:19
+Say what the tuple is where it goes: let pair: (Int, String?) = (1, null);
+[ERROR] E2003: cannot return type (Int, Int, Int) from function returning (Int, Int)
+shortcuts_errors.qi:53:12
+Ensure the return value is of type (Int, Int)
+[ERROR] E2028: match on (Bool, Bool) does not handle (false, false)
+shortcuts_errors.qi:57:5
+Add a case for each, or a 'default' case: case (false, false): { ... }
+[ERROR] E2017: operator + cannot be applied to Int?: the value may be null
+shortcuts_errors.qi:74:16
+Test it against null first, or provide a fallback with '??'

@@ -1,0 +1,98 @@
+// What the resolver knows of the packages it may choose: for a name, the
+// versions there are, and for a version, its qoqi.json. Where they come
+// from (git, a folder, a test) is the catalog's business.
+
+import manifest.{Manifest};
+import std.semver;
+import std.semver.{Version};
+
+// Where the files of one version are.
+pub struct Source {
+    kind: String;            // "git" or "path"
+    url: String;
+    reference: String = "";  // the commit, for git
+}
+
+// One version of a package, one the resolver may choose.
+pub struct Candidate {
+    name: String;
+
+    // As it is shown and locked: "1.4.0", "dev-main".
+    label: String;
+
+    // null for a branch, which only a requirement naming it accepts.
+    version: Version?;
+
+    source: Source;
+
+    // A package in a folder that says no version of its own is what it
+    // is: every requirement accepts it.
+    anyVersion: Bool = false;
+}
+
+impl Candidate {
+    pub fn describe() -> String {
+        return "${self.name} ${self.label}";
+    }
+}
+
+pub trait Catalog {
+    // Every version of a package, in any order.
+    fn candidates(name: String) -> Result<[Candidate], String>;
+
+    // What a version's qoqi.json says.
+    fn manifest(candidate: Candidate) -> Result<Manifest, String>;
+}
+
+// Whether a requirement accepts a candidate: "^1.2" a version, "dev-main"
+// the branch main. A requirement that is not a constraint is an error.
+pub fn accepts(candidate: Candidate, wanted: String) -> Result<Bool, String> {
+    if candidate.anyVersion {
+        return Ok(true);
+    }
+
+    if wanted.startsWith("dev-") {
+        return Ok(candidate.label == wanted);
+    }
+
+    let constraint = semver.constraint(wanted).mapErr(
+        error -> "${candidate.name}: ${error.describe()}",
+    )?;
+
+    let version = candidate.version;
+
+    if version == null {
+        return Ok(false);
+    }
+
+    return Ok(constraint.allows(version));
+}
+
+// Whether a requirement can be read at all, before anything is chosen.
+pub fn check(name: String, wanted: String) -> Result<Void, String> {
+    if wanted.startsWith("dev-") && wanted.len() > 4 {
+        return Ok();
+    }
+
+    if semver.constraint(wanted).isErr() {
+        return Err("the requirement ${name} \"${wanted}\" is not a version constraint: write it as ^1.2, ~1.2.3, >=1.0 <2.0, 1.2.* or dev-main");
+    }
+
+    return Ok();
+}
+
+// Newer first: versions from the newest, then branches by name.
+pub fn newestFirst(a: Candidate, b: Candidate) -> Bool {
+    let x = a.version;
+    let y = b.version;
+
+    if x != null && y != null {
+        return x > y;
+    }
+
+    if x != null || y != null {
+        return x != null;
+    }
+
+    return a.label < b.label;
+}

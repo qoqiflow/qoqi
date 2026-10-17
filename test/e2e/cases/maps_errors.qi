@@ -1,0 +1,9 @@
+// What the compiler says about dictionaries written wrongly.
+
+fn main() -> Int {
+    let nothing = {};
+    let mixed = { "a": 1, 2: 3 };
+    let ages = { "ada": 36 };
+    let wrong: Int = ages["ada"];
+    return 0;
+}

@@ -1,0 +1,83 @@
+// Every way to get `?`, `?.` and tuples wrong, and what is said about it.
+
+import std.result.{Result};
+import std.strings;
+
+struct User {
+    name: String;
+    boss: User?;
+}
+
+fn number(text: String) -> Result<Int, String> {
+    return Result.Ok(1);
+}
+
+fn noResult() -> Int {
+    return number("1")?;
+}
+
+fn otherFailure() -> Result<Int, Int> {
+    return Result.Ok(number("1")?);
+}
+
+fn noNull(text: String) -> Int {
+    return text.parseInt()?;
+}
+
+fn plain(n: Int) -> Int? {
+    return n?;
+}
+
+fn neverNull(user: User) -> String? {
+    return user?.name;
+}
+
+fn onResult(result: Result<User, String>) -> String? {
+    return result?.name;
+}
+
+fn stillOptional(user: User?) -> String {
+    return user?.boss.name;
+}
+
+fn positions(pair: (Int, String)) -> Int {
+    let third = pair.2;
+    let first = pair.first;
+    let (a, b, c) = pair;
+    pair.0 = 5;
+    return a;
+}
+
+fn sizes() -> (Int, Int) {
+    let untyped = (1, null);
+    return (1, 2, 3);
+}
+
+fn incomplete(point: (Bool, Bool)) -> Int {
+    match point {
+        case (true, _): {
+            return 1;
+        }
+
+        case (false, true): {
+            return 2;
+        }
+    }
+}
+
+fn changing(count: Int?) -> Int {
+    if count == null {
+        return 0;
+    }
+
+    let later = fn() -> Int {
+        return count + 1;
+    };
+
+    count = null;
+    return later();
+}
+
+fn main() -> Int {
+    return 0;
+}

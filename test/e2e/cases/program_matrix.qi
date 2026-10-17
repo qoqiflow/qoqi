@@ -1,0 +1,190 @@
+// Grids of numbers: nested arrays, indexed loops, generic helpers,
+// compound assignment on elements, and runtime bounds checks.
+
+struct Matrix {
+    rows: Int;
+    cols: Int;
+    cells: [[Int]];
+}
+
+fn zeros(rows: Int, cols: Int) -> Matrix {
+    let cells: [[Int]] = [];
+    let r = 0;
+
+    while r < rows {
+        let row: [Int] = [];
+        let c = 0;
+
+        while c < cols {
+            row.push(0);
+            c++;
+        }
+
+        cells.push(row);
+        r++;
+    }
+
+    return Matrix { rows: rows, cols: cols, cells: cells };
+}
+
+fn identity(n: Int) -> Matrix {
+    let m = zeros(n, n);
+
+    for i, row in m.cells {
+        row[i] = 1;
+    }
+
+    return m;
+}
+
+impl Matrix {
+    fn at(r: Int, c: Int) -> Int {
+        return self.cells[r][c];
+    }
+
+    fn times(other: Matrix) -> Matrix? {
+        if self.cols != other.rows {
+            return null;
+        }
+
+        let out = zeros(self.rows, other.cols);
+
+        for r, row in self.cells {
+            for k, value in row {
+                for c, factor in other.cells[k] {
+                    out.cells[r][c] += value * factor;
+                }
+            }
+        }
+
+        return out;
+    }
+
+    fn transposed() -> Matrix {
+        let out = zeros(self.cols, self.rows);
+
+        for r, row in self.cells {
+            for c, value in row {
+                out.cells[c][r] = value;
+            }
+        }
+
+        return out;
+    }
+
+    fn scale(factor: Int) -> Void {
+        for row in self.cells {
+            for c, value in row {
+                row[c] *= factor;
+            }
+        }
+    }
+
+    fn trace() -> Int {
+        let sum = 0;
+
+        for i, row in self.cells {
+            if i < self.cols {
+                sum += row[i];
+            }
+        }
+
+        return sum;
+    }
+
+    fn show(title: String) -> Void {
+        println(title, toString(self.rows) + "x" + toString(self.cols));
+
+        for row in self.cells {
+            println(" ", row);
+        }
+    }
+}
+
+fn map2<T, U>(grid: [[T]], f: fn(T) -> U) -> [[U]] {
+    let out: [[U]] = [];
+
+    for row in grid {
+        let mapped: [U] = [];
+
+        for cell in row {
+            mapped.push(f(cell));
+        }
+
+        out.push(mapped);
+    }
+
+    return out;
+}
+
+fn flatten<T>(grid: [[T]]) -> [T] {
+    let out: [T] = [];
+
+    for row in grid {
+        for cell in row {
+            out.push(cell);
+        }
+    }
+
+    return out;
+}
+
+fn power(base: Matrix, exponent: Int) -> Matrix {
+    let result = identity(base.rows);
+    let i = 0;
+
+    while i < exponent {
+        // A square matrix always multiplies with itself
+        result = result.times(base) as Matrix;
+        i++;
+    }
+
+    return result;
+}
+
+fn main() -> Int {
+    let a = zeros(2, 3);
+    let n = 1;
+
+    for r, row in a.cells {
+        for c, cell in row {
+            row[c] = n;
+            n++;
+        }
+    }
+
+    a.show("a");
+    a.transposed().show("a transposed");
+
+    let product = a.times(a.transposed());
+
+    if product != null {
+        product.show("a * at");
+        println("trace:", product.trace());
+    }
+
+    println("a * a is", a.times(a) == null);
+
+    let fib = Matrix { rows: 2, cols: 2, cells: [[1, 1], [1, 0]] };
+    let tenth = power(fib, 10);
+    tenth.show("fib^10");
+    println("fib(10) =", tenth.at(0, 1));
+
+    a.scale(-2);
+    println(flatten(a.cells));
+
+    println(
+        map2(a.cells, fn(v: Int) -> String {
+            return "<" + toString(v) + ">";
+        }),
+    );
+
+    println(
+        map2(identity(3).cells, fn(v: Int) -> Bool {
+            return v == 1;
+        }),
+    );
+
+    // Reading outside the grid stops the program
+    return a.at(2, 0);
+}

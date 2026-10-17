@@ -1,0 +1,41 @@
+// A program that stops itself. The message says what, the place, and the
+// calls that led there; the exit code is 1.
+
+import std.arrays;
+
+struct Queue {
+    items: [Int];
+    taken: Int;
+}
+
+impl Queue {
+    fn take() -> Int {
+        if self.items.len() == 0 {
+            panic("the queue is empty after", self.taken, "items");
+        }
+
+        self.taken++;
+        return self.items[0];
+    }
+}
+
+fn drain(q: Queue, times: Int) -> Int {
+    let total = 0;
+    let i = 0;
+
+    while i < times {
+        total += q.take();
+        q.items = q.items.slice(1, q.items.len());
+        i++;
+    }
+
+    return total;
+}
+
+fn main() -> Int {
+    let q = Queue { items: [4, 5], taken: 0 };
+    println("draining");
+    println(drain(q, 3));
+    println("never printed");
+    return 0;
+}

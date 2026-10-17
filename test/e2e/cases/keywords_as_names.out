@@ -1,0 +1,11 @@
+ok   1. plain: 42
+ok   2. two numbers: 7
+ok   3. no number: none
+FAIL 4. wrong on purpose: 101
+  42 is a number
+  7 is a number
+  none is no number
+  101 is a number
+3 of 4 passed (75%)
+struct Case
+[12, 1, 2] [1, 2]

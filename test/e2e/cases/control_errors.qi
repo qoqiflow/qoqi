@@ -1,0 +1,76 @@
+// Each of these gets a match that gives a value, a range or a defer wrong.
+
+enum Light { Red, Amber, Green }
+
+enum Shape { Circle(Float), Rect(Float, Float) }
+
+fn wait(light: Light) -> Int {
+    return match light {
+        case Light.Red: 30;
+        case Light.Amber if true: 5;
+    };
+}
+
+fn name(n: Int) -> String {
+    let word = match n {
+        case 1: "one";
+        case 2: "two";
+    };
+
+    return word;
+}
+
+fn mixed(n: Int) -> Int {
+    return match n {
+        case 1: 1;
+        case 2: "two";
+
+        case 3: {
+            println("three");
+        }
+
+        default: 0;
+    };
+}
+
+fn round(shape: Shape) -> Bool {
+    match shape {
+        case Shape.Circle(r) | Shape.Rect(w, _): {
+            return r > 0.0;
+        }
+    }
+}
+
+fn count() -> Int {
+    let numbers = 0..10.5;
+    for i in 0..2.5 {}
+
+    for i in 0..3 {
+        i = 5;
+    }
+
+    match "text" {
+        case 1..5: {}
+        default: {}
+    }
+
+    return 0;
+}
+
+fn tidy() -> Int {
+    defer {
+        return 1;
+    }
+
+    while true {
+        defer {
+            break;
+        }
+    }
+
+    return 0;
+}
+
+fn main() -> Int {
+    return 0;
+}

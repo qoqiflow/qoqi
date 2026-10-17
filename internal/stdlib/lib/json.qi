@@ -1,0 +1,548 @@
+// JSON: reading it, looking into it, writing it.
+//
+// A JSON document is a value of the enum Json, so a `match` takes it
+// apart and the compiler checks that every kind is handled:
+//
+//     match json.parse(text) {
+//         case Ok(document): {
+//             let name = document.get("name")?.text() ?? "nobody";
+//         }
+//         case Err(error): { println(error.describe()); }
+//     }
+
+import std.dict;
+import std.dict.{Dict};
+import std.result.{Result};
+import std.strings;
+import std.math;
+import std.ops.{Equal, Show};
+import std.arrays;
+
+// The largest whole number an Int holds, as a Float.
+const largestInt = 140737488355327.0;
+
+pub enum Json {
+    Null,
+    Bool(Bool),
+    Number(Float),
+    String(String),
+    Array([Json]),
+    Object(Dict<Json>),  // its keys stay in the order they were written
+}
+
+// Why a text is not JSON, and where.
+pub struct ParseError {
+    message: String;
+    line: Int;
+    column: Int;
+}
+
+impl ParseError {
+    // line 3, column 12: invalid character '}' looking for beginning of value
+    pub fn describe() -> String {
+        return "line ${self.line}, column ${self.column}: ${self.message}";
+    }
+}
+
+// Printed, and put in a text, as its sentence.
+impl Show for ParseError {
+    fn show() -> String {
+        return self.describe();
+    }
+}
+
+// The document a text describes, or why it is not one.
+pub fn parse(text: String) -> Result<Json, ParseError> {
+    let found = tokens(text);
+
+    if found == null {
+        // Where, as line:column, then what
+        let parts = problem();
+        let where = parts[0].split(":");
+
+        return Err(ParseError {
+            message: parts[1],
+            line: where[0].parseInt() ?? 0,
+            column: where[1].parseInt() ?? 0,
+        });
+    }
+
+    let reader = Reader { tokens: found, at: 0 };
+    return Ok(reader.value());
+}
+
+// Builds the tree from the tokens of a text the runtime has checked: the
+// punctuation as itself, and a letter in front of everything else.
+struct Reader {
+    tokens: [String];
+    at: Int;
+}
+
+impl Reader {
+    fn next() -> String {
+        let token = self.tokens[self.at];
+        self.at++;
+        return token;
+    }
+
+    fn value() -> Json {
+        let token = self.next();
+
+        match token[0] {
+            case "s": {
+                return Json.String(token.from(1));
+            }
+
+            case "n": {
+                return Json.Number(token.from(1).parseFloat() ?? 0.0);
+            }
+
+            case "t": {
+                return Json.Bool(true);
+            }
+
+            case "f": {
+                return Json.Bool(false);
+            }
+
+            case "[": {
+                let items: [Json] = [];
+
+                while self.tokens[self.at] != "]" {
+                    items.push(self.value());
+                }
+
+                self.at++;
+                return Json.Array(items);
+            }
+
+            case "{": {
+                let fields = dict.empty<Json>();
+
+                while self.tokens[self.at] != "}" {
+                    let key = self.next().from(1);
+                    let field = self.value();
+                    fields.set(key, field);
+                }
+
+                self.at++;
+                return Json.Object(fields);
+            }
+
+            default: {
+                return Json.Null;
+            }
+        }
+    }
+}
+
+// Two documents are == when they say the same: the same kind of value,
+// equal items in the same order, equal values under the same keys,
+// whatever order the keys are in.
+impl Equal for Json {
+    fn equals(other: Json) -> Bool {
+        match (self, other) {
+            case (Json.Null, Json.Null): {
+                return true;
+            }
+
+            case (Json.Bool(a), Json.Bool(b)): {
+                return a == b;
+            }
+
+            case (Json.Number(a), Json.Number(b)): {
+                return a == b;
+            }
+
+            case (Json.String(a), Json.String(b)): {
+                return a == b;
+            }
+
+            case (Json.Array(mine), Json.Array(theirs)): {
+                if mine.len() != theirs.len() {
+                    return false;
+                }
+
+                for i, item in mine {
+                    if item != theirs[i] {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            case (Json.Object(mine), Json.Object(theirs)): {
+                if mine.len() != theirs.len() {
+                    return false;
+                }
+
+                for (key, value) in mine.entries() {
+                    let other = theirs.get(key);
+
+                    if other == null || value != other {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            default: {
+                return false;
+            }
+        }
+    }
+}
+
+// Printed, and put in a text, as JSON on one line: {"a":[1,2]}.
+impl Show for Json {
+    fn show() -> String {
+        return self.stringify();
+    }
+}
+
+impl Json {
+    pub fn isNull() -> Bool {
+        return match self {
+            case Json.Null: true;
+            default: false;
+        };
+    }
+
+    // The value of a key, if this is an object that has it.
+    pub fn get(key: String) -> Json? {
+        return match self {
+            case Json.Object(fields): fields.get(key);
+            default: null;
+        };
+    }
+
+    // The item at a position, if this is an array that long.
+    pub fn at(index: Int) -> Json? {
+        match self {
+            case Json.Array(items): {
+                if index < 0 || index >= items.len() {
+                    return null;
+                }
+
+                return items[index];
+            }
+
+            default: {
+                return null;
+            }
+        }
+    }
+
+    // Follows keys and positions separated by dots: find("user.tags.0").
+    // A key with a dot in it is out of its reach: get("a.b") takes it.
+    pub fn find(path: String) -> Json? {
+        let here = self;
+
+        for step in path.split(".") {
+            let index = step.parseInt();
+
+            if index != null && here.items() != null {
+                here = here.at(index)?;
+            } else {
+                here = here.get(step)?;
+            }
+        }
+
+        return here;
+    }
+
+    // The text, if this is one.
+    pub fn text() -> String? {
+        return match self {
+            case Json.String(text): text;
+            default: null;
+        };
+    }
+
+    // The number, if this is one.
+    pub fn number() -> Float? {
+        return match self {
+            case Json.Number(x): x;
+            default: null;
+        };
+    }
+
+    // The number, if this is one, it is whole and an Int can hold it:
+    // 1e15 is a number, and none of 48 bits.
+    pub fn int() -> Int? {
+        match self {
+            case Json.Number(x): {
+                // Not NaN either, which is no number of any size
+                if !(x.abs() <= largestInt) {
+                    return null;
+                }
+
+                let whole = x.trunc();
+
+                if whole.toFloat() != x {
+                    return null;
+                }
+
+                return whole;
+            }
+
+            default: {
+                return null;
+            }
+        }
+    }
+
+    pub fn bool() -> Bool? {
+        return match self {
+            case Json.Bool(b): b;
+            default: null;
+        };
+    }
+
+    // The items, if this is an array.
+    pub fn items() -> [Json]? {
+        return match self {
+            case Json.Array(items): items;
+            default: null;
+        };
+    }
+
+    // The keys and their values, if this is an object.
+    pub fn fields() -> Dict<Json>? {
+        return match self {
+            case Json.Object(fields): fields;
+            default: null;
+        };
+    }
+
+    // On one line, as short as it gets: {"a":[1,2]}
+    pub fn stringify() -> String {
+        let out: [String] = [];
+        self.write(out, "", "");
+        return out.join("");
+    }
+
+    // Over several lines, each level two spaces further in.
+    pub fn pretty() -> String {
+        return self.prettyWith("  ");
+    }
+
+    // Over several lines, each level `indent` further in: "    ", "\t".
+    pub fn prettyWith(indent: String) -> String {
+        let out: [String] = [];
+        self.write(out, indent, "\n");
+        return out.join("");
+    }
+
+    // Adds the pieces of the text to `out`. `indent` is what one level
+    // adds at the start of a line and `line` what ends one: both empty
+    // for the short form.
+    fn write(out: [String], indent: String, line: String) {
+        self.writeAt(out, indent, line, line);
+    }
+
+    // `margin` is the line end followed by the indentation of this level.
+    fn writeAt(out: [String], indent: String, line: String, margin: String) {
+        let colon = ":";
+
+        if line != "" {
+            colon = ": ";
+        }
+
+        match self {
+            case Json.Null: {
+                out.push("null");
+            }
+
+            case Json.Bool(b): {
+                out.push(toString(b));
+            }
+
+            case Json.Number(x): {
+                out.push(numeral(x));
+            }
+
+            case Json.String(text): {
+                out.push(quote(text));
+            }
+
+            case Json.Array(items): {
+                if items.len() == 0 {
+                    out.push("[]");
+                    return;
+                }
+
+                out.push("[");
+
+                for i, item in items {
+                    if i > 0 {
+                        out.push(",");
+                    }
+
+                    out.push(margin + indent);
+                    item.writeAt(out, indent, line, margin + indent);
+                }
+
+                out.push(margin + "]");
+            }
+
+            case Json.Object(fields): {
+                if fields.isEmpty() {
+                    out.push("{}");
+                    return;
+                }
+
+                out.push("{");
+
+                for i, key in fields.keys() {
+                    if i > 0 {
+                        out.push(",");
+                    }
+
+                    out.push(margin + indent + quote(key) + colon);
+                    let field = fields.get(key);
+
+                    if field != null {
+                        field.writeAt(out, indent, line, margin + indent);
+                    }
+                }
+
+                out.push(margin + "}");
+            }
+        }
+    }
+}
+
+// --- Making documents ---
+
+// A whole number as a JSON number.
+pub fn int(n: Int) -> Json {
+    return Json.Number(n.toFloat());
+}
+
+// A number with a fraction as a JSON number.
+pub fn number(n: Float) -> Json {
+    return Json.Number(n);
+}
+
+// A text as a JSON string.
+pub fn text(value: String) -> Json {
+    return Json.String(value);
+}
+
+// true or false.
+pub fn bool(value: Bool) -> Json {
+    return Json.Bool(value);
+}
+
+// An array of texts.
+pub fn texts(items: [String]) -> Json {
+    let out: [Json] = [];
+
+    for item in items {
+        out.push(Json.String(item));
+    }
+
+    return Json.Array(out);
+}
+
+// An array of whole numbers.
+pub fn ints(items: [Int]) -> Json {
+    let out: [Json] = [];
+
+    for item in items {
+        out.push(int(item));
+    }
+
+    return Json.Array(out);
+}
+
+// An array made from anything, given how to turn one item into JSON.
+pub fn array<T>(items: [T], convert: fn(T) -> Json) -> Json {
+    let out: [Json] = [];
+
+    for item in items {
+        out.push(convert(item));
+    }
+
+    return Json.Array(out);
+}
+
+// An object, built a key at a time:
+//
+//     json.object().text("name", "ada").int("age", 36).set("tags", json.texts(tags)).done()
+pub struct Object {
+    priv fields: Dict<Json>;
+}
+
+pub fn object() -> Object {
+    return Object { fields: dict.empty<Json>() };
+}
+
+impl Object {
+    pub fn set(key: String, value: Json) -> Object {
+        self.fields.set(key, value);
+        return self;
+    }
+
+    pub fn text(key: String, value: String) -> Object {
+        return self.set(key, Json.String(value));
+    }
+
+    pub fn int(key: String, value: Int) -> Object {
+        return self.set(key, int(value));
+    }
+
+    pub fn number(key: String, value: Float) -> Object {
+        return self.set(key, Json.Number(value));
+    }
+
+    pub fn bool(key: String, value: Bool) -> Object {
+        return self.set(key, Json.Bool(value));
+    }
+
+    pub fn none(key: String) -> Object {
+        return self.set(key, Json.Null);
+    }
+
+    // The object as it is now. Going on with the builder afterwards
+    // changes the next one done gives, not this.
+    pub fn done() -> Json {
+        let fields = dict.empty<Json>();
+
+        for (key, value) in self.fields.entries() {
+            fields.set(key, value);
+        }
+
+        return Json.Object(fields);
+    }
+}
+
+// The same accessors as functions, to hand to items -> items.map() and the like.
+// For one value, `document.get("name")?.text()` says it shorter.
+pub fn textOf(value: Json) -> String? {
+    return value.text();
+}
+
+pub fn intOf(value: Json) -> Int? {
+    return value.int();
+}
+
+pub fn numberOf(value: Json) -> Float? {
+    return value.number();
+}
+
+pub fn boolOf(value: Json) -> Bool? {
+    return value.bool();
+}
+
+pub fn itemsOf(value: Json) -> [Json]? {
+    return value.items();
+}
+
+extern fn tokens(text: String) -> [String]?;
+extern fn quote(text: String) -> String;
+extern fn numeral(x: Float) -> String;
+extern fn problem() -> [String];

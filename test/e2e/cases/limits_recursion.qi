@@ -1,0 +1,37 @@
+// Recursion 5000 calls deep: a linked list walked recursively.
+struct Node {
+    value: Int;
+    next: Node?;
+}
+
+fn sum(node: Node?) -> Int {
+    if node == null {
+        return 0;
+    }
+
+    return node.value + sum(node.next);
+}
+
+fn length(node: Node?) -> Int {
+    if node == null {
+        return 0;
+    }
+
+    return 1 + length(node.next);
+}
+
+fn main() -> Int {
+    let list: Node? = null;
+
+    for i, x in "x" {
+        let n = i;
+
+        while n < 5000 {
+            list = Node { value: n, next: list };
+            n++;
+        }
+    }
+
+    println(sum(list), length(list));
+    return 0;
+}

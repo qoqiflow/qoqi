@@ -1,0 +1,259 @@
+// The compiler, asked about a program instead of told to run it.
+//
+// Every function takes the path of a file and its text: the text is what
+// is looked at, the path says where its modules are found and how its
+// places are named. An editor gives the text as it is being typed, saved
+// or not.
+//
+//     let source = io.readFile("main.qi").expect("a file");
+//     for problem in compiler.check("main.qi", source) {
+//         println(problem.describe());                    // main.qi:4:9: error E1001: undefined identifier 'totl'
+//     }
+//     for symbol in compiler.symbols("main.qi", source) {
+//         println(symbol.kind, symbol.name, symbol.detail);
+//     }
+//
+// It is what the language server is written with (`qoqi lsp`), and
+// serves as well for a linter, a documentation generator, or a program
+// that wants to know what another program declares.
+
+import std.strings;
+import std.arrays;
+
+// A place in a file. Lines and columns count from 1, columns in
+// characters.
+pub struct Place {
+    file: String;
+    line: Int;
+    column: Int;
+}
+
+impl Place {
+    // main.qi:12:5
+    pub fn describe() -> String {
+        return "${self.file}:${self.line}:${self.column}";
+    }
+}
+
+pub enum Severity { Error, Warning, Info }
+
+impl Severity {
+    pub fn name() -> String {
+        return match self {
+            case Severity.Error: "error";
+            case Severity.Warning: "warning";
+            case Severity.Info: "info";
+        };
+    }
+}
+
+// Something the compiler has to say about a program.
+pub struct Problem {
+    severity: Severity;
+    code: String;        // "E1001"
+    message: String;
+    at: Place;
+    endColumn: Int;      // the column after the last character concerned
+    suggestion: String;  // what usually fixes it, or ""
+}
+
+impl Problem {
+    // On one line: main.qi:4:9: error E1001: undefined identifier 'totl'
+    pub fn describe() -> String {
+        return "${self.at.describe()}: ${self.severity.name()} ${self.code}: ${self.message}";
+    }
+
+    pub fn isError() -> Bool {
+        return match self.severity {
+            case Severity.Error: true;
+            default: false;
+        };
+    }
+}
+
+// Compiles a program without running it. Gives everything the compiler
+// has to say: errors and warnings, in the file and in the modules it
+// imports, each with the file it is about. Empty for a program that is
+// fine.
+pub fn check(path: String, source: String) -> [Problem] {
+    // Per problem: severity, code, message, file, line, column, end column, suggestion
+    let parts = diagnose(path, source);
+    let out: [Problem] = [];
+    let i = 0;
+
+    while i + 7 < parts.len() {
+        out.push(Problem {
+            severity: severityOf(parts[i]),
+            code: parts[i + 1],
+            message: parts[i + 2],
+            at: Place {
+                file: parts[i + 3],
+                line: number(parts[i + 4]),
+                column: number(parts[i + 5]),
+            },
+            endColumn: number(parts[i + 6]),
+            suggestion: parts[i + 7],
+        });
+
+        i += 8;
+    }
+
+    return out;
+}
+
+fn severityOf(name: String) -> Severity {
+    return match name {
+        case "error": Severity.Error;
+        case "warning": Severity.Warning;
+        default: Severity.Info;
+    };
+}
+
+// What a declaration, or a suggestion, is.
+pub enum SymbolKind {
+    Function,
+    Method,
+    Struct,
+    Field,
+    Enum,
+    Variant,
+    Trait,
+    Constant,
+    Variable,
+    Module,
+    Keyword,
+}
+
+fn kindOf(name: String) -> SymbolKind {
+    return match name {
+        case "function": SymbolKind.Function;
+        case "method": SymbolKind.Method;
+        case "struct": SymbolKind.Struct;
+        case "field": SymbolKind.Field;
+        case "enum": SymbolKind.Enum;
+        case "variant": SymbolKind.Variant;
+        case "trait": SymbolKind.Trait;
+        case "constant": SymbolKind.Constant;
+        case "module": SymbolKind.Module;
+        case "keyword": SymbolKind.Keyword;
+        default: SymbolKind.Variable;
+    };
+}
+
+// Something a file declares.
+pub struct Symbol {
+    kind: SymbolKind;
+    name: String;
+    detail: String;     // its signature or its type: "fn area(shape: Shape) -> Float"
+    container: String;  // for a field, a method or a variant, what it is part of; else ""
+    line: Int;
+    column: Int;        // where its name starts
+}
+
+// What a file declares, in the order it does: functions, constants,
+// structs with their fields, enums with their variants, traits and
+// methods. Empty if the file cannot be read as a program.
+pub fn symbols(path: String, source: String) -> [Symbol] {
+    // Per symbol: kind, name, detail, container, line, column
+    let parts = outline(path, source);
+    let out: [Symbol] = [];
+    let i = 0;
+
+    while i + 5 < parts.len() {
+        out.push(Symbol {
+            kind: kindOf(parts[i]),
+            name: parts[i + 1],
+            detail: parts[i + 2],
+            container: parts[i + 3],
+            line: number(parts[i + 4]),
+            column: number(parts[i + 5]),
+        });
+
+        i += 6;
+    }
+
+    return out;
+}
+
+// What is known of a name used in a program.
+pub struct Description {
+    signature: String;  // how it is declared: "fn double(n: Int) -> Int", "let total: Int"
+    doc: String;        // the comment above its declaration, or ""
+    declared: Place?;   // where; null for a builtin
+    startColumn: Int;   // the extent of the name asked about, on its line
+    endColumn: Int;
+}
+
+// What the name at a line and column is: a variable, a function, a field,
+// a method, a type. Null if there is no name there, or the program has
+// errors that keep it from being understood.
+pub fn describe(path: String, source: String, line: Int, column: Int) -> Description? {
+    // signature, doc, file, line, column, start column, end column
+    let parts = describeAt(path, source, line, column);
+
+    if parts.len() < 7 {
+        return null;
+    }
+
+    let declared: Place? = null;
+
+    if parts[2] != "" {
+        declared = Place { file: parts[2], line: number(parts[3]), column: number(parts[4]) };
+    }
+
+    return Description {
+        signature: parts[0],
+        doc: parts[1],
+        declared: declared,
+        startColumn: number(parts[5]),
+        endColumn: number(parts[6]),
+    };
+}
+
+// Something that could be written at a place.
+pub struct Suggestion {
+    label: String;  // what would be written
+    kind: SymbolKind;
+    detail: String;
+}
+
+// What could be written at a line and column. After `name.` it is what
+// that name has: the public names of a module, the fields and methods of
+// a value, the variants of an enum. Elsewhere it is everything in reach:
+// variables, declarations, imports, builtins and keywords. The line being
+// typed need not make sense yet.
+pub fn complete(path: String, source: String, line: Int, column: Int) -> [Suggestion] {
+    // Per suggestion: label, kind, detail
+    let parts = completeAt(path, source, line, column);
+    let out: [Suggestion] = [];
+    let i = 0;
+
+    while i + 2 < parts.len() {
+        out.push(Suggestion { label: parts[i], kind: kindOf(parts[i + 1]), detail: parts[i + 2] });
+        i += 3;
+    }
+
+    return out;
+}
+
+// Says a file is being edited, and what it holds for now: a program that
+// imports it gets this text, not what is on disk. `close` ends it.
+pub fn open(path: String, text: String) {
+    overlay(path, text);
+}
+
+pub fn close(path: String) {
+    forget(path);
+}
+
+fn number(text: String) -> Int {
+    return text.parseInt() ?? 0;
+}
+
+// Provided by the runtime, which holds the compiler.
+extern fn diagnose(path: String, source: String) -> [String];
+extern fn outline(path: String, source: String) -> [String];
+extern fn describeAt(path: String, source: String, line: Int, column: Int) -> [String];
+extern fn completeAt(path: String, source: String, line: Int, column: Int) -> [String];
+extern fn overlay(path: String, text: String);
+extern fn forget(path: String);

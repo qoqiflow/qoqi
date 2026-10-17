@@ -1,0 +1,4 @@
+fn main() -> Int {
+    let count = 1;
+    return cuont + 1;
+}

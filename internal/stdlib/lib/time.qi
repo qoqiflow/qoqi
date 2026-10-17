@@ -1,0 +1,693 @@
+// The clock and the calendar.
+//
+// A moment is a number: milliseconds since the start of 1 January 1970,
+// which is what `now` gives. A length of time is a Duration, written as
+// what it is: 2.days(), 90.seconds(), 1.5.hours(). A Date is a moment
+// told the way people do, in some time zone.
+//
+//     wait time.after(2.days());
+//     let renewal = 30.days().fromNow();
+//
+//     let today = time.today();
+//     println(today.format("dddd D MMMM YYYY"));       // Tuesday 13 October 2026
+//     let due = today.plusDays(30);
+//     println(due.iso(), today.daysUntil(due));
+
+import std.strings;
+import std.math;
+import std.ops.{Ordered, Equal, Show, Add, Subtract};
+import std.task.{Waitable};
+
+// The time now, in milliseconds since 1 January 1970.
+pub extern fn now() -> Int;
+
+// Microseconds since the program started. For measuring how long
+// something takes: unlike now, it never jumps when the clock is set.
+pub extern fn ticks() -> Int;
+
+// That long from now, as something to wait for: `wait time.after(2.days())`
+// lets the other tasks go on meanwhile.
+pub fn after(length: Duration) -> After {
+    return After { at: now() + length.inMilliseconds().max(0) };
+}
+
+// A moment, as something to wait for: `wait time.until(renewal)`. One that
+// has passed is ready at once.
+pub fn until(moment: Int) -> After {
+    return After { at: moment };
+}
+
+// How long ago a moment was.
+pub fn since(moment: Int) -> Duration {
+    return Duration { ms: now() - moment };
+}
+
+// A moment to wait for, in milliseconds since 1970: one every process
+// agrees on, so that a program frozen while it waits for it is woken when
+// it comes, wherever it is taken up.
+pub struct After {
+    priv at: Int;
+}
+
+impl Waitable<Void> for After {
+    fn ready() -> Bool {
+        return now() >= self.at;
+    }
+
+    fn peek() {}
+
+    fn take() {}
+
+    fn watch() {}
+
+    fn until() -> Int {
+        return self.at;
+    }
+}
+
+// The time now, in whole seconds since 1 January 1970.
+pub fn seconds() -> Int {
+    return now() / 1000;
+}
+
+// --- Lengths of time ---
+
+// The lengths of the units, in milliseconds.
+const msSecond = 1000;
+const msMinute = 60000;
+const msHour = 3600000;
+const msDay = 86400000;
+const msWeek = 604800000;
+
+// A length of time, to the millisecond: 2.days(), 90.seconds(),
+// 1.5.hours(). Added and compared as lengths; a number alone is not one,
+// so that seconds are never taken for milliseconds.
+pub struct Duration {
+    priv ms: Int;
+}
+
+impl Int {
+    pub fn milliseconds() -> Duration {
+        return Duration { ms: self };
+    }
+
+    pub fn seconds() -> Duration {
+        return Duration { ms: self * msSecond };
+    }
+
+    pub fn minutes() -> Duration {
+        return Duration { ms: self * msMinute };
+    }
+
+    pub fn hours() -> Duration {
+        return Duration { ms: self * msHour };
+    }
+
+    pub fn days() -> Duration {
+        return Duration { ms: self * msDay };
+    }
+
+    pub fn weeks() -> Duration {
+        return Duration { ms: self * msWeek };
+    }
+}
+
+// Parts of a unit, to the nearest millisecond: 1.5.hours(), 0.25.seconds().
+impl Float {
+    pub fn seconds() -> Duration {
+        return Duration { ms: (self * 1000.0).round() };
+    }
+
+    pub fn minutes() -> Duration {
+        return Duration { ms: (self * 60000.0).round() };
+    }
+
+    pub fn hours() -> Duration {
+        return Duration { ms: (self * 3600000.0).round() };
+    }
+
+    pub fn days() -> Duration {
+        return Duration { ms: (self * 86400000.0).round() };
+    }
+}
+
+impl Duration {
+    // How long it is in a unit, the rest dropped: 90.minutes().inHours()
+    // is 1.
+    pub fn inMilliseconds() -> Int {
+        return self.ms;
+    }
+
+    pub fn inSeconds() -> Int {
+        return self.ms / msSecond;
+    }
+
+    pub fn inMinutes() -> Int {
+        return self.ms / msMinute;
+    }
+
+    pub fn inHours() -> Int {
+        return self.ms / msHour;
+    }
+
+    pub fn inDays() -> Int {
+        return self.ms / msDay;
+    }
+
+    // The moment that long from now: 30.days().fromNow().
+    pub fn fromNow() -> Int {
+        return now() + self.ms;
+    }
+
+    // The moment that long after another: 3.days().after(started).
+    pub fn after(moment: Int) -> Int {
+        return moment + self.ms;
+    }
+
+    // The moment that long before another: 3.days().before(end).
+    pub fn before(moment: Int) -> Int {
+        return moment - self.ms;
+    }
+
+    // So many of it: 30.days().times(3).
+    pub fn times(count: Int) -> Duration {
+        return Duration { ms: self.ms * count };
+    }
+
+    pub fn isZero() -> Bool {
+        return self.ms == 0;
+    }
+}
+
+impl Add for Duration {
+    fn plus(other: Duration) -> Duration {
+        return Duration { ms: self.ms + other.ms };
+    }
+}
+
+impl Subtract for Duration {
+    fn minus(other: Duration) -> Duration {
+        return Duration { ms: self.ms - other.ms };
+    }
+}
+
+impl Equal for Duration {
+    fn equals(other: Duration) -> Bool {
+        return self.ms == other.ms;
+    }
+}
+
+impl Ordered for Duration {
+    fn compare(other: Duration) -> Int {
+        return self.ms - other.ms;
+    }
+}
+
+// As people say it: 2 days, 1 h 30 min, 250 ms.
+impl Show for Duration {
+    fn show() -> String {
+        if self.ms == 0 {
+            return "0 s";
+        }
+
+        let left = self.ms.abs();
+        let parts: [String] = [];
+
+        for (size, unit) in [
+            (msDay, "day"),
+            (msHour, "h"),
+            (msMinute, "min"),
+            (msSecond, "s"),
+            (1, "ms"),
+        ] {
+            let count = left / size;
+            left = left % size;
+
+            if count == 1 && unit == "day" {
+                parts.push("1 day");
+            } else if count > 0 {
+                parts.push(if unit == "day" { "${count} days" } else { "${count} ${unit}" });
+            }
+        }
+
+        let sign = if self.ms < 0 { "-" } else { "" };
+        return sign + parts.join(" ");
+    }
+}
+
+// A stopwatch: start it, then ask how long ago that was.
+pub struct Stopwatch {
+    priv started: Int;
+}
+
+pub fn stopwatch() -> Stopwatch {
+    return Stopwatch { started: ticks() };
+}
+
+impl Stopwatch {
+    pub fn microseconds() -> Int {
+        return ticks() - self.started;
+    }
+
+    pub fn milliseconds() -> Int {
+        return self.microseconds() / 1000;
+    }
+
+    pub fn restart() {
+        self.started = ticks();
+    }
+}
+
+// --- The calendar ---
+
+pub enum Weekday { Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday }
+
+impl Weekday {
+    pub fn name() -> String {
+        return match self {
+            case Weekday.Monday: "Monday";
+            case Weekday.Tuesday: "Tuesday";
+            case Weekday.Wednesday: "Wednesday";
+            case Weekday.Thursday: "Thursday";
+            case Weekday.Friday: "Friday";
+            case Weekday.Saturday: "Saturday";
+            case Weekday.Sunday: "Sunday";
+        };
+    }
+
+    pub fn isWeekend() -> Bool {
+        return self == Weekday.Saturday || self == Weekday.Sunday;
+    }
+}
+
+const monthNames = "January February March April May June July August September October November December";
+
+// The name of a month from its number, 1 for January.
+pub fn monthName(month: Int) -> String {
+    let names = monthNames.split(" ");
+
+    if month < 1 || month > 12 {
+        panic("there is no month ${month}");
+    }
+
+    return names[month - 1];
+}
+
+// How many days a month has: 29 for the February of a leap year.
+pub fn daysIn(year: Int, month: Int) -> Int {
+    // Day 0 of the next month is the last of this one
+    return utc(moment([year, month + 1, 0, 0, 0, 0, 0], false)).day;
+}
+
+pub fn isLeapYear(year: Int) -> Bool {
+    return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+}
+
+// A moment, told as a date and a time of day in some time zone.
+//
+// Dates compare as the moments they are, whatever zone each is told in:
+// <, ==, ops.sorted(dates) and ops.largest(dates) work. One prints as
+// isoTime() writes it.
+pub struct Date {
+    year: Int;
+    month: Int;                // 1 for January
+    day: Int;                  // of the month, from 1
+    hour: Int;
+    minute: Int;
+    second: Int;
+    millisecond: Int;
+    weekday: Weekday;
+    dayOfYear: Int;            // from 1
+    offset: Int;               // minutes this time zone is ahead of UTC
+    priv fixed: Bool = false;  // told at that offset whatever the machine's zone does: atOffset
+}
+
+// A moment as told in UTC, the time zone without daylight saving that
+// the others are counted from.
+pub fn utc(moment: Int) -> Date {
+    return told(fields(moment, false));
+}
+
+// A moment as told where the program runs.
+pub fn local(moment: Int) -> Date {
+    return told(fields(moment, true));
+}
+
+// Now, as told where the program runs.
+pub fn today() -> Date {
+    return local(now());
+}
+
+// The start of a day, in UTC. Numbers out of range carry over: the 32nd
+// of January is the 1st of February.
+pub fn date(year: Int, month: Int, day: Int) -> Date {
+    return utc(moment([year, month, day, 0, 0, 0, 0], false));
+}
+
+// A day and a time of day, in UTC.
+pub fn dateTime(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Date {
+    return utc(moment([year, month, day, hour, minute, second, 0], false));
+}
+
+// The date a text names, or null. It reads "2026-10-13", "2026-10-13 14:30",
+// "2026-10-13T14:30:00Z", "2026-10-13T14:30:00.250+02:00", an offset
+// written +0200 as well, and the dates of e-mail and of web server logs. A
+// text that names no time zone is taken as UTC, and the date that comes
+// out is told in UTC whatever zone the text names: atOffset tells it at
+// another.
+pub fn parse(text: String) -> Date? {
+    return utc(read(text)?);
+}
+
+fn told(f: [Int]) -> Date {
+    let days = [
+        Weekday.Sunday,
+        Weekday.Monday,
+        Weekday.Tuesday,
+        Weekday.Wednesday,
+        Weekday.Thursday,
+        Weekday.Friday,
+        Weekday.Saturday,
+    ];
+
+    return Date {
+        year: f[0],
+        month: f[1],
+        day: f[2],
+        hour: f[3],
+        minute: f[4],
+        second: f[5],
+        millisecond: f[6],
+        weekday: days[f[7]],
+        dayOfYear: f[8],
+        offset: f[9],
+    };
+}
+
+impl Date {
+    // The moment, in milliseconds since 1 January 1970.
+    pub fn timestamp() -> Int {
+        let asUtc = moment(
+            [
+                self.year,
+                self.month,
+                self.day,
+                self.hour,
+                self.minute,
+                self.second,
+                self.millisecond,
+            ],
+            false,
+        );
+
+        return asUtc - self.offset * msMinute;
+    }
+
+    // The date that long later, in the same time zone: plus(90.minutes()).
+    // A negative length goes back.
+    pub fn plus(length: Duration) -> Date {
+        return self.at(self.timestamp() + length.inMilliseconds());
+    }
+
+    // The same time of day that many days later. Unlike plus(n.days())
+    // it stays at that time across a change to or from summer time.
+    pub fn plusDays(days: Int) -> Date {
+        return self.moved(0, days);
+    }
+
+    // The same day of the month that many months later. A day the month
+    // does not have carries over: 31 January plus one month is in March.
+    pub fn plusMonths(months: Int) -> Date {
+        return self.moved(months, 0);
+    }
+
+    // Midnight of the same day.
+    pub fn startOfDay() -> Date {
+        let midnight = moment([self.year, self.month, self.day, 0, 0, 0, 0], false);
+        return self.at(midnight - self.offset * msMinute);
+    }
+
+    // Whole days from this date to another, counting days of the calendar
+    // and not lengths of 24 hours: from Monday 23:00 to Tuesday 01:00 is 1.
+    pub fn daysUntil(other: Date) -> Int {
+        let from = moment([self.year, self.month, self.day, 0, 0, 0, 0], false);
+        let to = moment([other.year, other.month, other.day, 0, 0, 0, 0], false);
+        return (to - from) / msDay;
+    }
+
+    // The same moment, told at a fixed offset from UTC: that many minutes
+    // ahead of it, or behind if negative. atOffset(120) is two hours
+    // ahead, +02:00, and stays so across the dates summer time begins or
+    // ends, which local() follows.
+    pub fn atOffset(minutes: Int) -> Date {
+        if minutes.abs() >= 24 * 60 {
+            panic("time.Date.atOffset: an offset is less than a day, got ${minutes} minutes");
+        }
+
+        let out = utc(self.timestamp() + minutes * msMinute);
+        out.offset = minutes;
+        out.fixed = true;
+        return out;
+    }
+
+    // Whether both name the same day of the calendar.
+    pub fn isSameDay(other: Date) -> Bool {
+        return self.year == other.year && self.dayOfYear == other.dayOfYear;
+    }
+
+    // The date alone: 2026-10-13.
+    pub fn iso() -> String {
+        return self.format("YYYY-MM-DD");
+    }
+
+    // The date, the time and the time zone: 2026-10-13T14:30:00Z, or
+    // ...+02:00 two hours ahead of UTC, with the milliseconds when there
+    // are some: 2026-10-13T14:30:00.250Z.
+    pub fn isoTime() -> String {
+        if self.millisecond != 0 {
+            return self.format("YYYY-MM-DDTHH:mm:ss.SSSZ");
+        }
+
+        return self.format("YYYY-MM-DDTHH:mm:ssZ");
+    }
+
+    // The date written after a pattern. In it:
+    //
+    //     YYYY  2026        YY  26
+    //     MMMM  October     MMM Oct     MM  10      M  10
+    //     dddd  Tuesday     ddd Tue     DD  03      D  3
+    //     HH    09          H   9       hh  09 (of 12)   h  9     A  AM
+    //     mm    05          ss  07      SSS 042
+    //     Z     +02:00, or Z for UTC
+    //
+    // Other characters are kept; letters to be kept go in brackets:
+    // format("[on] D MMMM").
+    pub fn format(pattern: String) -> String {
+        let hour12 = (self.hour + 11) % 12 + 1;
+        let out: [String] = [];
+        let i = 0;
+
+        while i < pattern.len() {
+            // The longest run of the same letter
+            let letter = pattern[i];
+            let run = 1;
+
+            while i + run < pattern.len() && pattern[i + run] == letter {
+                run++;
+            }
+
+            if letter == "[" {
+                let close = pattern.from(i).indexOf("]") ?? pattern.len() - i;
+
+                out.push(pattern.substring(i + 1, i + close));
+                i += close + 1;
+                continue;
+            }
+
+            let used = run;
+
+            match letter {
+                case "Y": {
+                    if run >= 4 {
+                        out.push(pad(self.year, 4));
+                        used = 4;
+                    } else if run >= 2 {
+                        out.push(pad(self.year % 100, 2));
+                        used = 2;
+                    } else {
+                        out.push(letter);
+                    }
+                }
+
+                case "M": {
+                    if run >= 4 {
+                        out.push(monthName(self.month));
+                        used = 4;
+                    } else if run == 3 {
+                        out.push(monthName(self.month).first(3));
+                    } else {
+                        out.push(pad(self.month, run));
+                    }
+                }
+
+                case "d": {
+                    if run >= 4 {
+                        out.push(self.weekday.name());
+                        used = 4;
+                    } else if run == 3 {
+                        out.push(self.weekday.name().first(3));
+                    } else {
+                        out.push(letter.repeat(run));
+                    }
+                }
+
+                case "D": {
+                    used = run.min(2);
+                    out.push(pad(self.day, used));
+                }
+
+                case "H": {
+                    used = run.min(2);
+                    out.push(pad(self.hour, used));
+                }
+
+                case "h": {
+                    used = run.min(2);
+                    out.push(pad(hour12, used));
+                }
+
+                case "m": {
+                    used = run.min(2);
+                    out.push(pad(self.minute, used));
+                }
+
+                case "s": {
+                    used = run.min(2);
+                    out.push(pad(self.second, used));
+                }
+
+                case "S": {
+                    if run >= 3 {
+                        out.push(pad(self.millisecond, 3));
+                        used = 3;
+                    } else {
+                        out.push(letter.repeat(run));
+                    }
+                }
+
+                case "A": {
+                    used = 1;
+
+                    if self.hour < 12 {
+                        out.push("AM");
+                    } else {
+                        out.push("PM");
+                    }
+                }
+
+                case "Z": {
+                    used = 1;
+                    out.push(self.zone());
+                }
+
+                default: {
+                    out.push(letter.repeat(run));
+                }
+            }
+
+            i += used;
+        }
+
+        return out.join("");
+    }
+
+    // The time zone as an offset: "Z" for UTC, "+02:00", "-05:30".
+    pub fn zone() -> String {
+        if self.offset == 0 {
+            return "Z";
+        }
+
+        let sign = "+";
+
+        if self.offset < 0 {
+            sign = "-";
+        }
+
+        let minutes = self.offset.abs();
+        return sign + pad(minutes / 60, 2) + ":" + pad(minutes % 60, 2);
+    }
+
+    // A moment told in the time zone of this date.
+    fn at(moment: Int) -> Date {
+        if self.followsTheMachine() {
+            return local(moment);
+        }
+
+        return self.shifted(moment + self.offset * msMinute);
+    }
+
+    fn moved(months: Int, days: Int) -> Date {
+        let f = [
+            self.year,
+            self.month + months,
+            self.day + days,
+            self.hour,
+            self.minute,
+            self.second,
+            self.millisecond,
+        ];
+
+        if self.followsTheMachine() {
+            return local(moment(f, true));
+        }
+
+        return self.shifted(moment(f, false));
+    }
+
+    // Whether this date is told in the time zone of the machine, whose
+    // offset changes with the seasons, and not at a fixed offset.
+    fn followsTheMachine() -> Bool {
+        return !self.fixed && self.offset != 0 && local(self.timestamp()).offset == self.offset;
+    }
+
+    // The date whose clock reads what UTC reads at `moment`, at the
+    // offset of this one.
+    fn shifted(moment: Int) -> Date {
+        let out = utc(moment);
+        out.offset = self.offset;
+        out.fixed = self.fixed;
+        return out;
+    }
+}
+
+// Which of two dates comes first: the earlier moment. isBefore and isAfter
+// come with it.
+impl Ordered for Date {
+    fn compare(other: Date) -> Int {
+        return (self.timestamp() - other.timestamp()).sign();
+    }
+}
+
+// Two dates are equal when they are the same moment, told in the same
+// zone or not.
+impl Equal for Date {
+    fn equals(other: Date) -> Bool {
+        return self.timestamp() == other.timestamp();
+    }
+}
+
+// A date prints as isoTime() writes it: 2026-10-13T14:30:00Z.
+impl Show for Date {
+    fn show() -> String {
+        return self.isoTime();
+    }
+}
+
+fn pad(n: Int, width: Int) -> String {
+    let digits = toString(n);
+    return "0".repeat(0.max(width - digits.len())) + digits;
+}
+
+extern fn fields(moment: Int, isLocal: Bool) -> [Int];
+extern fn moment(fields: [Int], isLocal: Bool) -> Int;
+extern fn read(text: String) -> Int?;

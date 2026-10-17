@@ -1,0 +1,7 @@
+[ERROR] E8003: function 'atLeastOne' of module 'game.physics.body' is private
+modules_private.qi:4:27
+Declare it with 'pub' in test/e2e/cases/game/physics/body.qi to use it from other modules
+modules_private.qi:8:13
+let n = body.atLeastOne(0);
+[ERROR] E8002: module 'game.physics.body' has no 'nwe'
+Did you mean 'new'?

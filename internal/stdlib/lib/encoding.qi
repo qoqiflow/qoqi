@@ -1,0 +1,36 @@
+// Text written another way, to pass through places that only take some
+// characters. Reading one back gives null when the text is not in that
+// encoding.
+
+// Base64: letters, digits, + and /. For data in text files and e-mail.
+// Read back with its padding of = or without.
+pub extern fn toBase64(text: String) -> String;
+pub extern fn fromBase64(encoded: String) -> String?;
+
+// The variant that is safe in an address: - and _ and no padding. Read
+// back with padding or without.
+pub extern fn toBase64Url(text: String) -> String;
+pub extern fn fromBase64Url(encoded: String) -> String?;
+
+// Two hexadecimal digits per byte: "hi" is "6869".
+pub extern fn toHex(text: String) -> String;
+pub extern fn fromHex(encoded: String) -> String?;
+
+// As a value in the query of an address: "a b&c" is "a+b%26c".
+pub extern fn toUrl(text: String) -> String;
+pub extern fn fromUrl(encoded: String) -> String?;
+
+// Safe to put in a page: <, >, &, ' and " written as &lt; and the like,
+// so that what a visitor typed shows as text and never runs.
+pub extern fn toHtml(text: String) -> String;
+
+// The other way: &lt;b&gt; is <b>, &eacute; is é.
+pub extern fn fromHtml(encoded: String) -> String;
+
+// The bytes of a text in UTF-8: one for a letter of English, more for
+// the others.
+pub extern fn bytes(text: String) -> [Int];
+
+// The text made of those bytes. Bytes that are not UTF-8 stay as they
+// are, as in a text fromHex gives: bytes(fromBytes([255])) is [255].
+pub extern fn fromBytes(bytes: [Int]) -> String;

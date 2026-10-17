@@ -1,0 +1,178 @@
+// CSV: tables written as text, one row per line, values separated by
+// commas, quoted when they hold a comma, a quote or a line end. A
+// byte-order mark in front of the text, which some programs write, is
+// passed over.
+//
+//     let people = csv.table("name,age\nada,36\ngrace,45\n").expect("a table");
+//     people.column("name")                   // ["ada", "grace"]
+//     people.records()[0].get("age")          // "36"
+
+import std.result.{Result};
+import std.dict;
+import std.dict.{Dict};
+import std.strings;
+import std.arrays;
+import std.ops.{Show};
+
+// Why a text is not CSV, and where. Line 0 means the whole text.
+pub struct ParseError {
+    message: String;
+    line: Int;
+    column: Int;
+}
+
+impl ParseError {
+    pub fn describe() -> String {
+        if self.line == 0 {
+            return self.message;
+        }
+
+        return "line ${self.line}, column ${self.column}: ${self.message}";
+    }
+}
+
+// Printed, and put in a text, as its sentence.
+impl Show for ParseError {
+    fn show() -> String {
+        return self.describe();
+    }
+}
+
+// The rows of a text, each an array of its values.
+pub fn parse(text: String) -> Result<[[String]], ParseError> {
+    return parseWith(text, ",");
+}
+
+// The same with another separator: ";" or "\t".
+pub fn parseWith(text: String, separator: String) -> Result<[[String]], ParseError> {
+    let found = rows(text, separator);
+
+    if found == null {
+        let parts = problem();
+        let where = parts[0].split(":");
+
+        if where.len() < 2 {
+            return Err(ParseError { message: parts[1], line: 0, column: 0 });
+        }
+
+        return Err(ParseError {
+            message: parts[1],
+            line: where[0].parseInt() ?? 0,
+            column: where[1].parseInt() ?? 0,
+        });
+    }
+
+    return Ok(found);
+}
+
+// Rows as text, quoting the values that need it.
+pub fn write(table: [[String]]) -> String {
+    return text(table, ",");
+}
+
+pub fn writeWith(table: [[String]], separator: String) -> String {
+    return text(table, separator);
+}
+
+// A table whose first row names the columns.
+pub struct Table {
+    header: [String];
+    rows: [[String]];
+}
+
+// Reads a text as a table. Every row must have a value for each column.
+pub fn table(text: String) -> Result<Table, ParseError> {
+    let all = parse(text)?;
+    return asTable(all, text);
+}
+
+fn asTable(all: [[String]], text: String) -> Result<Table, ParseError> {
+    if all.len() == 0 {
+        return Err(ParseError { message: "there is no header row", line: 0, column: 0 });
+    }
+
+    let header = all[0];
+
+    for i, row in all {
+        if row.len() != header.len() {
+            // The line it starts on, which is not i + 1 after a value
+            // over several lines or a blank line
+            return Err(ParseError {
+                message: "expected ${header.len()} values, as in the header, found ${row.len()}",
+                line: starts(text, ",").at(i) ?? i + 1,
+                column: 1,
+            });
+        }
+    }
+
+    return Ok(Table { header: header, rows: all.slice(1, all.len()) });
+}
+
+impl Table {
+    pub fn len() -> Int {
+        return self.rows.len();
+    }
+
+    // The values of a column, or null if there is none of that name.
+    pub fn column(name: String) -> [String]? {
+        let at = self.header.indexOf(name)?;
+        let out: [String] = [];
+
+        for row in self.rows {
+            out.push(row[at]);
+        }
+
+        return out;
+    }
+
+    // The value of a column in a row, or null.
+    pub fn cell(row: Int, name: String) -> String? {
+        let at = self.header.indexOf(name);
+
+        if at == null || row < 0 || row >= self.rows.len() {
+            return null;
+        }
+
+        return self.rows[row][at];
+    }
+
+    // Each row as a dictionary from the name of a column to its value.
+    pub fn records() -> [Dict<String>] {
+        let out: [Dict<String>] = [];
+
+        for row in self.rows {
+            let record = dict.empty<String>();
+
+            for i, name in self.header {
+                record.set(name, row[i]);
+            }
+
+            out.push(record);
+        }
+
+        return out;
+    }
+
+    // The rows a function accepts, as a table with the same columns.
+    pub fn where(wanted: fn(Dict<String>) -> Bool) -> Table {
+        let kept: [[String]] = [];
+
+        for i, record in self.records() {
+            if wanted(record) {
+                kept.push(self.rows[i]);
+            }
+        }
+
+        return Table { header: self.header, rows: kept };
+    }
+
+    // The table as CSV text, header first.
+    pub fn write() -> String {
+        return text([self.header].concat(self.rows), ",");
+    }
+}
+
+extern fn rows(text: String, separator: String) -> [[String]]?;
+extern fn text(table: [[String]], separator: String) -> String;
+extern fn starts(text: String, separator: String) -> [Int];
+extern fn problem() -> [String];

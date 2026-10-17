@@ -1,0 +1,270 @@
+// Tests: saying what a program should do, and being told when it does not.
+//
+//     fn main() -> Int {
+//         let checks = test.suite("prices");
+//         checks.test("a total adds up", fn() {
+//             test.equal(total([1, 2, 3]), 6);
+//         });
+//         checks.test("an empty basket costs nothing", fn() {
+//             test.equal(total([]), 0);
+//         });
+//         return checks.run().exitCode();
+//     }
+//
+// A check that does not hold stops its test, by a panic; the suite catches
+// it, goes on with the next test and reports at the end. So does any
+// other failure in a test: an index out of bounds is a failed test, not
+// the end of the run.
+
+import std.result;
+import std.result.{Failure, Kind, Location};
+import std.strings;
+import std.arrays;
+import std.time;
+
+struct Case {
+    name: String;
+    body: fn() -> Void;
+}
+
+// Tests that belong together.
+pub struct Suite {
+    name: String;
+    cases: [Case];
+}
+
+pub fn suite(name: String) -> Suite {
+    return Suite { name: name, cases: [] };
+}
+
+// What became of one test.
+pub enum Outcome {
+    Passed,
+    Failed(Failure),
+}
+
+pub struct TestResult {
+    name: String;
+    outcome: Outcome;
+    microseconds: Int;
+}
+
+impl TestResult {
+    pub fn passed() -> Bool {
+        return self.outcome == Outcome.Passed;
+    }
+}
+
+// What became of a suite.
+pub struct Report {
+    suite: String;
+    results: [TestResult];
+}
+
+impl Suite {
+    // Adds a test. Returns the suite, to add the next one in the same
+    // breath.
+    pub fn test(name: String, body: fn() -> Void) -> Suite {
+        self.cases.push(Case { name: name, body: body });
+        return self;
+    }
+
+    // Runs every test, in the order they were added, without printing.
+    pub fn check() -> Report {
+        let results: [TestResult] = [];
+
+        for entry in self.cases {
+            let watch = time.stopwatch();
+            let failure = result.guard(entry.body);
+            let outcome = Outcome.Passed;
+
+            if failure != null {
+                outcome = Outcome.Failed(failure);
+            }
+
+            results.push(TestResult {
+                name: entry.name,
+                outcome: outcome,
+                microseconds: watch.microseconds(),
+            });
+        }
+
+        return Report { suite: self.name, results: results };
+    }
+
+    // Runs every test and prints what became of each.
+    pub fn run() -> Report {
+        let report = self.check();
+        report.print();
+        return report;
+    }
+}
+
+impl Report {
+    pub fn passed() -> Int {
+        return self.results.count(r -> r.passed());
+    }
+
+    pub fn failed() -> Int {
+        return self.results.len() - self.passed();
+    }
+
+    pub fn ok() -> Bool {
+        return self.failed() == 0;
+    }
+
+    // What main returns for the run to count as failed when a test did.
+    pub fn exitCode() -> Int {
+        if self.ok() {
+            return 0;
+        }
+
+        return 1;
+    }
+
+    // The report as lines of text: one per test, the reason and the place
+    // under a test that failed, and a count.
+    pub fn lines() -> [String] {
+        let out = [self.suite];
+
+        for r in self.results {
+            match r.outcome {
+                case Outcome.Passed: {
+                    out.push("  ok    ${r.name}");
+                }
+
+                case Outcome.Failed(failure): {
+                    out.push("  FAIL  ${r.name}");
+                    out.push("        ${failure.message}");
+                    let place = whereItFailed(failure);
+
+                    if place != null {
+                        out.push("        at ${place.file}:${place.line}");
+                    }
+                }
+            }
+        }
+
+        let count = "${self.passed()} passed";
+
+        if !self.ok() {
+            count = "${count}, ${self.failed()} failed";
+        }
+
+        out.push(count);
+        return out;
+    }
+
+    pub fn print() {
+        println(self.lines().join("\n"));
+    }
+}
+
+// The place to show for a failed test: where the test itself was when it
+// went wrong, not the line of this file that noticed.
+fn whereItFailed(failure: Failure) -> Location? {
+    let outside = fn(place: Location) -> Bool {
+        return !place.function.startsWith("std.");
+    };
+
+    return failure.stack.find(outside);
+}
+
+// --- Checks ---
+
+// Stops the test: for a check of your own.
+pub fn fail(message: String) {
+    panic(message);
+}
+
+// Stops the test unless both are equal, as == has it: by what they hold,
+// arrays, structs and values of enums too, or as a type that implements
+// Equal says. For arrays, `same` says which item differs.
+pub fn equal<T>(got: T, want: T) {
+    if got != want {
+        panic("expected ${want}, got ${got}");
+    }
+}
+
+pub fn notEqual<T>(got: T, unwanted: T) {
+    if got == unwanted {
+        panic("expected anything but ${unwanted}");
+    }
+}
+
+// Stops the test unless both arrays hold equal items in the same order.
+pub fn same<T>(got: [T], want: [T]) {
+    if got.len() != want.len() {
+        panic("expected ${want.len()} items, got ${got.len()}: ${got}");
+    }
+
+    for i, item in want {
+        if got[i] != item {
+            panic("expected ${item} at ${i}, got ${got[i]}: ${got}");
+        }
+    }
+}
+
+pub fn isTrue(condition: Bool, what: String) {
+    if !condition {
+        panic("expected ${what}");
+    }
+}
+
+pub fn isFalse(condition: Bool, what: String) {
+    if condition {
+        panic("did not expect ${what}");
+    }
+}
+
+// Stops the test unless two numbers are within `tolerance` of each other.
+// Numbers with a point are rarely exactly equal: 0.1 + 0.2 is not 0.3.
+pub fn near(got: Float, want: Float, tolerance: Float) {
+    let gap = got - want;
+
+    if gap < 0.0 {
+        gap = -gap;
+    }
+
+    if gap > tolerance {
+        panic("expected ${want} give or take ${tolerance}, got ${got}");
+    }
+}
+
+// Stops the test if there is no value. Gives the value.
+pub fn present<T>(value: T?, what: String) -> T {
+    if value == null {
+        panic("expected ${what}, got nothing");
+    }
+
+    return value;
+}
+
+pub fn absent<T>(value: T?, what: String) {
+    if value != null {
+        panic("expected no ${what}, got ${value}");
+    }
+}
+
+pub fn contains(text: String, part: String) {
+    if !text.contains(part) {
+        panic("expected '${part}' in '${text}'");
+    }
+}
+
+// Stops the test unless the function stops with a failure of that kind:
+// test.fails(Kind.Bounds, fn() { let x = items[9]; }). Gives the failure,
+// to look at its message.
+pub fn fails(kind: Kind, action: fn() -> Void) -> Failure {
+    let failure = result.guard(action);
+
+    if failure == null {
+        panic("expected a failure, and there was none");
+    }
+
+    if failure.kind != kind {
+        panic("expected a failure of kind ${kind}, got ${failure.kind}: ${failure.message}");
+    }
+
+    return failure;
+}

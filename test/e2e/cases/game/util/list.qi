@@ -1,0 +1,39 @@
+pub struct List<T> {
+    items: [T];
+}
+
+pub fn newList<T>() -> List<T> {
+    return List<T> { items: [] };
+}
+
+impl<T> List<T> {
+    pub fn add(value: T) {
+        self.items.push(value);
+    }
+
+    pub fn size() -> Int {
+        return self.items.len();
+    }
+
+    pub fn map<U>(f: fn(T) -> U) -> List<U> {
+        let out = newList<U>();
+
+        for item in self.items {
+            out.add(f(item));
+        }
+
+        return out;
+    }
+
+    pub fn count(wanted: fn(T) -> Bool) -> Int {
+        let n = 0;
+
+        for item in self.items {
+            if wanted(item) {
+                n++;
+            }
+        }
+
+        return n;
+    }
+}

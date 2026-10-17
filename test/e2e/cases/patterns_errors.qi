@@ -1,0 +1,38 @@
+// What the compiler says about patterns of structs, and about names the
+// patterns of a case do not share.
+
+struct Point {
+    x: Int;
+    y: Int;
+}
+
+struct Size {
+    width: Int;
+}
+
+enum Shape {
+    Dot(Point),
+    Line(Point, Point),
+    Blank,
+}
+
+fn main() -> Int {
+    let p = Point { x: 1, y: 2 };
+
+    match p {
+        case Point { z: 0 }: {}
+        case Point { x: "one" }: {}
+        case Size { width }: {}
+        default: {}
+    }
+
+    let s = Dot(p);
+
+    match s {
+        case Dot(a) | Line(a, b): {}
+        case Blank | Line(_, c): {}
+        default: {}
+    }
+
+    return 0;
+}

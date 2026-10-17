@@ -1,0 +1,174 @@
+// A parcel depot: parcels are priced, routed and loaded onto vans.
+// match that gives a value, with conditions and several patterns per
+// case; ranges to loop over and to match against; defer for what has to
+// happen whichever way a block is left.
+
+import std.result.{Result, attempt};
+
+enum Size { Letter, Box(Int, Int, Int), Pallet(Int) }
+
+enum Zone { Local, National, Abroad(String) }
+
+enum Status { Waiting, Loaded(Int), Refused(String) }
+
+struct Parcel {
+    id: Int;
+    grams: Int;
+    size: Size;
+    zone: Zone;
+    status: Status = Status.Waiting;
+}
+
+struct Dock {
+    busy: Bool = false;
+    log: [String] = [];
+}
+
+impl Dock {
+    fn note(text: String) {
+        self.log.push(text);
+    }
+
+    // The dock is given back whichever way the loading ends
+    fn load(parcel: Parcel, van: Int) -> Result<Int, String> {
+        if self.busy {
+            panic("the dock is already in use");
+        }
+
+        self.busy = true;
+
+        defer {
+            self.busy = false;
+        }
+
+        defer self.note("parcel ${parcel.id}: dock released");
+
+        let cost = price(parcel)?;
+
+        if van > 3 {
+            panic("there is no van ${van}");
+        }
+
+        parcel.status = Status.Loaded(van);
+        return Ok(cost);
+    }
+}
+
+fn volume(size: Size) -> Int {
+    return match size {
+        case Size.Letter: 0;
+        case Size.Box(w, h, d): w * h * d;
+        case Size.Pallet(layers): layers * 120 * 80 * 20;
+    };
+}
+
+// Cents, by weight band, then by where it goes
+fn price(parcel: Parcel) -> Result<Int, String> {
+    let base = match parcel.grams {
+        case 0: {
+            return Err("parcel ${parcel.id} weighs nothing");
+        }
+
+        case 1..100: 150;
+        case 100..=2000: 590;
+        case 2001..=30000: 1290;
+
+        default: {
+            return Err("parcel ${parcel.id} is too heavy");
+        }
+    };
+
+    let factor = match parcel.zone {
+        case Zone.Local: 1;
+        case Zone.National: 2;
+        case Zone.Abroad(country) if country == "BE" || country == "LU": 3;
+        case Zone.Abroad(_): 5;
+    };
+
+    return Ok(base * factor);
+}
+
+fn van(parcel: Parcel) -> Int {
+    return match (parcel.size, parcel.zone) {
+        case (Size.Pallet(_), _): 3;
+        case (Size.Box(_, _, _), Zone.Abroad(_)) | (Size.Letter, Zone.Abroad(_)): 2;
+        case (Size.Box(w, h, d), _) if w * h * d > 60000: 3;
+        default: 1;
+    };
+}
+
+fn summary(parcel: Parcel) -> String {
+    let where = match parcel.status {
+        case Status.Waiting: "waiting";
+        case Status.Loaded(n) if n == 1: "on the small van";
+        case Status.Loaded(n): "on van ${n}";
+        case Status.Refused(reason): "refused (${reason})";
+    };
+
+    return "#${parcel.id} ${where}";
+}
+
+fn main() -> Int {
+    let parcels = [
+        Parcel { id: 1, grams: 40, size: Size.Letter, zone: Zone.Local },
+        Parcel { id: 2, grams: 1500, size: Size.Box(30, 20, 10), zone: Zone.National },
+        Parcel { id: 3, grams: 0, size: Size.Letter, zone: Zone.Local },
+        Parcel { id: 4, grams: 9000, size: Size.Box(60, 50, 40), zone: Zone.Abroad("BE") },
+        Parcel { id: 5, grams: 25000, size: Size.Pallet(2), zone: Zone.Abroad("JP") },
+        Parcel { id: 6, grams: 45000, size: Size.Pallet(4), zone: Zone.National },
+        Parcel { id: 7, grams: 800, size: Size.Box(50, 40, 40), zone: Zone.Local },
+    ];
+
+    let dock = Dock {};
+    let takings = 0;
+
+    for parcel in parcels {
+        takings += match dock.load(parcel, van(parcel)) {
+            case Ok(cost): cost;
+
+            case Err(reason): {
+                parcel.status = Status.Refused(reason);
+                continue;
+            }
+        };
+    }
+
+    for parcel in parcels {
+        println(summary(parcel), volume(parcel.size));
+    }
+
+    println("takings:", takings, "dock busy:", dock.busy);
+
+    for line in dock.log {
+        println(" ", line);
+    }
+
+    // A van that does not exist: the loading stops with a failure, and the
+    // dock is free again all the same
+    dock.log = [];
+    let late = Parcel { id: 8, grams: 300, size: Size.Letter, zone: Zone.Local };
+
+    match attempt(() -> dock.load(late, 9)) {
+        case Ok(_): println("loaded?");
+
+        case Err(failure): println("failed:", failure.message, "- dock busy:", dock.busy, dock.log);
+    }
+
+    // The vans leave in order; every second day the big one stays
+    for day in 1..=4 {
+        let leaving: [String] = [];
+
+        for n in 1..4 {
+            if n == 3 && day % 2 == 0 {
+                continue;
+            }
+
+            let count = parcels.filter(p -> p.status == Status.Loaded(n)).len();
+            leaving.push("van ${n} (${count})");
+        }
+
+        println("day ${day}:", leaving.join(", "));
+    }
+
+    return 0;
+}

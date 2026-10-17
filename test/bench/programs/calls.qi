@@ -1,0 +1,44 @@
+// Calls: functions that call themselves, with numbers only.
+
+fn fib(n: Int) -> Int {
+    if n < 2 {
+        return n;
+    }
+
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn ackermann(m: Int, n: Int) -> Int {
+    if m == 0 {
+        return n + 1;
+    }
+
+    if n == 0 {
+        return ackermann(m - 1, 1);
+    }
+
+    return ackermann(m - 1, ackermann(m, n - 1));
+}
+
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 {
+        return a;
+    }
+
+    return gcd(b, a % b);
+}
+
+fn main() -> Int {
+    println(fib(27));
+    println(ackermann(2, 500), ackermann(3, 5));
+    let total = 0;
+
+    for a in 1..300 {
+        for b in 1..100 {
+            total += gcd(a * 7, b * 21);
+        }
+    }
+
+    println(total);
+    return 0;
+}

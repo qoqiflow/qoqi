@@ -1,0 +1,172 @@
+// Working with values that may be null, without testing each one.
+//
+// A function that may have no answer returns an optional: `Int?` is an Int
+// or null. These functions carry "or nothing" through a series of steps:
+// each step runs only if the one before gave a value.
+//
+//     let port = option.then(io.env("PORT"), text -> text.parseInt());     // Int?
+//     let label = option.mapOr(port, "default", toString);          // String
+
+// The value turned into another, or null if there was none.
+//
+//     option.map("21".parseInt(), n -> n * 2)    // 42
+pub fn map<T, U>(value: T?, convert: fn(T) -> U) -> U? {
+    if value == null {
+        return null;
+    }
+
+    return convert(value);
+}
+
+// The same, for a step that may itself have no answer: null if there was
+// no value, or if the step gives none.
+//
+//     option.then(io.readLine(), text -> text.parseInt())    // Int?
+pub fn then<T, U>(value: T?, step: fn(T) -> U?) -> U? {
+    if value == null {
+        return null;
+    }
+
+    return step(value);
+}
+
+// The value if the function accepts it, null otherwise.
+pub fn filter<T>(value: T?, wanted: fn(T) -> Bool) -> T? {
+    if value == null {
+        return null;
+    }
+
+    if wanted(value) {
+        return value;
+    }
+
+    return null;
+}
+
+// The value turned into another, or `fallback` if there was none.
+pub fn mapOr<T, U>(value: T?, fallback: U, convert: fn(T) -> U) -> U {
+    if value == null {
+        return fallback;
+    }
+
+    return convert(value);
+}
+
+// The first value if there is one, otherwise the second.
+pub fn or<T>(first: T?, second: T?) -> T? {
+    if first != null {
+        return first;
+    }
+
+    return second;
+}
+
+// The value, or what the function makes when there is none. Unlike
+// `value ?? fallback`, the fallback is only worked out if it is needed.
+pub fn orElse<T>(value: T?, make: fn() -> T) -> T {
+    if value != null {
+        return value;
+    }
+
+    return make();
+}
+
+// Calls the function with the value, if there is one.
+pub fn each<T>(value: T?, action: fn(T) -> Void) {
+    if value != null {
+        action(value);
+    }
+}
+
+// The value, or the program stops with the message when there is none.
+//
+//     let port = io.env("PORT").expect("PORT is not set");
+pub fn expect<T>(value: T?, message: String) -> T {
+    if value == null {
+        panic(message);
+    }
+
+    return value;
+}
+
+// The value as a Result: Ok when there is one, Err with the failure given
+// when there is none.
+//
+//     let user = users.get(name).okOr("no user ${name}")?;
+pub fn okOr<T, E>(value: T?, failure: E) -> Result<T, E> {
+    if value == null {
+        return Err(failure);
+    }
+
+    return Ok(value);
+}
+
+pub fn isSome<T>(value: T?) -> Bool {
+    return value != null;
+}
+
+pub fn isNone<T>(value: T?) -> Bool {
+    return value == null;
+}
+
+// The values of an array that are not null.
+pub fn values<T>(items: [T?]) -> [T] {
+    let out: [T] = [];
+
+    for item in items {
+        if item != null {
+            out.push(item);
+        }
+    }
+
+    return out;
+}
+
+// The same functions, as methods of every optional:
+//
+//     let name = users.get(key).map(user -> user.name) ?? "nobody";
+impl<T> T? {
+    pub fn map<U>(convert: fn(T) -> U) -> U? {
+        return map(self, convert);
+    }
+
+    pub fn then<U>(step: fn(T) -> U?) -> U? {
+        return then(self, step);
+    }
+
+    pub fn filter(wanted: fn(T) -> Bool) -> T? {
+        return filter(self, wanted);
+    }
+
+    pub fn mapOr<U>(fallback: U, convert: fn(T) -> U) -> U {
+        return mapOr(self, fallback, convert);
+    }
+
+    pub fn or(second: T?) -> T? {
+        return or(self, second);
+    }
+
+    pub fn orElse(make: fn() -> T) -> T {
+        return orElse(self, make);
+    }
+
+    pub fn each(action: fn(T) -> Void) {
+        each(self, action);
+    }
+
+    pub fn expect(message: String) -> T {
+        return expect(self, message);
+    }
+
+    pub fn okOr<E>(failure: E) -> Result<T, E> {
+        return okOr(self, failure);
+    }
+
+    pub fn isSome() -> Bool {
+        return isSome(self);
+    }
+
+    pub fn isNone() -> Bool {
+        return isNone(self);
+    }
+}

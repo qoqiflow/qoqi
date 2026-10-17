@@ -1,0 +1,507 @@
+// qoqi pkg install, update, require, remove, show: the packages of a
+// project, the way Composer does it for PHP.
+//
+//     qoqi pkg install                 what qoqi.lock says, or resolve and lock first
+//     qoqi pkg update [vendor/name]    resolve again, all or those packages, and lock
+//     qoqi pkg require vendor/name[:^1.2] [--dev]
+//     qoqi pkg remove vendor/name
+//     qoqi pkg show                    what is installed
+//
+// qoqi.json says what the project requires; qoqi.lock the versions it
+// was resolved to; vendor/ holds them, and vendor/installed.json tells
+// the compiler where each package's modules are.
+
+import manifest;
+import manifest.{Manifest};
+import lockfile;
+import lockfile.{Lock, Locked};
+import resolver;
+import resolver.{Requirement, Choice};
+import installer;
+import sources;
+import sources.{Sources};
+import catalog;
+import inspect;
+import std.dict;
+import std.fs;
+import std.io;
+import std.os;
+import std.path;
+import std.semver;
+import std.set;
+import std.format;
+
+const usage = """
+    Usage: qoqi pkg install [--no-dev]
+           qoqi pkg update [vendor/name]... [--no-dev]
+           qoqi pkg require vendor/name[:constraint]... [--dev]
+           qoqi pkg remove vendor/name...
+           qoqi pkg show [vendor/name]
+           qoqi pkg why vendor/name
+           qoqi pkg outdated
+    """;
+
+// What a command was asked to do.
+struct Request {
+    command: String;
+    names: [String] = [];
+    dev: Bool = true;
+    toDev: Bool = false;
+}
+
+// The project worked on: the folder of its qoqi.json, and what it says.
+struct Project {
+    dir: String;
+    manifest: Manifest;
+
+    // Made once, so that each repository is fetched once in a run.
+    found: Sources? = null;
+
+    // Whether qoqi.json is new, made by this run of qoqi pkg require.
+    created: Bool = false;
+}
+
+impl Project {
+    fn file(name: String) -> String {
+        return path.join([self.dir, name]);
+    }
+
+    fn sources() -> Sources {
+        let made = self.found;
+
+        if made != null {
+            return made;
+        }
+
+        let fresh = Sources {
+            project: self.dir,
+            repositories: self.manifest.repositories,
+            cache: sources.cacheDir(),
+            say: say,
+        };
+
+        self.found = fresh;
+        return fresh;
+    }
+}
+
+fn say(line: String) {
+    io.printError(line + "\n");
+}
+
+// The project of the current folder, or of a folder above it.
+fn findProject(create: Bool) -> Result<Project, String> {
+    let dir = fs.currentDir();
+
+    while true {
+        let file = manifest.inside(dir);
+
+        if io.exists(file) {
+            return Ok(Project { dir: dir, manifest: manifest.load(file)? });
+        }
+
+        let parent = path.dir(dir);
+
+        if parent == dir {
+            break;
+        }
+
+        dir = parent;
+    }
+
+    if !create {
+        return Err("there is no ${manifest.FILE} in this folder or above it: qoqi pkg require vendor/name makes one");
+    }
+
+    let here = fs.currentDir();
+    say("Writing a new ${manifest.FILE}");
+    return Ok(Project { dir: here, manifest: manifest.parse("{}")?, created: true });
+}
+
+fn requirementsOf(project: Manifest) -> [Requirement] {
+    return project.requirements(true).map(
+        entry -> Requirement { name: entry.0, wanted: entry.1, by: manifest.FILE },
+    );
+}
+
+// Resolves the project again and writes the lock. Packages not named in
+// `only` keep their locked version where they can; with `only` empty all
+// of them are resolved afresh.
+fn update(project: Project, only: [String]) -> Result<Lock, String> {
+    let old = lockfile.read(project.file(lockfile.FILE))?;
+    let prefer = dict.empty<String>();
+
+    let known = set.of(old?.packages.map(locked -> locked.name) ?? []);
+
+    for name in only {
+        if !known.has(name)
+            && !project.manifest.require.has(name)
+            && !project.manifest.requireDev.has(name)
+        {
+            return Err("${name} is not a package of this project");
+        }
+    }
+
+    if old != null && !only.isEmpty() {
+        prefer = old.versions();
+
+        for name in only {
+            prefer.remove(name);
+        }
+    }
+
+    say("Updating dependencies");
+    let choices = resolver.resolve(project.sources(), requirementsOf(project.manifest), prefer)?;
+
+    let lock = Lock {
+        hash: lockfile.contentHash(project.manifest),
+        packages: lockedOf(project.manifest, choices),
+    };
+
+    report(old, lock);
+    say("Writing lock file");
+
+    io.writeFile(project.file(lockfile.FILE), lockfile.text(lock)).mapErr(
+        error -> error.describe(),
+    )?;
+
+    return Ok(lock);
+}
+
+// The choices as the lock has them: the packages require needs, then
+// those only require-dev needs, each part by name.
+fn lockedOf(project: Manifest, choices: [Choice]) -> [Locked] {
+    let byName = dict.empty<Choice>();
+
+    for choice in choices {
+        byName.set(choice.candidate.name, choice);
+    }
+
+    // What the project's require reaches, through what each package requires
+    let needed = set.texts();
+    let waiting = project.require.keys();
+
+    while !waiting.isEmpty() {
+        let name = waiting.pop();
+
+        if name == null || !needed.add(name) {
+            continue;
+        }
+
+        let choice = byName.get(name);
+
+        if choice != null {
+            waiting = waiting.concat(choice.manifest.require.keys());
+        }
+    }
+
+    let locked = choices.map(
+        choice -> Locked {
+            name: choice.candidate.name,
+            version: choice.candidate.label,
+            source: choice.candidate.source,
+            importName: choice.manifest.importName,
+            root: choice.manifest.root,
+            description: choice.manifest.description,
+            require: choice.manifest.require,
+            dev: !needed.has(choice.candidate.name),
+        },
+    );
+
+    return locked.sortedByText(entry -> entry.name);
+}
+
+// What changed in the lock, as Composer says it.
+fn report(old: Lock?, new: Lock) {
+    let lines: [String] = [];
+    let installs = 0;
+    let updates = 0;
+    let removals = 0;
+
+    for locked in new.packages {
+        let before = old?.find(locked.name);
+
+        if before == null {
+            installs++;
+            lines.push("  - Locking ${locked.name} (${locked.version})");
+        } else if before.version != locked.version
+            || before.source.reference != locked.source.reference
+        {
+            updates++;
+            lines.push("  - ${changeOf(before.version, locked.version)} ${locked.name} (${before.version} => ${locked.version})");
+        }
+    }
+
+    for before in old?.packages ?? [] {
+        if new.find(before.name) == null {
+            removals++;
+            lines.push("  - Removing ${before.name} (${before.version})");
+        }
+    }
+
+    if lines.isEmpty() {
+        say("Nothing to modify in lock file");
+        return;
+    }
+
+    say("Lock file operations: ${format.plural(installs, "install", "installs")}, ${format.plural(updates, "update", "updates")}, ${format.plural(removals, "removal", "removals")}");
+
+    for line in lines {
+        say(line);
+    }
+}
+
+fn changeOf(from: String, to: String) -> String {
+    let old = semver.parse(from).value();
+    let new = semver.parse(to).value();
+
+    if old == null || new == null || old == new {
+        return "Updating";
+    }
+
+    return if new > old { "Upgrading" } else { "Downgrading" };
+}
+
+fn install(project: Project, request: Request) -> Result<Void, String> {
+    let found = lockfile.read(project.file(lockfile.FILE))?;
+
+    if found != null && found.hash != lockfile.contentHash(project.manifest) {
+        say("Warning: The lock file is not up to date with the latest changes in ${manifest.FILE}. You may be getting outdated dependencies. Run qoqi pkg update to update them.");
+    }
+
+    let lock = if found == null {
+        say("No lock file found. Updating dependencies instead of installing from lock file.");
+        update(project, [])?
+    } else {
+        found
+    };
+
+    say("Installing dependencies from lock file");
+    return installer.install(project.sources(), lock, request.dev);
+}
+
+fn updateCommand(project: Project, request: Request) -> Result<Void, String> {
+    let lock = update(project, request.names)?;
+    return installer.install(project.sources(), lock, request.dev);
+}
+
+// Adds requirements to qoqi.json, resolves, installs. When it cannot be
+// done qoqi.json is left as it was.
+fn require(project: Project, request: Request) -> Result<Void, String> {
+    if request.names.isEmpty() {
+        return Err("name the packages to require: qoqi pkg require vendor/name[:^1.2]");
+    }
+
+    let original = manifest.text(project.manifest);
+    let key = if request.toDev { "require-dev" } else { "require" };
+    let other = if request.toDev { "require" } else { "require-dev" };
+    let added: [String] = [];
+
+    for spec in request.names {
+        let (name, wanted) = spec.cut(":") ?? (spec, "");
+
+        if !manifest.isPackageName(name) {
+            return Err("${name} is not a package name: write vendor/name, in lower case");
+        }
+
+        if wanted == "" {
+            wanted = newest(project, name)?;
+            say("Using version ${wanted} for ${name}");
+        }
+
+        catalog.check(name, wanted)?;
+        manifest.setRequirement(project.manifest, key, name, wanted);
+        manifest.setRequirement(project.manifest, other, name, "");
+        added.push(name);
+    }
+
+    say("${project.file(manifest.FILE)} has been updated");
+
+    io.writeFile(project.file(manifest.FILE), manifest.text(project.manifest)).mapErr(
+        error -> error.describe(),
+    )?;
+
+    match update(project, added) {
+        case Ok(lock): {
+            return installer.install(project.sources(), lock, request.dev);
+        }
+
+        case Err(reason): {
+            if project.created {
+                say("Installation failed, deleting ${manifest.FILE}.");
+                io.remove(project.file(manifest.FILE));
+            } else {
+                say("Installation failed, reverting ${manifest.FILE} to its original content.");
+
+                io.writeFile(project.file(manifest.FILE), original).mapErr(
+                    error -> error.describe(),
+                )?;
+            }
+
+            return Err(reason);
+        }
+    }
+}
+
+// The constraint a package is required with when none is given: ^ of
+// its newest release.
+fn newest(project: Project, name: String) -> Result<String, String> {
+    let all = project.sources().candidates(name)?;
+
+    let releases = all.filter(
+        candidate -> candidate.version != null && !candidate.version.isPrerelease(),
+    );
+
+    let best = releases.sorted(catalog.newestFirst).first();
+
+    if best != null {
+        let version = best.version;
+
+        if version != null {
+            return Ok(semver.caret(version));
+        }
+    }
+
+    if all.find(candidate -> candidate.anyVersion) != null {
+        return Ok("*");
+    }
+
+    let branch = all.find(candidate -> candidate.version == null);
+
+    if branch != null {
+        return Ok(branch.label);
+    }
+
+    return Err("${name} has no version to require");
+}
+
+fn remove(project: Project, request: Request) -> Result<Void, String> {
+    if request.names.isEmpty() {
+        return Err("name the packages to remove: qoqi pkg remove vendor/name");
+    }
+
+    for name in request.names {
+        if !project.manifest.require.has(name) && !project.manifest.requireDev.has(name) {
+            return Err("${name} is not required by ${manifest.FILE}");
+        }
+
+        manifest.setRequirement(project.manifest, "require", name, "");
+        manifest.setRequirement(project.manifest, "require-dev", name, "");
+    }
+
+    say("${project.file(manifest.FILE)} has been updated");
+
+    io.writeFile(project.file(manifest.FILE), manifest.text(project.manifest)).mapErr(
+        error -> error.describe(),
+    )?;
+
+    let lock = update(project, request.names)?;
+    return installer.install(project.sources(), lock, request.dev);
+}
+
+// The installed packages: name, version, import name, description.
+// The lock of a project that has one, for the commands that only look.
+fn lockOf(project: Project) -> Result<Lock, String> {
+    let lock = lockfile.read(project.file(lockfile.FILE))?;
+
+    if lock == null {
+        return Err("there is no ${lockfile.FILE}: run qoqi pkg install");
+    }
+
+    return Ok(lock);
+}
+
+fn printAll(lines: [String]) -> Result<Void, String> {
+    for line in lines {
+        println(line);
+    }
+
+    return Ok();
+}
+
+fn show(project: Project, request: Request) -> Result<Void, String> {
+    let lock = lockOf(project)?;
+
+    if lock.packages.isEmpty() && request.names.isEmpty() {
+        say("No packages");
+        return Ok();
+    }
+
+    let installed = installer.installed(project.dir);
+    return printAll(inspect.show(lock, project.manifest, installed, request.names.first())?);
+}
+
+fn why(project: Project, request: Request) -> Result<Void, String> {
+    let name = request.names.first();
+
+    if name == null {
+        return Err("name the package: qoqi pkg why vendor/name");
+    }
+
+    return printAll(inspect.why(lockOf(project)?, project.manifest, name)?);
+}
+
+fn outdated(project: Project) -> Result<Void, String> {
+    let lock = lockOf(project)?;
+    let found = inspect.outdated(lock, project.manifest, project.sources())?;
+    return printAll(inspect.outdatedLines(found));
+}
+
+fn parse(arguments: [String]) -> Result<Request, String> {
+    if arguments.isEmpty() {
+        return Err(usage);
+    }
+
+    let request = Request { command: arguments[0] };
+
+    for argument in arguments.drop(1) {
+        match argument {
+            case "--no-dev": {
+                request.dev = false;
+            }
+
+            case "--dev": {
+                request.toDev = true;
+            }
+
+            default: {
+                if argument.startsWith("-") {
+                    return Err("unknown option ${argument}\n${usage}");
+                }
+
+                request.names.push(argument);
+            }
+        }
+    }
+
+    return Ok(request);
+}
+
+fn run(arguments: [String]) -> Result<Void, String> {
+    let request = parse(arguments)?;
+    let project = findProject(request.command == "require")?;
+
+    return match request.command {
+        case "install": install(project, request);
+        case "update": updateCommand(project, request);
+        case "require": require(project, request);
+        case "remove": remove(project, request);
+        case "show": show(project, request);
+        case "why": why(project, request);
+        case "outdated": outdated(project);
+        default: Err("unknown command ${request.command}\n${usage}");
+    };
+}
+
+fn main() -> Int {
+    match run(os.args()) {
+        case Ok(_): {
+            return 0;
+        }
+
+        case Err(reason): {
+            io.printError("\n${reason.trim()}\n");
+            return 1;
+        }
+    }
+}

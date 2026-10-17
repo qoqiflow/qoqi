@@ -1,0 +1,12 @@
+{
+  "name": "@qoqi/flow",
+  "description": "Carry out the steps of Qoqi's flows in a TypeScript application",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  }
+}

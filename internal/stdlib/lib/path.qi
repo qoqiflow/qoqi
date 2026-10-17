@@ -1,0 +1,80 @@
+// Paths: the names of files and folders, taken apart and put together.
+//
+// Nothing here touches the disk; see std.fs for that. The separator is
+// the one of the system the program runs on.
+
+import std.strings;
+import std.arrays;
+
+// "/" on Linux and macOS, "\" on Windows.
+pub extern fn separator() -> String;
+
+extern fn joined(parts: [String]) -> String;
+
+// The parts put together with the separator, tidied: join(["a", "b/", "../c.txt"])
+// is "a/c.txt".
+pub fn join(parts: [String]) -> String {
+    return joined(parts);
+}
+
+// A name inside a folder: path.inside("notes", "todo.txt") is "notes/todo.txt".
+pub fn inside(folder: String, name: String) -> String {
+    return joined([folder, name]);
+}
+
+// The last part: "notes/todo.txt" gives "todo.txt".
+pub extern fn base(path: String) -> String;
+
+// All but the last part: "notes/todo.txt" gives "notes".
+pub extern fn dir(path: String) -> String;
+
+// The extension with its dot, ".txt", or "" if there is none. The dots
+// a name starts with are not one: ".bashrc" has none.
+pub extern fn extension(path: String) -> String;
+
+// The shortest path that means the same: "a//b/../c" gives "a/c".
+pub extern fn clean(path: String) -> String;
+
+pub extern fn isAbsolute(path: String) -> Bool;
+
+// The path from the root of the disk, relative ones being taken from the
+// folder the program runs in.
+pub extern fn absolute(path: String) -> String;
+
+// The path that leads from a folder to another path, or null when there
+// is none, as between two drives: relative("app", "app/vendor/x") gives
+// "vendor/x", relative("app/src", "app/lib") gives "../lib".
+pub extern fn relative(from: String, to: String) -> String?;
+
+// Whether a name fits a pattern where * stands for any characters and ?
+// for one: path.matches("*.txt", "todo.txt").
+pub extern fn matches(pattern: String, name: String) -> Bool;
+
+// The last part without its extension: "notes/todo.txt" gives "todo",
+// ".bashrc" gives ".bashrc".
+pub fn stem(path: String) -> String {
+    let name = base(path);
+    return name.first(name.len() - extension(name).len());
+}
+
+// The same path with another extension: withExtension("a/b.md", ".html").
+// A name without one is given it: ".bashrc" becomes ".bashrc.bak".
+pub fn withExtension(path: String, extension: String) -> String {
+    let folder = dir(path);
+    let name = stem(path) + extension;
+
+    if folder == "." && !path.startsWith(".") {
+        return name;
+    }
+
+    return inside(folder, name);
+}
+
+// The names along the path: "a/b/c.txt" gives ["a", "b", "c.txt"].
+pub fn parts(path: String) -> [String] {
+    let wanted = fn(part: String) -> Bool {
+        return part != "";
+    };
+
+    return clean(path).split(separator()).filter(wanted);
+}

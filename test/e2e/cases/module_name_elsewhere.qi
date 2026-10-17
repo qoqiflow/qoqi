@@ -1,0 +1,8 @@
+// A function asked of the wrong module of the library: the one that has
+// it is named.
+import std.task;
+
+fn main() -> Int {
+    wait task.after(10);
+    return 0;
+}

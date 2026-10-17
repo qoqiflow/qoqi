@@ -1,0 +1,8 @@
+// The smallest Qoqi program.
+//
+// Run it with: qoqi run examples/hello.qi
+
+fn main() -> Int {
+    println("Hello, Qoqi!");
+    return 0;
+}

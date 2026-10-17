@@ -1,0 +1,47 @@
+{
+  "format": "qoqi.flow.lock/1",
+  "version": "sha256:e45c9ac772268d35777788d3640579a2f98c6e7afea7ce89d416a0fd6295a40c",
+  "flows": {
+    "Signup": {
+      "trying": {
+        "activated": "Bool",
+        "card": "String?",
+        "checkpoint": "Int",
+        "loop.end#1": "Int",
+        "loop.index#1": "Int",
+        "loop.items#1": "[Int]",
+        "self": "Signup",
+        "self.day": "Int",
+        "self.email": "String",
+        "self.events": "std.flow.Inbox<Event>",
+        "self.plan": "Plan",
+        "started": "Int",
+        "until": "Int",
+        "used": "[String]"
+      }
+    },
+    "Subscription": {
+      "billing": {
+        "paid": "Int",
+        "plan": "Plan",
+        "self": "Subscription",
+        "self.card": "String",
+        "self.changes": "std.flow.Inbox<Change>",
+        "self.day": "Int",
+        "self.email": "String",
+        "self.plan": "Plan"
+      },
+      "subscribed": {
+        "paid": "Int",
+        "plan": "Plan",
+        "renewal": "Int",
+        "self": "Subscription",
+        "self.card": "String",
+        "self.changes": "std.flow.Inbox<Change>",
+        "self.day": "Int",
+        "self.email": "String",
+        "self.plan": "Plan"
+      }
+    }
+  }
+}

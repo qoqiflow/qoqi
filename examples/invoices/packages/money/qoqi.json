@@ -1,0 +1,5 @@
+{
+    "name": "acme/money",
+    "version": "1.2.0",
+    "description": "Amounts of money, counted in cents"
+}

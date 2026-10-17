@@ -1,0 +1,4 @@
+[ERROR] E2015: zero is a static function of Money, which takes no value of it
+functions_of_types_errors.qi:15:19
+[ERROR] E2015: Money has no function or method 'one'
+functions_of_types_errors.qi:16:18

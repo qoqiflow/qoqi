@@ -1,0 +1,5 @@
+[ERROR] E2041: 'Empty' is a variant of more than one enum, and nothing here says which
+bare_variants_errors.qi:15:19
+Write which: Shape.Empty or Slot.Empty
+[ERROR] E2001: cannot assign type Slot to Shape
+bare_variants_errors.qi:16:20

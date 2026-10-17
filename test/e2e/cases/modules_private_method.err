@@ -1,0 +1,4 @@
+[ERROR] E2027: method 'keepInside' of game.world.World is private
+modules_private_method.qi:9:6
+w.keepInside(thing);
+Declare it with 'pub fn keepInside' to use it from other modules

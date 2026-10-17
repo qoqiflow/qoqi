@@ -1,0 +1,118 @@
+// A small drawing program that takes its input apart with patterns: the
+// fields of structs, the names several patterns share, null among the
+// cases, and structs written with their fields' names alone.
+
+struct Point {
+    x: Int;
+    y: Int;
+}
+
+struct Size {
+    width: Int;
+    height: Int;
+}
+
+trait Figure {
+    fn origin() -> Point;
+}
+
+struct Box {
+    at: Point;
+    size: Size;
+}
+
+struct Dot {
+    at: Point;
+}
+
+impl Figure for Box {
+    fn origin() -> Point {
+        return self.at;
+    }
+}
+
+impl Figure for Dot {
+    fn origin() -> Point {
+        return self.at;
+    }
+}
+
+enum Command {
+    Draw(Figure),
+    Move(Point, Point),
+    Copy(Point, Point),
+    Erase(Point),
+    Clear,
+}
+
+fn place(p: Point) -> String {
+    return match p {
+        case Point { x: 0, y: 0 }: "the corner";
+        case Point { x: 0, y } | Point { x: y, y: 0 }: "an edge, ${y} along";
+        case Point { x, y } if x == y: "the diagonal at ${x}";
+        case Point { x, y }: "${x},${y}";
+    };
+}
+
+fn describe(figure: Figure) -> String {
+    return match figure {
+        case Box { size: Size { width, height } } if width == height: "a square of ${width}";
+        case Box { at, size: Size { width, height } }: "a ${width}x${height} box at ${place(at)}";
+        case Dot { at }: "a dot at ${place(at)}";
+        default: "something";
+    };
+}
+
+fn run(command: Command) -> String {
+    return match command {
+        case Draw(figure): "draw ${describe(figure)}";
+        case Move(from, to) | Copy(from, to) if from == to: "nothing to do at ${place(from)}";
+
+        case Move(from, Point { x: 0, y: 0 })
+            | Copy(from, Point { x: 0, y: 0 }): "send ${place(from)} to the corner";
+
+        case Move(from, to): "move ${place(from)} to ${place(to)}";
+        case Copy(from, to): "copy ${place(from)} to ${place(to)}";
+        case Erase(Point { x, y }): "erase ${x},${y}";
+        case Clear: "clear";
+    };
+}
+
+// The last command, if there was one
+fn last(commands: [Command]) -> Command? {
+    return commands.len() > 0 ? commands[commands.len() - 1] : null;
+}
+
+fn main() -> Int {
+    let x = 2;
+    let y = 5;
+    let here = Point { x, y };
+    let size = Size { width: 3, height: 3 };
+
+    let commands = [
+        Draw(Box { at: here, size }),
+        Draw(Box { at: Point { x: 0, y: 4 }, size: Size { width: 2, height: 1 } }),
+        Draw(Dot { at: Point { x: 7, y: 7 } }),
+        Move(here, here),
+        Copy(here, Point { x: 0, y: 0 }),
+        Move(Point { x: 9, y: 0 }, here),
+        Erase(Point { x: 1, y: 1 }),
+        Clear,
+    ];
+
+    for command in commands {
+        println(run(command));
+    }
+
+    for history in [commands, []] {
+        let said = match last(history) {
+            case null: "no commands";
+            case Clear: "ended clear";
+            default: "ended with something drawn";
+        };
+
+        println(said);
+    }
+
+    return 0;
+}

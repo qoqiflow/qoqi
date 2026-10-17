@@ -1,0 +1,20 @@
+[ERROR] E2028: match on Light does not handle Light.Amber
+enums_errors.qi:10:5
+Add a case for each, or a 'default' case: case Light.Amber: { ... }
+[ERROR] E2028: match on Option does not handle Option.Some(Order.Shipped)
+enums_errors.qi:22:5
+[ERROR] E2029: Order.Placed(Int) holds 1 value, the pattern has 2
+Write the pattern as Order.Placed(a)
+[ERROR] E2029: enum Order has no variant 'Shiped'
+Did you mean 'Shipped'?
+[ERROR] E2029: a value of type Order is never a Light.Red
+[ERROR] E2010: cannot use type String as value 1 of Order.Placed, which is of type Int
+[ERROR] E2030: Order.Shipped holds 2 values, got 1
+It is declared as Order.Shipped(Int, String)
+[ERROR] E2030: Order.Cancelled holds no values
+Write Order.Cancelled without parentheses
+[ERROR] E2030: enum Light has no variant 'Blue'
+[ERROR] E2030: nothing here says what T of Option is
+Write the type: Option<...>.None
+[ERROR] E2030: 'Light' is an enum, not a value
+[ERROR] E2001: cannot assign type Order to Light

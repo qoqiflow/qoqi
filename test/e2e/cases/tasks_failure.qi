@@ -1,0 +1,31 @@
+// A task that stops while nobody waits for it: the others finish, then
+// its failure ends the program, as it would have ended it from main.
+
+import std.task;
+import std.arrays;
+
+struct Order {
+    id: Int;
+    items: [String];
+}
+
+fn firstItem(order: Order) -> String {
+    return order.items[0];
+}
+
+fn main() -> Int {
+    let orders = [
+        Order { id: 1, items: ["tea"] },
+        Order { id: 2, items: [] },
+        Order { id: 3, items: ["salt", "rice"] },
+    ];
+
+    for order in orders {
+        task.run(fn() {
+            println("order ${order.id} starts with ${firstItem(order)}");
+        });
+    }
+
+    println("all orders handed out");
+    return 0;
+}

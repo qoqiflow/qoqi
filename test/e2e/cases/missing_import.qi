@@ -1,0 +1,14 @@
+// Names of the library need no import: the modules (dict), the
+// collections (Dict, List, Set) and the traits of operators (Ordered).
+// A name that is nothing at all is still reported, with a guess.
+
+fn largest<T: Ordered>(items: [T]) -> T? {
+    return null;
+}
+
+fn main() -> Int {
+    let counts = dict.empty<Int>();
+    let names: Dict<String>? = null;
+    let count = 1;
+    return cuont;
+}

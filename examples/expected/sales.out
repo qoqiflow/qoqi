@@ -1,0 +1,35 @@
+Sales, 28 September to 13 October 2026
+10 orders over 16 days, 1,565.19 in all, 156.52 an order
+
+By category
+category     orders  units   revenue  share
+-----------  ------  -----  --------  -----
+hardware          5      6  1,297.69  82.9%
+accessories       3      6    163.50  10.4%
+stationery        2     32    104.00   6.6%
+
+By customer
+customer           orders  units  revenue  share
+-----------------  ------  -----  -------  -----
+Alan Turing             2      4   729.80  46.6%
+Margaret Hamilton       2     13   358.90  22.9%
+Ada Lovelace            2      2   174.00  11.1%
+Hopper, Grace           3     24   173.49  11.1%
+Linus Torvalds          1      1   129.00   8.2%
+
+Best sellers
+product              orders  units  revenue  share
+-------------------  ------  -----  -------  -----
+27" monitor               2      3   959.70  61.3%
+Mechanical keyboard       2      2   258.00  16.5%
+Laptop stand              2      3   135.00   8.6%
+
+By week
+week of 28 Sep  1,051.29  ########################
+week of 05 Oct    358.90  ########
+week of 12 Oct    155.00  ###
+
+3 rows left out of 13
+  row 8 (order 1007): quantity is 'ten', not a number
+  row 10 (order 1009): '2026/10/07' is not a date
+  row 12 (order 1011): no quantity

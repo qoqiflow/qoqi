@@ -1,0 +1,4 @@
+[ERROR] R0001: Bob has 20, not 50
+--> test/e2e/cases/defer_failure.qi:20:9 in function 'withdraw'
+called from test/e2e/cases/defer_failure.qi:32:43 in function 'pay'
+called from test/e2e/cases/defer_failure.qi:45:5 in function 'main'

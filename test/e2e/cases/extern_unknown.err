@@ -1,0 +1,3 @@
+[ERROR] E7002: the runtime has no function 'launchRocket'
+extern_unknown.qi:4:11
+extern fn launchRocket(countdown: Int) -> Bool;

@@ -1,0 +1,242 @@
+// Tasks and channels in one program: a sieve made of tasks in a row, an
+// account several tasks draw on, a relay of failures, and work shared
+// out between workers.
+
+import std.task;
+import std.task.{Task, Channel};
+import std.result.{Result, Kind};
+import std.arrays;
+import std.dict;
+import std.dict.{Dict};
+
+// --- A sieve: one task per prime, each passing on what it cannot divide ---
+
+fn numbersFrom(start: Int, to: Int) -> Channel<Int> {
+    let out = task.channel<Int>(0);
+
+    task.run(fn() {
+        for n in arrays.range(start, to) {
+            wait out.send(n);
+        }
+
+        out.close();
+    });
+
+    return out;
+}
+
+fn without(multiplesOf: Int, numbers: Channel<Int>) -> Channel<Int> {
+    let out = task.channel<Int>(0);
+
+    task.run(fn() {
+        numbers.each(fn(n: Int) {
+            if n % multiplesOf != 0 {
+                wait out.send(n);
+            }
+        });
+
+        out.close();
+    });
+
+    return out;
+}
+
+fn primesBelow(limit: Int) -> [Int] {
+    let primes: [Int] = [];
+    let numbers = numbersFrom(2, limit);
+
+    while true {
+        let prime = wait numbers.receive();
+
+        if prime == null {
+            return primes;
+        }
+
+        primes.push(prime);
+        numbers = without(prime, numbers);
+    }
+}
+
+// --- An account: a change in several steps, with a wait in the middle ---
+
+struct Account {
+    balance: Int;
+    lock: Channel<Bool>;  // holds one value while nobody is changing the account
+}
+
+enum Refusal { Short(Int) }
+
+fn openAccount(balance: Int) -> Account {
+    let account = Account { balance: balance, lock: task.channel<Bool>(1) };
+    wait account.lock.send(true);
+    return account;
+}
+
+impl Account {
+    // Takes money out if there is enough. Reading the balance and writing
+    // it are apart, with a pause between: without the lock two tasks
+    // would both read the same balance.
+    fn withdraw(amount: Int) -> Result<Int, Refusal> {
+        wait self.lock.receive();
+        let before = self.balance;
+        task.pause();
+
+        if before < amount {
+            wait self.lock.send(true);
+            return Err(Refusal.Short(amount - before));
+        }
+
+        self.balance = before - amount;
+        wait self.lock.send(true);
+        return Ok(self.balance);
+    }
+
+    fn withdrawCarelessly(amount: Int) -> Bool {
+        let before = self.balance;
+        task.pause();
+
+        if before < amount {
+            return false;
+        }
+
+        self.balance = before - amount;
+        return true;
+    }
+}
+
+// --- Work shared out: each worker takes the next job when it is free ---
+
+struct Job {
+    id: Int;
+    text: String;
+}
+
+struct Done {
+    job: Int;
+    worker: Int;
+    words: Dict<Int>;
+}
+
+fn countWords(text: String) -> Dict<Int> {
+    let counts = dict.empty<Int>();
+
+    for word in text.lower().split(" ") {
+        if word != "" {
+            counts.update(word, 0, n -> n + 1);
+        }
+    }
+
+    return counts;
+}
+
+fn shareOut(texts: [String], workers: Int) -> [Done] {
+    let jobs = task.channel<Job>(texts.len());
+    let done = task.channel<Done>(0);
+
+    for i, text in texts {
+        wait jobs.send(Job { id: i, text: text });
+    }
+
+    jobs.close();
+
+    let crew: [Task<Bool>] = [];
+
+    for worker in arrays.range(1, workers + 1) {
+        crew.push(
+            task.run(fn() {
+                jobs.each(fn(job: Job) {
+                    wait done.send(Done {
+                        job: job.id,
+                        worker: worker,
+                        words: countWords(job.text),
+                    });
+                });
+            }),
+        );
+    }
+
+    task.run(fn() {
+        wait task.all(crew);
+        done.close();
+    });
+
+    return done.drain().sortedBy(one -> one.job);
+}
+
+fn main() -> Int {
+    println(primesBelow(60));
+
+    // Ten tasks each try to take 30 out of 100
+    let account = openAccount(100);
+
+    let takers = arrays.range(0, 10).map(
+        n -> task.start(fn() -> Result<Int, Refusal> {
+            return account.withdraw(30);
+        }),
+    );
+
+    let taken = 0;
+
+    for taker in takers {
+        match wait taker {
+            case Ok(Ok(_)): {
+                taken++;
+            }
+
+            case Ok(Err(Refusal.Short(_))): {}
+
+            case Err(failure): {
+                println("a withdrawal stopped:", failure.describe());
+            }
+        }
+    }
+
+    println(taken, "withdrawals,", account.balance, "left");
+
+    let careless = openAccount(100);
+    let lucky = wait task.map(arrays.range(0, 10), n -> careless.withdrawCarelessly(30));
+
+    println(lucky.or([]).count(went -> went), "careless withdrawals,", careless.balance, "left");
+
+    // Failures cross from task to task as values
+    let relay = task.start(fn() -> String {
+        let inner = task.start(fn() -> Int {
+            return [1, 2, 3][7];
+        });
+
+        match wait inner {
+            case Ok(n): {
+                return "got ${n}";
+            }
+
+            case Err(failure): {
+                panic("the inner task failed: ${failure.message}");
+            }
+        }
+    });
+
+    match wait relay {
+        case Ok(text): {
+            println(text);
+        }
+
+        case Err(failure): {
+            println(failure.kind == Kind.Panic, failure.message);
+        }
+    }
+
+    let texts = ["the cat and the hat", "a cat is a cat", "", "The end"];
+
+    for one in shareOut(texts, 3) {
+        let words = one.words.sortedKeys().map(word -> "${word}=${one.words.getOr(word, 0)}");
+
+        println("job ${one.job} by worker ${one.worker}:", words.join(" "));
+    }
+
+    // main returns; this one is still to run
+    task.run(fn() {
+        println("last words from task", task.current() > 0);
+    });
+
+    return 0;
+}

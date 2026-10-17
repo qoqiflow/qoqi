@@ -1,0 +1,178 @@
+import std.flow;
+import std.flow.{Flow, Inbox};
+import std.time.{Duration};
+
+// Every shape a value of a flow can take, written by the console and read
+// by the program: what the program reads of them is compared with what it
+// reads of the same values made in Qoqi.
+
+struct Point {
+    x: Int;
+    y: Float;
+}
+
+struct Box<T> {
+    item: T;
+    tag: String;
+}
+
+enum Shape {
+    Dot,
+    Circle(Float),
+    Rect(Float, Float),
+    Label { text: String, size: Int },
+    At(Point),
+}
+
+enum Wide {
+    Many(Int, Int, Int, Int, Int, Int, Int, Int, Int, Int, Int, Int),
+}
+
+struct All {
+    n: Int;
+    f: Float;
+    yes: Bool;
+    s: String;
+    numbers: [Int];
+    maybe: String?;
+    nothing: Int?;
+    scores: Dict<Int>;
+    point: Point;
+    points: [Point];
+    shapes: [Shape];
+    boxed: Box<Shape>;
+    ok: Result<Int, String>;
+    err: Result<Int, String>;
+    wide: Wide;
+    patience: Duration;
+}
+
+struct Echo {
+    all: All;
+    shapes: Inbox<Shape> = flow.inbox<Shape>(8);
+}
+
+impl Flow<String> for Echo {
+    fn run() -> String {
+        let given = describeAll(self.all);
+        let made = describeAll(sample());
+
+        let messages: [String] = [];
+
+        for _ in 0..5 {
+            stage listening;
+
+            messages.push(describeShape(wait self.shapes.receive()));
+        }
+
+        return "${given}\n${made}\n${messages.join(" ")}";
+    }
+}
+
+fn sample() -> All {
+    return All {
+        n: -42,
+        f: 2.5,
+        yes: true,
+        s: "été \"quoted\"",
+        numbers: [3, 1, 2],
+        maybe: "here",
+        nothing: null,
+        scores: { "b": 2, "a": 1 },
+        point: Point { x: 1, y: 0.5 },
+        points: [Point { x: 2, y: 1.0 }, Point { x: 3, y: -1.5 }],
+        shapes: [
+            Shape.Dot,
+            Shape.Circle(1.5),
+            Shape.Rect(2.0, 3.0),
+            Shape.Label { text: "hi", size: 12 },
+            Shape.At(Point { x: 7, y: 7.5 }),
+        ],
+        boxed: Box { item: Shape.Label { text: "boxed", size: 3 }, tag: "t" },
+        ok: Ok(7),
+        err: Err("no"),
+        wide: Wide.Many(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+        patience: 90.minutes(),
+    };
+}
+
+fn describeAll(a: All) -> String {
+    let parts = [
+        "n=${a.n}", "f=${quarter(a.f)}", "yes=${a.yes}", "s=${a.s}", "numbers=${a.numbers}",
+        "maybe=${a.maybe ?? "null"}", "nothing=${a.nothing ?? -1}",
+        "scores=${describeScores(a.scores)}", "point=${describePoint(a.point)}",
+        "points=${a.points.map(describePoint).join(",")}",
+        "shapes=${a.shapes.map(describeShape).join(",")}",
+        "boxed=${describeShape(a.boxed.item)}/${a.boxed.tag}", "ok=${describeResult(a.ok)}",
+        "err=${describeResult(a.err)}", "wide=${describeWide(a.wide)}",
+        "patience=${a.patience.inSeconds()}s/${a.patience}",
+    ];
+
+    return parts.join(" ");
+}
+
+fn describeScores(scores: Dict<Int>) -> String {
+    let out: [String] = [];
+
+    for key in scores.sortedKeys() {
+        out.push("${key}:${scores.getOr(key, -1)}");
+    }
+
+    return out.join(",");
+}
+
+fn describePoint(p: Point) -> String {
+    return "(${p.x},${quarter(p.y)})";
+}
+
+fn describeShape(shape: Shape) -> String {
+    match shape {
+        case Dot: {
+            return "dot";
+        }
+
+        case Circle(r): {
+            return "circle:${quarter(r)}";
+        }
+
+        case Rect(w, h): {
+            return "rect:${quarter(w)}x${quarter(h)}";
+        }
+
+        case Label { text, size }: {
+            return "label:${text}@${size}";
+        }
+
+        case At(p): {
+            return "at:${describePoint(p)}";
+        }
+    }
+}
+
+// A Float worked with: an Int where a Float goes reads otherwise, though
+// both print 2 for 2.0.
+fn quarter(x: Float) -> String {
+    return "${x / 4.0}";
+}
+
+fn describeResult(r: Result<Int, String>) -> String {
+    match r {
+        case Ok(n): {
+            return "ok:${n}";
+        }
+
+        case Err(e): {
+            return "err:${e}";
+        }
+    }
+}
+
+fn describeWide(w: Wide) -> String {
+    match w {
+        case Many(a, b, c, d, e, f, g, h, i, j, k, l): {
+            return "${a}${b}${c}${d}${e}${f}${g}${h}${i}${j}/${k}/${l}";
+        }
+    }
+}
+
+fn main() {}

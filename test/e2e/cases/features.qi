@@ -1,0 +1,130 @@
+// One program touching every supported feature, as a regression net for
+// the whole pipeline.
+
+struct Account {
+    owner: String;
+    balance: Int;
+    history: [Int];
+}
+
+trait Describable {
+    fn describe() -> String;
+}
+
+impl Describable for Account {
+    fn describe() -> String {
+        return self.owner + ": " + toString(self.balance);
+    }
+}
+
+impl Account {
+    fn deposit(amount: Int) -> Void {
+        self.balance = self.balance + amount;
+        self.history.push(amount);
+    }
+
+    fn largest() -> Int {
+        let best = 0;
+
+        for amount in self.history {
+            if amount > best {
+                best = amount;
+            }
+        }
+
+        return best;
+    }
+}
+
+fn open(owner: String, deposits: ...Int) -> Account {
+    let account = Account { owner: owner, balance: 0, history: [] };
+
+    for amount in deposits {
+        account.deposit(amount);
+    }
+
+    return account;
+}
+
+fn pick<T>(condition: Bool, yes: T, no: T) -> T {
+    if condition {
+        return yes;
+    }
+
+    return no;
+}
+
+fn grade(score: Int) -> String {
+    match score / 10 {
+        case 10: {
+            return "perfect";
+        }
+
+        case 9: {
+            return "great";
+        }
+
+        default: {
+            return "ok";
+        }
+    }
+}
+
+fn makeLogger(prefix: String) -> fn(String) -> Int {
+    let lines = 0;
+
+    return fn(message: String) -> Int {
+        lines = lines + 1;
+        println(prefix, toString(lines) + ":", message);
+        return lines;
+    };
+}
+
+fn collatz(n: Int) -> Int {
+    let steps = 0;
+
+    while n != 1 {
+        if n % 2 == 0 {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+
+        steps = steps + 1;
+    }
+
+    return steps;
+}
+
+fn main() -> Int {
+    let log = makeLogger("log");
+
+    let account = open("ada", 50, 120, 30);
+    log(account.describe());
+    log("largest deposit " + toString(account.largest()));
+    log(toString(account.history) + " / " + toString(account.history.len()));
+
+    let empty = open("bob");
+    log(empty.describe());
+
+    log(pick<String>(account.balance > 100, "rich", "poor"));
+    log(grade(100) + " " + grade(95) + " " + grade(42));
+    log("collatz(27) = " + toString(collatz(27)));
+
+    let ratio = 7.0 / 2.0;
+    let unset: Int? = null;
+    log(toString(ratio) + " " + toString(unset ?? -1));
+
+    let words = ["a", "b", "c"];
+    let joined = "";
+
+    for word in words {
+        if word == "b" {
+            continue;
+        }
+
+        joined = joined + word;
+    }
+
+    return log(joined);
+}

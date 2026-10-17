@@ -1,0 +1,57 @@
+// A generic call that says nothing of its types takes them from how its
+// variable is used afterwards: as an argument, a value returned or kept
+// in a variable of a type, an array something is pushed onto.
+
+struct Order {
+    id: Int;
+    lines: [String];
+}
+
+fn none<T>() -> [T] {
+    return [];
+}
+
+fn nothing<T>() -> T? {
+    return null;
+}
+
+fn describe(order: Order) -> String {
+    return "#${order.id}: ${order.lines.join(", ")}";
+}
+
+fn printAll(texts: [String]) {
+    for text in texts {
+        println(" ", text);
+    }
+}
+
+// The lines of an order, the empty ones left out
+fn cleaned(lines: [String]) -> [String] {
+    let kept = none();
+
+    for line in lines {
+        if line.trim() != "" {
+            kept.push(line.trim());
+        }
+    }
+
+    return kept;
+}
+
+fn main() -> Int {
+    let order = Order { id: 7, lines: cleaned(["tea", " ", "  bread ", ""]) };
+    println(describe(order));
+
+    let notes = none();
+    printAll(notes);
+
+    let counts = none();
+    counts.push(3);
+    counts.push(4);
+    println(counts.sum());
+
+    let fallback = nothing();
+    let chosen: Order? = fallback;
+    println(chosen?.id ?? 0);
+    return 0;
+}

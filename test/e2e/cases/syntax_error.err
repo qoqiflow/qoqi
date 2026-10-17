@@ -1,0 +1,4 @@
+[ERROR] E0003: expected ';' after '1', found 'let'
+Suggestion: Add ';' to end the statement
+[ERROR] E0001: expected expression, found ';'
+syntax_error.qi:4:13

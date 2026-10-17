@@ -1,0 +1,14 @@
+{
+    "name": "qoqi/flow",
+    "description": "Carry out the steps of Qoqi's flows in a PHP application",
+    "type": "library",
+    "require": {
+        "php": ">=8.4",
+        "ext-json": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Qoqi\\Flow\\": "src/"
+        }
+    }
+}

@@ -1,0 +1,6 @@
+// The front door of the folder game/physics: it passes on the names most
+// programs need, so they can write `import game.physics.{Shape, overlaps};`
+// without knowing which file declares what.
+
+pub import game.physics.collide.{Shape, overlaps};
+pub import game.physics.body.{Body};

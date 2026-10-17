@@ -1,0 +1,57 @@
+# Binaries
+/qoqi
+cmd/qoqi/qoqi
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+
+# Go build artifacts and coverage
+*.o
+*.a
+coverage.txt
+coverage.html
+*.coverprofile
+
+# ...the expected output of example and end-to-end programs is kept
+*.out
+!examples/expected/*.out
+!test/e2e/cases/*.out
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+*.tmp
+
+# Packaged editor extensions
+*.vsix
+
+# Packages installed by qoqi install
+vendor/
+
+# What qoqi serve leaves where it runs: its store, the address of the
+# daemon, and its token, which is a secret
+*.db
+*.db-wal
+*.db-shm
+*.db.daemon
+*.db.token
+
+# Local state of coding agents
+.claude/worktrees/
+.claude/settings.local.json
+
+# The console's dependencies and build state (console/). What it builds
+# into internal/flowd/console is kept: building qoqi needs no node
+node_modules/
+*.tsbuildinfo
+console/coverage/
+console/.vite/

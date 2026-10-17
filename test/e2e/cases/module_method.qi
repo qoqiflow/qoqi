@@ -1,0 +1,9 @@
+// A method of a type of the module, called as a function of the module
+
+import std.json;
+
+fn main() -> Int {
+    let data = json.parse("[1, 2]").expect("a document");
+    println(json.stringify(data));
+    return 0;
+}

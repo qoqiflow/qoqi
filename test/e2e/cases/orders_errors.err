@@ -1,0 +1,13 @@
+[ERROR] E2015: [String] has no method 'sum'
+orders_errors.qi:12:45
+Only [Float] and [Int] have it; give [String] one of your own: impl [String] { fn sum(...) { ... } }
+[ERROR] E2009: sorted takes the function that says which of two items comes first: only numbers and texts have an order of their own
+orders_errors.qi:13:24
+Say which comes first: ops.sorted(items) when Job is Ordered, items.sortedBy(item -> item.rank), or items.sorted((a, b) -> ...)
+[ERROR] E2014: Job has no field 'tilte'
+orders_errors.qi:14:25
+Did you mean 'title'?
+[ERROR] E2015: an array has no method 'firstWhere'
+orders_errors.qi:15:27
+[ERROR] E2017: cannot call 'len' on String?: the value may be null
+orders_errors.qi:17:17

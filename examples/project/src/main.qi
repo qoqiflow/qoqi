@@ -1,0 +1,22 @@
+// The entry file of a project. See ../qoqi.json:
+//
+//   "entry"     this file, so `qoqi run examples/project` finds it
+//   "root"      src, so `import app.guests;` is src/app/guests.qi
+//   "packages"  textkit is the folder ../packages/textkit, so
+//               `import textkit.format.pad;` is packages/textkit/format/pad.qi
+
+import app.guests;
+import textkit;                    // packages/textkit.qi
+import textkit.format.pad.{left};  // packages/textkit/format/pad.qi
+
+fn main() -> Int {
+    let list = guests.invited();
+
+    for i, name in list {
+        println(left(toString(i + 1), 3), textkit.title(name));
+    }
+
+    println(textkit.repeat("-", 12));
+    println(guests.count(list), "guests");
+    return 0;
+}

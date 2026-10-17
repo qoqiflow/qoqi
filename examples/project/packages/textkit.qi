@@ -1,0 +1,11 @@
+// The front of the package: what `import textkit;` gives.
+
+import textkit.format.pad;
+
+pub fn title(name: String) -> String {
+    return "* " + name + " *";
+}
+
+pub fn repeat(text: String, times: Int) -> String {
+    return pad.fill(text, times);
+}

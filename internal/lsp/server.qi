@@ -1,0 +1,679 @@
+// The language server of Qoqi: what an editor talks to, to underline
+// mistakes as they are typed, say what a name is, jump to where it is
+// declared, list what a file declares, suggest what to write next and
+// format a file.
+//
+// It speaks the Language Server Protocol over its input and output:
+// messages of JSON, each preceded by a line saying how many bytes it is.
+// What it knows of programs it asks the compiler, through std.compiler.
+// Run it with `qoqi lsp`; the editor starts it and does the talking.
+
+import std.io;
+import std.os;
+import std.json;
+import std.json.{Json};
+import std.dict;
+import std.dict.{Dict};
+import std.encoding;
+import std.result;
+import std.task;
+import std.time;
+import std.formatter;
+import std.compiler;
+import std.compiler.{Problem, Symbol, SymbolKind, Severity, Description, Suggestion};
+
+// How long after the last keystroke a file is checked.
+const settle = 150;
+
+// --- Messages ---
+
+// Reads the next message: header lines, an empty line, then as many bytes
+// of JSON as the header said. Null when the editor has closed the input.
+fn readMessage() -> Json? {
+    let length = 0;
+
+    while true {
+        let line = io.readLine();
+
+        if line == null {
+            return null;
+        }
+
+        if line == "" {
+            break;
+        }
+
+        let header = line.cut(":");
+
+        if header != null {
+            let (name, value) = header;
+
+            if name.trim().lower() == "content-length" {
+                length = value.trim().parseInt() ?? 0;
+            }
+        }
+    }
+
+    let body = io.readBytes(length)?;
+    return json.parse(body).or(Json.Null);
+}
+
+fn send(message: Json) {
+    let body = message.stringify();
+    print("Content-Length: ${body.byteLength()}\r\n\r\n${body}");
+}
+
+fn reply(id: Json, value: Json) {
+    send(json.object().text("jsonrpc", "2.0").set("id", id).set("result", value).done());
+}
+
+fn refuse(id: Json, code: Int, message: String) {
+    let error = json.object().int("code", code).text("message", message).done();
+    send(json.object().text("jsonrpc", "2.0").set("id", id).set("error", error).done());
+}
+
+fn notify(method: String, params: Json) {
+    send(json.object().text("jsonrpc", "2.0").text("method", method).set("params", params).done());
+}
+
+// --- Places ---
+
+// The editor names files by address, file:///home/ada/main.qi, and
+// counts lines and columns from 0; the compiler takes paths and counts
+// from 1.
+
+fn pathOf(uri: String) -> String {
+    let path = uri;
+
+    if path.startsWith("file://") {
+        path = path.from(7);
+    }
+
+    return encoding.fromUrl(path) ?? path;
+}
+
+fn uriOf(path: String) -> String {
+    let parts = path.split("/").map(part -> encoding.toUrl(part));
+    return "file://" + parts.join("/");
+}
+
+fn position(line: Int, column: Int) -> Json {
+    return json.object().int("line", line - 1).int("character", column - 1).done();
+}
+
+// The stretch of one line from a column up to another, not included.
+fn range(line: Int, from: Int, to: Int) -> Json {
+    return json.object().set("start", position(line, from)).set("end", position(line, to)).done();
+}
+
+// --- What the protocol calls things ---
+
+fn severityNumber(severity: Severity) -> Int {
+    match severity {
+        case Severity.Error: {
+            return 1;
+        }
+
+        case Severity.Warning: {
+            return 2;
+        }
+
+        case Severity.Info: {
+            return 3;
+        }
+    }
+}
+
+// The number of a kind in an outline.
+fn outlineKind(kind: SymbolKind) -> Int {
+    match kind {
+        case SymbolKind.Module: {
+            return 2;
+        }
+
+        case SymbolKind.Method: {
+            return 6;
+        }
+
+        case SymbolKind.Field: {
+            return 8;
+        }
+
+        case SymbolKind.Enum: {
+            return 10;
+        }
+
+        case SymbolKind.Trait: {
+            return 11;
+        }
+
+        case SymbolKind.Function: {
+            return 12;
+        }
+
+        case SymbolKind.Variable: {
+            return 13;
+        }
+
+        case SymbolKind.Constant: {
+            return 14;
+        }
+
+        case SymbolKind.Variant: {
+            return 22;
+        }
+
+        case SymbolKind.Struct: {
+            return 23;
+        }
+
+        case SymbolKind.Keyword: {
+            return 14;
+        }
+    }
+}
+
+// The number of a kind among suggestions.
+fn suggestionKind(kind: SymbolKind) -> Int {
+    match kind {
+        case SymbolKind.Method: {
+            return 2;
+        }
+
+        case SymbolKind.Function: {
+            return 3;
+        }
+
+        case SymbolKind.Field: {
+            return 5;
+        }
+
+        case SymbolKind.Variable: {
+            return 6;
+        }
+
+        case SymbolKind.Trait: {
+            return 8;
+        }
+
+        case SymbolKind.Module: {
+            return 9;
+        }
+
+        case SymbolKind.Enum: {
+            return 13;
+        }
+
+        case SymbolKind.Keyword: {
+            return 14;
+        }
+
+        case SymbolKind.Variant: {
+            return 20;
+        }
+
+        case SymbolKind.Constant: {
+            return 21;
+        }
+
+        case SymbolKind.Struct: {
+            return 22;
+        }
+    }
+}
+
+// --- The server ---
+
+// A file open in the editor, as it is there: saved or not.
+struct Document {
+    uri: String;
+    path: String;
+    text: String;
+    version: Int = 0;  // goes up with every change
+    edition: Int = 0;  // the editor's number for this text, which the
+    // problems found in it are sent with
+}
+
+struct Server {
+    documents: Dict<Document>;  // by path
+    // For each open file, the files its last check found something to
+    // say about: they are cleared when it has nothing more to say.
+    flagged: Dict<[String]>;
+    asked: Bool = false;        // whether the editor asked to shut down
+}
+
+// A declaration with what is part of it, for the outline.
+struct Entry {
+    symbol: Symbol;
+    parts: [Symbol];
+}
+
+impl Server {
+    // --- Files ---
+
+    fn opened(params: Json) {
+        let uri = params.find("textDocument.uri")?.text() ?? "";
+
+        let document = Document {
+            uri: uri,
+            path: pathOf(uri),
+            text: params.find("textDocument.text")?.text() ?? "",
+            edition: params.find("textDocument.version")?.int() ?? 0,
+        };
+
+        self.documents.set(document.path, document);
+        compiler.open(document.path, document.text);
+        self.check(document);
+    }
+
+    fn changed(params: Json) {
+        let document = self.documentOf(params);
+
+        if document == null {
+            return;
+        }
+
+        // The whole text is sent with every change
+        let changes = params.get("contentChanges")?.items() ?? [];
+
+        if changes.len() == 0 {
+            return;
+        }
+
+        document.text = changes[changes.len() - 1].get("text")?.text() ?? document.text;
+        document.version++;
+        document.edition = params.find("textDocument.version")?.int() ?? document.edition;
+        compiler.open(document.path, document.text);
+
+        // Checked once the typing pauses, not at every letter
+        let version = document.version;
+
+        task.run(fn() {
+            wait time.after(settle.milliseconds());
+
+            if document.version == version && self.documents.has(document.path) {
+                self.check(document);
+            }
+        });
+    }
+
+    fn closed(params: Json) {
+        let document = self.documentOf(params);
+
+        if document == null {
+            return;
+        }
+
+        self.documents.remove(document.path);
+        compiler.close(document.path);
+        Server.publish(document.uri, [], null);
+
+        for file in self.flagged.getOr(document.path, []) {
+            Server.publish(uriOf(file), [], null);
+        }
+
+        self.flagged.remove(document.path);
+    }
+
+    fn documentOf(params: Json) -> Document? {
+        return self.documents.get(pathOf(params.find("textDocument.uri")?.text() ?? ""));
+    }
+
+    // --- Mistakes ---
+
+    // Compiles a file and tells the editor what there is to say: about
+    // the file, and about the modules it imports.
+    fn check(document: Document) {
+        let byFile = dict.empty<[Problem]>();
+        byFile.set(document.path, []);
+
+        for problem in compiler.check(document.path, document.text) {
+            let file = problem.at.file;
+
+            if file.startsWith("<") {
+                file = document.path;
+            }
+
+            byFile.update(file, [], known -> known.concat([problem]));
+        }
+
+        for file in self.flagged.getOr(document.path, []) {
+            if !byFile.has(file) {
+                Server.publish(uriOf(file), [], null);
+            }
+        }
+
+        for file in byFile.keys() {
+            if file == document.path {
+                // Said of the text as it was checked, which the editor
+                // may have changed since
+                Server.publish(document.uri, byFile.getOr(file, []), document.edition);
+            } else {
+                Server.publish(uriOf(file), byFile.getOr(file, []), null);
+            }
+        }
+
+        self.flagged.set(document.path, byFile.keys().filter(file -> file != document.path));
+    }
+
+    // Tells the editor what is wrong in a file; for an open one, with the
+    // editor's number for the text that was checked.
+    static fn publish(uri: String, problems: [Problem], edition: Int?) {
+        let list = json.array(problems, fn(problem: Problem) -> Json {
+            let message = problem.message;
+
+            if problem.suggestion != "" {
+                message = "${message}\n${problem.suggestion}";
+            }
+
+            return json.object()
+                .set("range", range(problem.at.line, problem.at.column, problem.endColumn))
+                .int("severity", severityNumber(problem.severity))
+                .text("code", problem.code)
+                .text("source", "qoqi")
+                .text("message", message)
+                .done();
+        });
+
+        let params = json.object().text("uri", uri).set("diagnostics", list);
+
+        if edition != null {
+            params = params.int("version", edition);
+        }
+
+        notify("textDocument/publishDiagnostics", params.done());
+    }
+
+    // --- Questions ---
+
+    // The name under the cursor, if the file is open and there is one.
+    fn nameAt(params: Json) -> Description? {
+        let document = self.documentOf(params)?;
+        let line = params.find("position.line")?.int() ?? 0;
+        let column = params.find("position.character")?.int() ?? 0;
+        return compiler.describe(document.path, document.text, line + 1, column + 1);
+    }
+
+    fn hover(params: Json) -> Json {
+        let found = self.nameAt(params);
+
+        if found == null {
+            return Json.Null;
+        }
+
+        let text = "```qoqi\n${found.signature}\n```";
+
+        if found.doc != "" {
+            text = "${text}\n\n${found.doc}";
+        }
+
+        let line = (params.find("position.line")?.int() ?? 0) + 1;
+
+        return json.object()
+            .set("contents", json.object().text("kind", "markdown").text("value", text).done())
+            .set("range", range(line, found.startColumn, found.endColumn))
+            .done();
+    }
+
+    fn definition(params: Json) -> Json {
+        let declared = self.nameAt(params)?.declared;
+
+        // What is declared inside the library has no file to open
+        if declared == null || declared.file.startsWith("<") {
+            return Json.Null;
+        }
+
+        return json.object()
+            .text("uri", uriOf(declared.file))
+            .set("range", range(declared.line, declared.column, declared.column))
+            .done();
+    }
+
+    fn outline(params: Json) -> Json {
+        let document = self.documentOf(params);
+
+        if document == null {
+            return json.array<Entry>([], entryJson);
+        }
+
+        // Fields, variants and methods go under what they are part of
+        let entries: [Entry] = [];
+
+        for symbol in compiler.symbols(document.path, document.text) {
+            let holder = entries.find(
+                entry -> symbol.container != "" && entry.symbol.name == symbol.container,
+            );
+
+            if holder != null {
+                holder.parts.push(symbol);
+            } else {
+                entries.push(Entry { symbol: symbol, parts: [] });
+            }
+        }
+
+        return json.array(entries, entryJson);
+    }
+
+    fn completion(params: Json) -> Json {
+        let document = self.documentOf(params);
+
+        if document == null {
+            return Json.Null;
+        }
+
+        let line = params.find("position.line")?.int() ?? 0;
+        let column = params.find("position.character")?.int() ?? 0;
+        let found = compiler.complete(document.path, document.text, line + 1, column + 1);
+
+        return json.array(found, fn(suggestion: Suggestion) -> Json {
+            return json.object()
+                .text("label", suggestion.label)
+                .int("kind", suggestionKind(suggestion.kind))
+                .text("detail", suggestion.detail)
+                .done();
+        });
+    }
+
+    // The file, formatted: one change that replaces all of it. None for
+    // a file that is formatted already, or that does not read as a
+    // program yet: the mistake is underlined, and saying it twice helps
+    // nobody.
+    fn formatting(params: Json) -> Json {
+        let document = self.documentOf(params);
+
+        if document == null {
+            return Json.Null;
+        }
+
+        let tidy = formatter.format(document.text).value();
+
+        if tidy == null || tidy == document.text {
+            return Json.Array([]);
+        }
+
+        // From the start to past the last line, wherever that is
+        let lines = document.text.count("\n") + 1;
+
+        let whole = json.object()
+            .set("start", position(1, 1))
+            .set("end", position(lines + 1, 1))
+            .done();
+
+        return Json.Array([json.object().set("range", whole).text("newText", tidy).done()]);
+    }
+
+    // What the server can do, told to the editor when they meet.
+    static fn capabilities() -> Json {
+        let can = json.object()
+            .int("textDocumentSync", 1)
+            .bool("hoverProvider", true)
+            .bool("definitionProvider", true)
+            .bool("documentSymbolProvider", true)
+            .bool("documentFormattingProvider", true)
+            .set(
+                "completionProvider",
+                json.object().set("triggerCharacters", json.texts(["."])).done(),
+            )
+            .done();
+
+        let about = json.object().text("name", "qoqi").done();
+        return json.object().set("capabilities", can).set("serverInfo", about).done();
+    }
+
+    // --- One message ---
+
+    // Answers a question: a message with a number, which the answer
+    // carries back.
+    fn answer(method: String, params: Json) -> Json? {
+        match method {
+            case "initialize": {
+                return Server.capabilities();
+            }
+
+            case "shutdown": {
+                self.asked = true;
+                return Json.Null;
+            }
+
+            case "textDocument/hover": {
+                return self.hover(params);
+            }
+
+            case "textDocument/definition": {
+                return self.definition(params);
+            }
+
+            case "textDocument/documentSymbol": {
+                return self.outline(params);
+            }
+
+            case "textDocument/completion": {
+                return self.completion(params);
+            }
+
+            case "textDocument/formatting": {
+                return self.formatting(params);
+            }
+
+            default: {
+                return null;
+            }
+        }
+    }
+
+    // Takes note of something the editor says without waiting for an
+    // answer.
+    fn note(method: String, params: Json) {
+        match method {
+            case "textDocument/didOpen": {
+                self.opened(params);
+            }
+
+            case "textDocument/didChange": {
+                self.changed(params);
+            }
+
+            case "textDocument/didClose": {
+                self.closed(params);
+            }
+
+            case "textDocument/didSave": {
+                let document = self.documentOf(params);
+
+                if document != null {
+                    self.check(document);
+                }
+            }
+
+            case "exit": {
+                if self.asked {
+                    os.exit(0);
+                }
+
+                os.exit(1);
+            }
+
+            default: {}
+        }
+    }
+
+    fn handle(message: Json) {
+        let method = message.get("method")?.text() ?? "";
+        let params = message.get("params") ?? Json.Null;
+        let id = message.get("id");
+
+        if id == null {
+            // A mistake in the server must not end it: the editor would
+            // lose everything it is shown
+            let failure = result.guard(fn() {
+                self.note(method, params);
+            });
+
+            if failure != null {
+                io.printError("qoqi lsp: ${method} failed: ${failure.describe()}\n");
+            }
+
+            return;
+        }
+
+        if method == "" {
+            return;
+        }  // An answer to something the server asked: it asks nothing
+
+        match result.attempt(fn() -> Json? {
+            return self.answer(method, params);
+        }) {
+            case Ok(value): {
+                if value == null {
+                    refuse(id, -32601, "the server does not know '${method}'");
+                } else {
+                    reply(id, value);
+                }
+            }
+
+            case Err(failure): {
+                io.printError("qoqi lsp: ${method} failed: ${failure.describe()}\n");
+                refuse(id, -32603, failure.message);
+            }
+        }
+    }
+}
+
+fn entryJson(entry: Entry) -> Json {
+    return symbolJson(entry.symbol)
+        .set(
+            "children",
+            json.array(entry.parts, fn(part: Symbol) -> Json {
+                return symbolJson(part).done();
+            }),
+        )
+        .done();
+}
+
+fn symbolJson(symbol: Symbol) -> json.Object {
+    let name = range(symbol.line, symbol.column, symbol.column + symbol.name.len());
+
+    return json.object()
+        .text("name", symbol.name)
+        .text("detail", symbol.detail)
+        .int("kind", outlineKind(symbol.kind))
+        .set("range", name)
+        .set("selectionRange", name);
+}
+
+fn main() -> Int {
+    let server = Server { documents: dict.empty<Document>(), flagged: dict.empty<[String]>() };
+
+    while true {
+        let message = readMessage();
+
+        if message == null {
+            break;
+        }
+
+        server.handle(message);
+    }
+
+    // The editor went away without saying goodbye
+    return 1;
+}

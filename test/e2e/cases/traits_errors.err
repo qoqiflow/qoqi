@@ -1,0 +1,49 @@
+[ERROR] E2013: trait Source takes 1 type arguments (<T>), got 0
+traits_errors.qi:32:1
+Say what T is for Counter: impl Source<...> for Counter
+[ERROR] E2013: method 'next' returns Int?, trait requires String?
+traits_errors.qi:41:5
+Return type should be String? to match trait 'Source'
+[ERROR] E2001: field 'port' is of type Int, and its value when none is given is of type String
+traits_errors.qi:47:17
+Give a value of type Int, or change the type of the field
+[ERROR] E2015: nothing is known of a T: it has no method 'compare'
+traits_errors.qi:56:13
+Require a trait that has the method where T is introduced: <T: Trait>
+[ERROR] E2006: operator < not defined for types T and T
+traits_errors.qi:56:34
+Require it of the type parameter: <T: Ordered>, with: import std.ops.{Ordered};
+[ERROR] E2015: T is only known to implement Show, which has no method 'compare'
+traits_errors.qi:60:13
+[ERROR] E2036: Point does not implement Ordered, which function 'largest' requires of T
+traits_errors.qi:73:13
+Add: impl Ordered for Point { ... }
+[ERROR] E2036: Counter does not implement Show, which struct Box requires of T
+traits_errors.qi:74:13
+Add: impl Show for Counter { ... }
+[ERROR] E2036: Shown does not implement Ordered, which method 'bigger' requires of T
+traits_errors.qi:76:14
+Add: impl Ordered for Shown { ... }
+[ERROR] E2006: operator < not defined for types Point and Point
+traits_errors.qi:77:15
+Implement the trait Ordered for Point (method 'compare'), with: import std.ops.{Ordered};
+[ERROR] E2006: operator + not defined for types Point and Point
+traits_errors.qi:78:15
+Implement the trait Add for Point (method 'plus'), with: import std.ops.{Add};
+[ERROR] E2011: cannot iterate over type Point
+traits_errors.qi:79:14
+Loop over an array it holds, or implement Iterable<...> for Point (method 'iterate'), with: import std.ops.{Iterable};
+[ERROR] E2006: type Point cannot be indexed
+traits_errors.qi:80:14
+Call one of its methods, or implement Indexed<Key, Value> for Point (method 'at'), with: import std.ops.{Indexed};
+[ERROR] E2018: struct literal of Conf is missing 'name'
+traits_errors.qi:81:13
+Every field needs a value; use null for an optional field, or give the field a value of its own in the struct: name: Type = value;
+[ERROR] E2014: a method can be used as a value on a variable or a field, not on the result of a computation
+traits_errors.qi:82:13
+Put the value in a variable first, then use variable.get
+[ERROR] E2001: cannot assign type Words to Source<Int>
+traits_errors.qi:83:30
+Ensure the value is of type Source<Int>
+[ERROR] E2015: a number has no method 'nope'
+traits_errors.qi:84:14

@@ -1,0 +1,187 @@
+// Regular expressions: finding and replacing text by its shape.
+//
+//     let date = regex.compile("(\\d{4})-(\\d{2})-(\\d{2})").expect("a valid pattern");
+//     let found = date.find("released on 2026-10-13");
+//     if found != null { println(found.text, found.groups[0]); }      // 2026-10-13 2026
+//
+// The syntax is that of RE2: no look-behind and no back-references, and
+// in exchange a search always takes time proportional to the text.
+
+import std.result.{Result};
+import std.strings;
+import std.arrays;
+import std.ops.{Show};
+
+// A pattern that has been checked.
+pub struct Regex {
+    pattern: String;
+    names: [String];  // the name of each group, "" for those without one
+}
+
+// One place where a pattern fits.
+pub struct Match {
+    text: String;      // what was matched
+    start: Int;        // where it starts
+    end: Int;          // where it stops, just after its last character
+    groups: [String];  // what each ( ) took, the first at 0; "" for one that took no part
+    names: [String];
+}
+
+impl Match {
+    // What a group named with (?P<name>...) took, or null if the pattern
+    // has no group of that name.
+    pub fn named(name: String) -> String? {
+        let at = self.names.indexOf(name);
+
+        if at == null || name == "" {
+            return null;
+        }
+
+        return self.groups[at];
+    }
+
+    // What a group took, counted as $n counts in replace: group(1) is
+    // the first ( ), group(0) the whole match. Null if there is no such
+    // group.
+    pub fn group(index: Int) -> String? {
+        if index == 0 {
+            return self.text;
+        }
+
+        return self.groups.at(index - 1);
+    }
+}
+
+// Why a text is not a pattern.
+pub struct PatternError {
+    pattern: String;
+    message: String;
+}
+
+impl PatternError {
+    pub fn describe() -> String {
+        return "'${self.pattern}' is not a regular expression: ${self.message}";
+    }
+}
+
+// Printed, and put in a text, as its sentence.
+impl Show for PatternError {
+    fn show() -> String {
+        return self.describe();
+    }
+}
+
+// Checks a pattern. In a text of a program a backslash is written twice:
+// "\\d+".
+pub fn compile(pattern: String) -> Result<Regex, PatternError> {
+    let wrong = mistake(pattern);
+
+    if wrong != null {
+        return Err(PatternError { pattern: pattern, message: wrong });
+    }
+
+    let names = groupNames(pattern);
+    return Ok(Regex { pattern: pattern, names: names.slice(1, names.len()) });
+}
+
+// The same, for a pattern written in the program: one that is wrong is a
+// mistake to fix, so it stops the program.
+pub fn must(pattern: String) -> Regex {
+    match compile(pattern) {
+        case Ok(re): {
+            return re;
+        }
+
+        case Err(error): {
+            panic("std.regex.must: " + error.describe());
+        }
+    }
+}
+
+impl Regex {
+    // Whether the pattern fits somewhere in the text.
+    pub fn matches(text: String) -> Bool {
+        return test(self.pattern, text);
+    }
+
+    // The first place it fits, or null.
+    pub fn find(text: String) -> Match? {
+        return self.found(text, 1).first();
+    }
+
+    // What the groups of the first match took, or null if there is none.
+    //
+    //     let parts = date.capture("on 2026-10-13")?;      // ["2026", "10", "13"]
+    pub fn capture(text: String) -> [String]? {
+        return self.find(text)?.groups;
+    }
+
+    // Every place it fits, from left to right, without overlap.
+    pub fn findAll(text: String) -> [Match] {
+        return self.found(text, -1);
+    }
+
+    // The text of every match.
+    pub fn all(text: String) -> [String] {
+        return self.findAll(text).map(m -> m.text);
+    }
+
+    // The text with every match replaced. In the replacement, $1 is what
+    // the first group took, $0 the whole match and ${name} what a named
+    // one did; in a text of a program that one is written "\${name}", for
+    // it not to be read as a value to put in the text. A name runs as far
+    // as letters, digits and _ go: $1_x is the group named 1_x, and the
+    // first group followed by _x is written "\${1}_x".
+    pub fn replace(text: String, with: String) -> String {
+        return substitute(self.pattern, text, with);
+    }
+
+    // The text with every match replaced by what a function makes of it.
+    //
+    //     numbers.replaceWith("3 apples", m -> m.text + m.text)
+    pub fn replaceWith(text: String, convert: fn(Match) -> String) -> String {
+        let out: [String] = [];
+        let from = 0;
+
+        for found in self.findAll(text) {
+            out.push(text.substring(from, found.start));
+            out.push(convert(found));
+            from = found.end;
+        }
+
+        out.push(text.from(from));
+        return out.join("");
+    }
+
+    // The pieces of the text between the matches.
+    pub fn split(text: String) -> [String] {
+        return pieces(self.pattern, text);
+    }
+
+    fn found(text: String, limit: Int) -> [Match] {
+        let out: [Match] = [];
+
+        // Per match: where it starts, where it stops, its text, its groups
+        for row in search(self.pattern, text, limit) {
+            out.push(Match {
+                text: row[2],
+                start: row[0].parseInt() ?? 0,
+                end: row[1].parseInt() ?? 0,
+                groups: row.slice(3, row.len()),
+                names: self.names,
+            });
+        }
+
+        return out;
+    }
+}
+
+// A text as a pattern that matches exactly it: escape("1+1") is "1\+1".
+pub extern fn escape(text: String) -> String;
+
+extern fn mistake(pattern: String) -> String?;
+extern fn groupNames(pattern: String) -> [String];
+extern fn test(pattern: String, text: String) -> Bool;
+extern fn search(pattern: String, text: String, limit: Int) -> [[String]];
+extern fn substitute(pattern: String, text: String, with: String) -> String;
+extern fn pieces(pattern: String, text: String) -> [String];

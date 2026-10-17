@@ -1,0 +1,347 @@
+// A map: values found by a key of any type, a number, a value of an enum,
+// a struct, a tuple, and not only a text, which is what Dict is for.
+//
+//     let seats = map.empty<(Int, Int), String>();
+//     seats.set((3, 4), "ada");
+//     seats.get((3, 4)) ?? "free"
+//
+// Two keys are the same key when they are written the same, as toString
+// writes them, and are equal, ==. So 1 and "1" are two keys of a
+// Map<Int | String, V>: they are written the same, and are not equal.
+// Keys come back in the order they were first set.
+//
+// A literal makes one: {(3, 4): "ada", (3, 5): "alan"} is a Map, and
+// {"ada": 36} a Dict.
+
+import std.dict;
+import std.dict.{Dict, shownInside};
+import std.ops.{Iterable, Indexed, IndexedSet, Equal, Show};
+
+// The keys and the values are two arrays, in the order the keys were
+// first set: the value of keys[i] is values[i]. The index gives, for the
+// text of a key, where the keys written that way are, which finds one in
+// about the same time however many there are.
+//
+// A key taken out leaves its place empty, marked in dead, and the empty
+// places are taken out together once they are half of all.
+pub struct Map<K, V> {
+    priv index: Dict<[Int]>;
+    priv keys: [K] = [];
+    priv values: [V] = [];
+    priv dead: [Bool] = [];
+    priv count: Int = 0;
+    priv removed: Int = 0;
+
+    // For set.by: the text of a key, which alone then tells two keys
+    // apart. Null for a map, whose keys are written with toString.
+    priv keyText: (fn(K) -> String)? = null;
+}
+
+// An empty map. Say what it holds: map.empty<Int, String>().
+pub fn empty<K, V>() -> Map<K, V> {
+    return Map<K, V> { index: dict.empty<[Int]>() };
+}
+
+// An empty map whose keys are told apart by the text `text` gives for
+// them alone, and not by ==. For the library: it is what set.by is.
+pub fn keyedBy<K, V>(text: fn(K) -> String) -> Map<K, V> {
+    return Map<K, V> { index: dict.empty<[Int]>(), keyText: text };
+}
+
+// A map of the keys and values of an array of pairs; a key given twice
+// has the value given last.
+pub fn of<K, V>(entries: [(K, V)]) -> Map<K, V> {
+    let made = empty<K, V>();
+
+    for (key, value) in entries {
+        made.set(key, value);
+    }
+
+    return made;
+}
+
+// `seats[(3, 4)]` is what get gives, `seats[(3, 4)] = "ada";` is set, and
+// `for key in seats` goes through the keys.
+impl<K, V> Iterable<K> for Map<K, V> {
+    fn iterate() -> [K] {
+        return self.keys();
+    }
+}
+
+impl<K, V> Indexed<K, V?> for Map<K, V> {
+    fn at(key: K) -> V? {
+        return self.get(key);
+    }
+}
+
+impl<K, V> IndexedSet<K, V> for Map<K, V> {
+    fn put(key: K, value: V) {
+        self.set(key, value);
+    }
+}
+
+// Two maps are equal when they have the same keys, with equal values,
+// whatever order the keys were set in.
+impl<K, V> Equal for Map<K, V> {
+    fn equals(other: Map<K, V>) -> Bool {
+        if self.count != other.count {
+            return false;
+        }
+
+        for (key, value) in self.entries() {
+            if !other.has(key) || other.get(key) != value {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+// A map is written as its literal is: {(3, 4): "ada"}.
+impl<K, V> Show for Map<K, V> {
+    fn show() -> String {
+        let parts: [String] = [];
+
+        for (key, value) in self.entries() {
+            parts.push("${shownInside(key)}: ${shownInside(value)}");
+        }
+
+        return "{" + parts.join(", ") + "}";
+    }
+}
+
+impl<K, V> Map<K, V> {
+    pub fn len() -> Int {
+        return self.count;
+    }
+
+    pub fn isEmpty() -> Bool {
+        return self.count == 0;
+    }
+
+    // The value of a key, or null when the map does not have it.
+    pub fn get(key: K) -> V? {
+        let at = self.find(key);
+
+        if at < 0 {
+            return null;
+        }
+
+        return self.values[at];
+    }
+
+    // The value of a key, or `fallback` when the map does not have it.
+    pub fn getOr(key: K, fallback: V) -> V {
+        let at = self.find(key);
+
+        if at < 0 {
+            return fallback;
+        }
+
+        return self.values[at];
+    }
+
+    // The value of a key, which is first set to what `make` gives when the
+    // map does not have it:
+    //
+    //     byTeam.getOrSet(player.team, () -> []).push(player);
+    pub fn getOrSet(key: K, make: fn() -> V) -> V {
+        let at = self.find(key);
+
+        if at >= 0 {
+            return self.values[at];
+        }
+
+        let value = make();
+        self.add(key, value);
+        return value;
+    }
+
+    pub fn has(key: K) -> Bool {
+        return self.find(key) >= 0;
+    }
+
+    // Sets the value of a key, replacing the one it had.
+    pub fn set(key: K, value: V) {
+        let at = self.find(key);
+
+        if at >= 0 {
+            self.values[at] = value;
+            return;
+        }
+
+        self.add(key, value);
+    }
+
+    // Gives a key the value `change` makes of the one it has, or of
+    // `start` when it has none: counts.update(word, 0, n -> n + 1).
+    pub fn update(key: K, start: V, change: fn(V) -> V) {
+        let at = self.find(key);
+
+        if at >= 0 {
+            self.values[at] = change(self.values[at]);
+        } else {
+            self.add(key, change(start));
+        }
+    }
+
+    // Takes a key out, and says whether the map had it.
+    pub fn remove(key: K) -> Bool {
+        let text = self.textOf(key);
+        let at = self.findIn(text, key);
+
+        if at < 0 {
+            return false;
+        }
+
+        let places = self.index.get(text) ?? [];
+        let kept = places.filter(place -> place != at);
+
+        if kept.isEmpty() {
+            self.index.remove(text);
+        } else {
+            self.index.set(text, kept);
+        }
+
+        self.dead[at] = true;
+        self.count--;
+        self.removed++;
+
+        if self.removed * 2 > self.keys.len() {
+            self.compact();
+        }
+
+        return true;
+    }
+
+    // The keys, in the order they were first set.
+    pub fn keys() -> [K] {
+        let out: [K] = [];
+
+        for at, key in self.keys {
+            if !self.dead[at] {
+                out.push(key);
+            }
+        }
+
+        return out;
+    }
+
+    // The values, in the order of their keys.
+    pub fn values() -> [V] {
+        let out: [V] = [];
+
+        for at, value in self.values {
+            if !self.dead[at] {
+                out.push(value);
+            }
+        }
+
+        return out;
+    }
+
+    // Each key with its value, in the order of the keys.
+    //
+    //     for (seat, name) in seats.entries() { ... }
+    pub fn entries() -> [(K, V)] {
+        let out: [(K, V)] = [];
+
+        for at, key in self.keys {
+            if !self.dead[at] {
+                out.push((key, self.values[at]));
+            }
+        }
+
+        return out;
+    }
+
+    // Calls the function with each key and its value.
+    pub fn each(action: fn(K, V) -> Void) {
+        for (key, value) in self.entries() {
+            action(key, value);
+        }
+    }
+
+    // A map of its own, with the same keys and values.
+    pub fn copy() -> Map<K, V> {
+        let made = Map<K, V> { index: dict.empty<[Int]>(), keyText: self.keyText };
+
+        for (key, value) in self.entries() {
+            made.add(key, value);
+        }
+
+        return made;
+    }
+
+    // The text a key is found by.
+    fn textOf(key: K) -> String {
+        let keyText = self.keyText;
+
+        if keyText != null {
+            return keyText(key);
+        }
+
+        return toString(key);
+    }
+
+    // Where a key is among the keys, or -1.
+    fn find(key: K) -> Int {
+        return self.findIn(self.textOf(key), key);
+    }
+
+    // Where a key written as `text` is among the keys, or -1.
+    fn findIn(text: String, key: K) -> Int {
+        let places = self.index.get(text);
+
+        if places == null {
+            return -1;
+        }
+
+        if self.keyText != null {
+            return places[0];
+        }
+
+        for at in places {
+            if self.keys[at] == key {
+                return at;
+            }
+        }
+
+        return -1;
+    }
+
+    // Adds a key the map does not have, after the others.
+    fn add(key: K, value: V) {
+        let at = self.keys.len();
+        self.keys.push(key);
+        self.values.push(value);
+        self.dead.push(false);
+        self.count++;
+
+        let text = self.textOf(key);
+        let places = self.index.get(text);
+
+        if places == null {
+            self.index.set(text, [at]);
+        } else {
+            places.push(at);
+        }
+    }
+
+    // Takes the empty places out, and makes the index of what is left.
+    fn compact() {
+        let keys = self.keys();
+        let values = self.values();
+        self.keys = [];
+        self.values = [];
+        self.dead = [];
+        self.count = 0;
+        self.removed = 0;
+        self.index = dict.empty<[Int]>();
+
+        for i, key in keys {
+            self.add(key, values[i]);
+        }
+    }
+}

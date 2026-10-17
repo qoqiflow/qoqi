@@ -1,0 +1,14 @@
+[ERROR] E2029: enum Shape has no variant 'Square'
+is_patterns_errors.qi:11:21
+Its variants are Circle, Rect, Empty
+[ERROR] E2029: Shape.Rect(Float, Float) holds 2 values, the pattern has 1
+Write the pattern as Shape.Rect(a, b)
+[ERROR] E2029: a value of type Shape is never a Light.Red
+[ERROR] E2029: a value of type Int is never a Shape.Empty
+[ERROR] E2029: a value of type Float is never equal to a String
+[ERROR] E2029: a value of type (Int, Int) is never a tuple of 3 values
+is_patterns_errors.qi:35:16
+[ERROR] E2006: operator > not defined for types Float and String
+[WARNING] E2023: this test always holds: every value of type Wrap fits the pattern
+is_patterns_errors.qi:51:16
+[WARNING] E2023: this test always holds: every value of type (Int, Int) fits the pattern

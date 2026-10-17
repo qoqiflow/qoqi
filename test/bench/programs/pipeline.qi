@@ -1,0 +1,58 @@
+// Closures: functions given to functions, over arrays of records.
+
+struct Order {
+    id: Int;
+    customer: Int;
+    amount: Int;
+    items: Int;
+}
+
+fn orders(count: Int) -> [Order] {
+    let out: [Order] = [];
+
+    for i in 0..count {
+        out.push(Order {
+            id: i,
+            customer: (i * 7919) % 97,
+            amount: (i * 104729) % 5000 + 1,
+            items: i % 9 + 1,
+        });
+    }
+
+    return out;
+}
+
+fn main() -> Int {
+    let all = orders(20000);
+    let total = 0;
+
+    for threshold in 0..12 {
+        let least = threshold * 400;
+        let large = all.filter(order -> order.amount > least);
+        let perItem = large.map(order -> order.amount / order.items);
+        let sum = perItem.fold(0, (acc, n) -> (acc + n) % 1000003);
+        let busiest = large.sumOf(order -> order.items);
+        total = (total + sum + busiest + large.len()) % 1000003;
+    }
+
+    // A counter per customer, each a closure over its own variable
+    let counters: [fn(Int) -> Int] = [];
+
+    for customer in 0..97 {
+        let seen = 0;
+
+        counters.push(fn(amount: Int) -> Int {
+            seen += amount;
+            return seen;
+        });
+    }
+
+    let last = 0;
+
+    for order in all {
+        last = counters[order.customer](order.amount);
+    }
+
+    println(total, last, counters[0](0), counters[96](0));
+    return 0;
+}

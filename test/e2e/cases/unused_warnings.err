@@ -1,0 +1,8 @@
+[WARNING] E8010: module 'std.json' is imported and never used
+unused_warnings.qi:4:8
+[WARNING] E1004: parameter 'label' is never used
+unused_warnings.qi:11:33
+[WARNING] E1004: variable 'skipped' is never used
+unused_warnings.qi:14:9
+[WARNING] E1004: name 'why' is never used
+unused_warnings.qi:23:26

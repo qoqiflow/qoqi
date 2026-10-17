@@ -1,0 +1,75 @@
+// Keywords as names: a small test runner whose cases are called case, a
+// regex whose finds are called match, and a stream called in.
+import std.regex;
+
+struct Case {
+    name: String;
+    in: String;
+    expected: String;
+}
+
+struct Outcome {
+    case: Case;
+    actual: String;
+    passed: Bool;
+}
+
+// The first number in a text, or "none"
+fn firstNumber(in: String) -> String {
+    let match = regex.must("[0-9]+").find(in);
+
+    if match != null {
+        return match.text;
+    }
+
+    return "none";
+}
+
+fn run(case: Case) -> Outcome {
+    let actual = firstNumber(case.in);
+    return Outcome { case: case, actual: actual, passed: actual == case.expected };
+}
+
+fn struct(name: String) -> String {
+    return "struct ${name}";
+}
+
+fn main() -> Int {
+    let cases = [
+        Case { name: "plain", in: "order 42 shipped", expected: "42" },
+        Case { name: "two numbers", in: "7 of 9", expected: "7" },
+        Case { name: "no number", in: "nothing here", expected: "none" },
+        Case { name: "wrong on purpose", in: "room 101", expected: "100" },
+    ];
+
+    let in = cases.map(case -> run(case));
+    let passed = 0;
+
+    for i, case in in {
+        let as = case.passed ? "ok  " : "FAIL";
+        println("${as} ${i + 1}. ${case.case.name}: ${case.actual}");
+
+        if case.passed {
+            passed++;
+        }
+    }
+
+    // A match on a variable called match, inside a loop over in
+    for match in in.map(outcome -> outcome.actual) {
+        let kind = match match {
+            case "none": "no number";
+            default: "a number";
+        };
+
+        println("  ${match} is ${kind}");
+    }
+
+    let import = passed * 100 / in.len();
+    println("${passed} of ${in.len()} passed (${import}%)");
+    println(struct("Case"));
+
+    let extern = [3, 1, 2];
+    extern[0] = extern[1] * 10 + extern[2];
+    println(extern, extern[1..]);
+    return passed == in.len() ? 0 : 1;
+}

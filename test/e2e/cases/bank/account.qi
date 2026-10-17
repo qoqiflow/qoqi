@@ -1,0 +1,41 @@
+// An account keeps its balance to itself: other modules see the owner,
+// and change the balance only through what the account offers.
+
+pub struct Account {
+    owner: String;
+    priv balance: Int = 0;
+    priv history: [Int] = [];
+}
+
+impl Account {
+    pub static fn open(owner: String, deposit: Int = 0) -> Account {
+        let account = Account { owner };
+        account.deposit(deposit);
+        return account;
+    }
+
+    pub fn deposit(cents: Int) {
+        if cents > 0 {
+            self.balance += cents;
+            self.history.push(cents);
+        }
+    }
+
+    pub fn withdraw(cents: Int) -> Result<Int, String> {
+        if cents > self.balance {
+            return Err("${self.owner} has ${self.balance}, not ${cents}");
+        }
+
+        self.balance -= cents;
+        self.history.push(-cents);
+        return Ok(self.balance);
+    }
+
+    pub fn balance() -> Int {
+        return self.balance;
+    }
+
+    pub fn moves() -> Int {
+        return self.history.len();
+    }
+}

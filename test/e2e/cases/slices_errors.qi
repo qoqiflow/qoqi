@@ -1,0 +1,8 @@
+// What the compiler says about parts of arrays and texts used wrongly.
+
+fn main() -> Int {
+    let items = [1, 2, 3];
+    items[0..2] = [7, 8];
+    let count: Int = items[1..];
+    return 0;
+}

@@ -1,0 +1,65 @@
+// Expressions inside strings: "${expression}".
+
+struct Item {
+    name: String;
+    price: Int;
+    count: Int;
+}
+
+enum Status { Paid, Due(Int) }
+
+impl Item {
+    fn total() -> Int {
+        return self.price * self.count;
+    }
+
+    fn line() -> String {
+        return "${self.name.padRight(8)} ${self.count} x ${self.price} = ${"${self.total()}".padLeft(5)}";
+    }
+}
+
+fn describe(status: Status) -> String {
+    match status {
+        case Status.Paid: {
+            return "paid in full";
+        }
+
+        case Status.Due(amount): {
+            return "${amount} still to pay";
+        }
+    }
+}
+
+const CURRENCY = "EUR";
+const HEADER = "Receipt (all prices in ${CURRENCY})";
+
+fn main() -> Int {
+    let items = [
+        Item { name: "pen", price: 3, count: 4 },
+        Item { name: "notebook", price: 12, count: 2 },
+        Item { name: "ink", price: 9, count: 1 },
+    ];
+
+    println(HEADER);
+    println("-".repeat(HEADER.len()));
+
+    for i, item in items {
+        println("${i + 1}. ${item.line()}");
+    }
+
+    let total = items.map(fn(item: Item) -> Int {
+        return item.total();
+    }).sum();
+
+    println("total: ${total} ${CURRENCY} for ${items.len()} kinds of thing");
+    println("average: ${total / items.len()}, most expensive: ${items.map(fn(item: Item) -> Int { return item.price; }).largest() ?? 0}");
+
+    for status in [Status.Paid, Status.Due(total - 20)] {
+        println("status: ${status} -> ${describe(status)}");
+    }
+
+    // What is not an expression: a dollar alone, braces alone, and an escaped \${
+    println("cost: $${total}, a set {a, b}, written as \${total}");
+    println("nested: ${"[${"${items[0].name}".upper()}]"}, values: ${items[0]}");
+    return 0;
+}

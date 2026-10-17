@@ -1,0 +1,273 @@
+// A parcel depot, written the way nobody should: everything the language
+// has, packed as tightly as it parses.
+import std.arrays;
+import std.strings;
+import std.dict.{Dict};
+import std.result.{Result, Failure};
+import std.io as files;
+
+pub import std.math;
+
+const limit = 40;
+const names: [String] = ["north", "south", "east", "west"];
+pub const rate: Float = 1.5e3;
+const mask = 0xFF & ~0b1010 | 1 << 4;
+
+extern fn clock() -> Int;
+
+// What a parcel is.
+pub enum Size { Small, Medium, Large(Int) }
+
+enum Route<T> {
+    Direct(T),  // one hop
+    // through a hub
+    Via(T, T),
+    Lost,
+}
+
+pub struct Parcel<T: Show + Equal> {
+    id: Int;
+    weight: Float = 1.0;
+    to: String;
+    size: Size;
+    tags: [String] = [];   // free text
+    note: String? = null;  // from the sender
+    payload: T;
+}
+
+struct Empty {}
+
+trait Priced {
+    fn price() -> Float;
+
+    fn label() -> String {
+        return "priced";
+    }
+}
+
+trait Source<T> {
+    fn next() -> T?;
+}
+
+impl<T: Show + Equal> Priced for Parcel<T> {
+    fn price() -> Float {
+        if self.weight > 10.0 {
+            return self.weight * rate;
+        } else if self.weight > 5.0 {
+            return rate;
+        } else {
+            return 1.0;
+        }
+    }
+}
+
+impl<T: Show + Equal> Parcel<T> {
+    pub fn heavy() -> Bool {
+        return self.weight >= 20.0 && self.size != Size.Small
+            || self.tags |> arrays.contains("heavy");
+    }
+
+    // Every tag, cleaned.
+    pub fn clean() -> [String] {
+        return self.tags
+            |> arrays.map(tag -> strings.trim(tag))
+            |> arrays.filter(tag -> !strings.isEmpty(tag))
+            |> arrays.sortedByText(tag -> strings.lower(tag))
+            |> arrays.take(limit);
+    }
+
+    fn describe() -> String {
+        return match self.size {
+            case Size.Small: "small";
+            case Size.Medium: "medium";
+
+            case Size.Large(n) if n > 100: {
+                return "huge";
+            }
+
+            case Size.Large(_): "large";
+        };
+    }
+}
+
+fn route<T>(from: T, to: T, hub: T?) -> Route<T> {
+    if hub != null {
+        return Route.Via(from, hub);
+    }
+
+    return Route.Direct(to);
+}
+
+fn sum(numbers: ...Int) -> Int {
+    let total = 0;
+
+    for n in numbers {
+        total += n;
+    }
+
+    return total;
+}
+
+fn apply(f: fn(Int, Int) -> Int, pair: (Int, Int)) -> Int {
+    let (a, b) = pair;
+    return f(a, b);
+}
+
+fn load(path: String) -> Result<[String], String> {
+    let text = files.readFile(path).mapErr(error -> error.describe())?;
+    defer println("read", path);
+
+    defer {
+        println("done");
+    }
+
+    return Result.Ok(strings.lines(text));
+}
+
+fn main() -> Int {
+    let parcel = Parcel<String> { id: 1, to: "north", size: Size.Large(120), payload: "books" };
+
+    let other = Parcel<String> {
+        id: 2,
+        to: "south",
+        size: Size.Small,
+        payload: "pens",
+    };
+
+    let weights: [Float] = [1.0, 2.5, -3.0];
+    let grid = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+
+    let primes = [
+        2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89,
+        97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181,
+        191, 193, 197, 199,
+    ];
+
+    let label = if parcel.heavy() {
+        "heavy"
+    } else if parcel.weight > 2.0 {
+        "medium"
+    } else {
+        "light"
+    };
+
+    let fee = if parcel.weight > 100.0 {
+        println("a big one");
+        parcel.weight * 2.0
+    } else {
+        parcel.weight
+    };
+
+    let double = x -> x * 2;
+    let add = (a, b) -> a + b;
+    let now = () -> clock();
+
+    let shout = fn(text: String) -> String {
+        return strings.upper(text) + "!";
+    };
+
+    let i = 0;
+
+    while i < arrays.len(names) && names[i] != "east" {
+        i++;
+    }
+
+    for index, name in names {
+        if index % 2 == 0 {
+            continue;
+        }
+
+        println(index, name);
+    }
+
+    for (key, value) in arrays.zip(names, weights) {
+        println("${key}: ${value}");
+    }
+
+    for n in 0..=10 {
+        if n is Int && n > 8 {
+            break;
+        }
+    }
+
+    let total = sum(1, 2, 3) + apply(add, (4, 5)) - double(mask >> 2) * -1;
+    let found = arrays.find(names, name -> strings.startsWith(name, "s")) ?? "none";
+    let length = parcel.note?.trim().len() ?? 0;
+    let pair = (1, "one");
+    println(pair.0, pair.1);
+    let answer = parcel.payload as String;
+
+    if other.size is Size.Large(n) && n > 10 {
+        println(n);
+    }
+
+    match route("a", "b", null) {
+        case Route.Direct(to): {
+            println(to);
+        }
+
+        case Route.Via(from, hub): {
+            println(from, hub);
+        }
+
+        case Route.Lost: {}
+    }
+
+    match total {
+        case 0 | 1 | 2: {
+            println("few");
+        }
+
+        case 3..10: {
+            println("some");
+        }
+
+        default: {
+            println("many");
+        }
+    }
+
+    let report = dict.empty<Int>();
+    report.set("north", 1);
+    report.update("north", 0, n -> n + 1);
+
+    names |> arrays.each(fn(name: String) {
+        // each name on a line
+        println(name);
+    });
+
+    let message = "parcel ${parcel.id} to ${strings.upper(parcel.to)} costs ${parcel.price()}";
+
+    let help = """
+        usage: depot <command>
+          add <parcel>
+        """;
+
+    let veryLongConditionNumberOne = true;
+    let veryLongConditionNumberTwo = false;
+    let veryLongConditionNumberThree = true;
+
+    if veryLongConditionNumberOne && veryLongConditionNumberTwo
+        || veryLongConditionNumberThree && !veryLongConditionNumberOne
+    {
+        println(message, help);
+    }
+
+    println(
+        strings.join(
+            arrays.map(names, name -> strings.padLeft(strings.capitalize(name), limit)),
+            ", ",
+        ),
+        total,
+        found,
+        length,
+        answer,
+        label,
+        fee,
+    );
+
+    /* a block comment */ println(shout("done"));  // and a trailing one
+
+    return 0;
+    // nothing after this
+}

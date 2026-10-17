@@ -1,0 +1,7 @@
+[ERROR] E8001: module 'game.physics.gravity' not found
+modules_missing.qi:3:8
+Expected the file test/e2e/cases/game/physics/gravity.qi. Module paths start at the folder of the program's entry file
+[ERROR] E8001: module 'game.physics.body.new' not found
+To import 'new' from the module 'game.physics.body', write: import game.physics.body.{new};
+[ERROR] E8001: module 'game' not found
+Expected the file test/e2e/cases/game.qi

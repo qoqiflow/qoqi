@@ -1,0 +1,11 @@
+Receipt (all prices in EUR)
+---------------------------
+1. pen      4 x 3 =    12
+2. notebook 2 x 12 =    24
+3. ink      1 x 9 =     9
+total: 45 EUR for 3 kinds of thing
+average: 15, most expensive: 12
+status: Paid -> paid in full
+status: Due(25) -> 25 still to pay
+cost: $45, a set {a, b}, written as ${total}
+nested: [PEN], values: {count: 4, name: "pen", price: 3}

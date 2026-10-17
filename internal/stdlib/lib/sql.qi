@@ -1,0 +1,433 @@
+// Databases: a file of SQLite, or a server of Postgres or MySQL, by its
+// address.
+//
+//     import std.sql;
+//     import std.sql.{Value};
+//
+//     let db = sql.open("shop.db").expect("the database");
+//
+//     db.exec("CREATE TABLE IF NOT EXISTS parcels (id TEXT PRIMARY KEY, city TEXT, grams INTEGER)")?;
+//     db.exec("INSERT INTO parcels VALUES (?, ?, ?)", [Value.Text("p-1"), Value.Text("Lyon"), Value.Int(1200)])?;
+//
+//     for row in db.query("SELECT id, grams FROM parcels WHERE city = ?", [Value.Text("Lyon")])? {
+//         println(row.text("id"), row.int("grams"));
+//     }
+//
+// An address is a path, or a server's:
+//
+//     shop.db
+//     postgres://qoqi:secret@db.internal:5432/shop
+//     mysql://qoqi:secret@db.internal:3306/shop
+//
+// A parameter is written ? on every database: on Postgres it becomes $1,
+// $2. What a query gives is rows of Values: a number too large for an
+// Int comes as its digits, a Text; a moment as a text of ISO 8601; bytes
+// that are not text as \x and their hex.
+//
+// Waiting for the database lets the other tasks go on. In a flow, the
+// database is a step's to reach, as the world is; a step that writes only
+// to the store of the flows asks for it with flow.store(), and what it
+// writes is kept with what it gives, in one transaction.
+
+import std.result.{Result};
+import std.ops.{Show};
+
+// A value given to a statement, or found in a row.
+pub enum Value {
+    Null,
+    Int(Int),
+    Float(Float),
+    Text(String),
+    Bool(Bool),
+}
+
+// Why the database said no.
+pub enum ErrorKind {
+    Unreachable,  // the database cannot be opened or reached
+    Query,        // the statement is wrong: its words, a table or a column
+    Constraint,   // a row breaks a rule: a key taken, a null, a reference
+    Conflict,     // ended for another transaction at the same time: run it again
+    Closed,       // the database or the transaction is closed
+    Other,
+}
+
+pub struct Error {
+    kind: ErrorKind;
+    message: String;
+}
+
+impl Error {
+    pub fn describe() -> String {
+        return self.message;
+    }
+}
+
+impl Show for Error {
+    fn show() -> String {
+        return self.message;
+    }
+}
+
+// A database opened.
+pub struct Db {
+    priv id: Int;
+}
+
+// A transaction: what is written in it is kept when it is committed, and
+// not at all when it is rolled back or never ended.
+pub struct Tx {
+    priv id: Int;
+}
+
+// A row a query gave.
+pub struct Row {
+    priv names: [String];
+    priv values: [Value];
+}
+
+// The database at an address, made if it is a file that is not there.
+pub fn open(address: String) -> Result<Db, Error> {
+    let id = openAt(address);
+
+    if id == null {
+        return Err(failure("cannot open ${address}"));
+    }
+
+    return Ok(Db { id: id });
+}
+
+// The transaction of the step running on the database of the store of
+// the flows: what flow.store() gives, which is how a step asks for it.
+pub fn storeOfStep() -> Result<Tx, Error> {
+    let id = storeTx();
+
+    if id == null {
+        return Err(failure("cannot begin the store's transaction"));
+    }
+
+    return Ok(Tx { id: id });
+}
+
+impl Db {
+    // Runs a statement that gives no rows: how many rows it changed.
+    pub fn exec(statement: String, params: [Value] = []) -> Result<Int, Error> {
+        return run(self.id, statement, params);
+    }
+
+    // The rows a statement gives.
+    pub fn query(statement: String, params: [Value] = []) -> Result<[Row], Error> {
+        return rows(self.id, statement, params);
+    }
+
+    // The first row a statement gives, null when it gives none.
+    pub fn one(statement: String, params: [Value] = []) -> Result<Row?, Error> {
+        return first(rows(self.id, statement, params));
+    }
+
+    // A transaction, to commit or roll back.
+    pub fn begin() -> Result<Tx, Error> {
+        let id = begin(self.id);
+
+        if id == null {
+            return Err(failure("cannot begin a transaction"));
+        }
+
+        return Ok(Tx { id: id });
+    }
+
+    // Runs work in a transaction: committed when it gives Ok, rolled back
+    // when it gives Err, which is given back.
+    pub fn transaction<T>(work: fn(Tx) -> Result<T, Error>) -> Result<T, Error> {
+        let tx = self.begin()?;
+
+        match work(tx) {
+            case Ok(value): {
+                tx.commit()?;
+                return Ok(value);
+            }
+
+            case Err(error): {
+                tx.rollback();
+                return Err(error);
+            }
+        }
+    }
+
+    // "sqlite", "postgres" or "mysql".
+    pub fn kind() -> String {
+        return kindOf(self.id);
+    }
+
+    // Closes the database. Closing twice is the same as closing once.
+    pub fn close() {
+        close(self.id);
+    }
+}
+
+impl Tx {
+    // Runs a statement that gives no rows: how many rows it changed.
+    pub fn exec(statement: String, params: [Value] = []) -> Result<Int, Error> {
+        return run(self.id, statement, params);
+    }
+
+    // The rows a statement gives, as the transaction sees them.
+    pub fn query(statement: String, params: [Value] = []) -> Result<[Row], Error> {
+        return rows(self.id, statement, params);
+    }
+
+    // The first row a statement gives, null when it gives none.
+    pub fn one(statement: String, params: [Value] = []) -> Result<Row?, Error> {
+        return first(rows(self.id, statement, params));
+    }
+
+    // Keeps what was written in it. The store's transaction of a step is
+    // not the step's to end: it is committed with what the step gives.
+    pub fn commit() -> Result<Void, Error> {
+        if !end(self.id, true) {
+            return Err(failure("cannot commit"));
+        }
+
+        return Ok();
+    }
+
+    // Forgets what was written in it.
+    pub fn rollback() {
+        end(self.id, false);
+    }
+}
+
+impl Row {
+    // The names of its columns, in order.
+    pub fn columns() -> [String] {
+        return self.names;
+    }
+
+    // The value of a column, null when the row has no such column.
+    pub fn get(column: String) -> Value? {
+        for i, name in self.names {
+            if name == column {
+                return self.values[i];
+            }
+        }
+
+        return null;
+    }
+
+    // A column's text; null when it is NULL, not a text, or not there.
+    pub fn text(column: String) -> String? {
+        if self.get(column) is Value.Text(text) {
+            return text;
+        }
+
+        return null;
+    }
+
+    // A column's whole number; null when it is NULL, not one, or not there.
+    pub fn int(column: String) -> Int? {
+        if self.get(column) is Value.Int(n) {
+            return n;
+        }
+
+        return null;
+    }
+
+    // A column's number, whole or not; null when it is NULL, not a
+    // number, or not there.
+    pub fn float(column: String) -> Float? {
+        match self.get(column) {
+            case Value.Float(f): {
+                return f;
+            }
+
+            case Value.Int(n): {
+                return n.toFloat();
+            }
+
+            default: {
+                return null;
+            }
+        }
+    }
+
+    // A column's truth: a boolean, or 0 and 1 as SQLite and MySQL keep
+    // it; null otherwise.
+    pub fn bool(column: String) -> Bool? {
+        match self.get(column) {
+            case Value.Bool(b): {
+                return b;
+            }
+
+            case Value.Int(n): {
+                return n != 0;
+            }
+
+            default: {
+                return null;
+            }
+        }
+    }
+
+    // Whether a column is NULL. A column the row has not is not.
+    pub fn isNull(column: String) -> Bool {
+        return self.get(column) is Value.Null;
+    }
+}
+
+impl Show for Row {
+    fn show() -> String {
+        let parts: [String] = [];
+
+        for i, name in self.names {
+            parts.push("${name}: ${shown(self.values[i])}");
+        }
+
+        return "{" + parts.join(", ") + "}";
+    }
+}
+
+fn shown(value: Value) -> String {
+    match value {
+        case Value.Null: {
+            return "null";
+        }
+
+        case Value.Int(n): {
+            return "${n}";
+        }
+
+        case Value.Float(f): {
+            return "${f}";
+        }
+
+        case Value.Text(text): {
+            return "\"${text}\"";
+        }
+
+        case Value.Bool(b): {
+            return "${b}";
+        }
+    }
+}
+
+// --- What crosses to the runtime: a letter and what follows it ---
+
+fn token(value: Value) -> String {
+    match value {
+        case Value.Null: {
+            return "n";
+        }
+
+        case Value.Int(n): {
+            return "i${n}";
+        }
+
+        case Value.Float(f): {
+            return "f${f}";
+        }
+
+        case Value.Text(text): {
+            return "t" + text;
+        }
+
+        case Value.Bool(b): {
+            return if b { "b1" } else { "b0" };
+        }
+    }
+}
+
+fn valueOf(token: String) -> Value {
+    match token[0] {
+        case "i": {
+            return Value.Int(token.from(1).parseInt() ?? 0);
+        }
+
+        case "f": {
+            return Value.Float(token.from(1).parseFloat() ?? 0.0);
+        }
+
+        case "t": {
+            return Value.Text(token.from(1));
+        }
+
+        case "b": {
+            return Value.Bool(token == "b1");
+        }
+
+        default: {
+            return Value.Null;
+        }
+    }
+}
+
+fn run(handle: Int, statement: String, params: [Value]) -> Result<Int, Error> {
+    let changed = exec(handle, statement, params.map(token));
+
+    if changed == null {
+        return Err(failure("cannot run ${statement}"));
+    }
+
+    return Ok(changed);
+}
+
+fn rows(handle: Int, statement: String, params: [Value]) -> Result<[Row], Error> {
+    let found = query(handle, statement, params.map(token));
+
+    if found == null {
+        return Err(failure("cannot query ${statement}"));
+    }
+
+    let width = found[0].parseInt() ?? 0;
+    let names = found.slice(1, 1 + width);
+    let out: [Row] = [];
+    let at = 1 + width;
+
+    while width > 0 && at < found.len() {
+        let values: [Value] = [];
+
+        for i in 0..width {
+            values.push(valueOf(found[at + i]));
+        }
+
+        out.push(Row { names: names, values: values });
+        at += width;
+    }
+
+    return Ok(out);
+}
+
+fn first(found: Result<[Row], Error>) -> Result<Row?, Error> {
+    let all = found?;
+
+    if all.len() == 0 {
+        return Ok(null);
+    }
+
+    return Ok(all[0]);
+}
+
+// The reason of the last refusal, with what was being done.
+fn failure(doing: String) -> Error {
+    let parts = problem();
+
+    let kind = match parts[0] {
+        case "unreachable": ErrorKind.Unreachable;
+        case "query": ErrorKind.Query;
+        case "constraint": ErrorKind.Constraint;
+        case "conflict": ErrorKind.Conflict;
+        case "closed": ErrorKind.Closed;
+        default: ErrorKind.Other;
+    };
+
+    return Error { kind: kind, message: "${doing}: ${parts[1]}" };
+}
+
+// Provided by the runtime, on databases and transactions by number.
+extern fn openAt(address: String) -> Int?;
+extern fn kindOf(handle: Int) -> String;
+extern fn exec(handle: Int, statement: String, params: [String]) -> Int?;
+extern fn query(handle: Int, statement: String, params: [String]) -> [String]?;
+extern fn begin(db: Int) -> Int?;
+extern fn end(tx: Int, commit: Bool) -> Bool;
+extern fn close(db: Int);
+extern fn storeTx() -> Int?;
+extern fn problem() -> [String];

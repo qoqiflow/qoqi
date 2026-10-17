@@ -1,0 +1,9 @@
+{
+    "name": "greeter",
+    "entry": "src/main.qi",
+    "root": "src",
+    "packages": {
+        "textkit": "packages/textkit"
+    },
+    "max_depth": 2000
+}

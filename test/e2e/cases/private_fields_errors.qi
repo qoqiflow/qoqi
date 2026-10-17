@@ -1,0 +1,10 @@
+// What the compiler says about the priv fields of another module.
+import bank.account.{Account};
+
+fn main() -> Int {
+    let ada = Account.open("ada");
+    println(ada.balance);
+    ada.balance = 1000000;
+    let forged = Account { owner: "eve", balance: 99 };
+    return 0;
+}

@@ -1,0 +1,243 @@
+// Stock of a small shop, read from text: tuples, `?` to pass a failure
+// on, `?.` to read through what may be missing, texts over several lines,
+// and tests that reach into function expressions.
+
+import std.dict;
+import std.dict.{Dict};
+import std.format;
+
+const stock = """
+    # item, quantity, price, supplier
+    nails, 500, 0.02, acme
+    hammer, 12, 14.50, acme
+    saw, 3, 22.00
+    glue, , 4.10, bond
+    tape, 40, 2.25, bond
+    ladder, two, 89.00, heights
+    """;
+
+const suppliers = """
+    acme = Acme Tools, Leeds
+    bond = Bond & Sons
+    """;
+
+struct Supplier {
+    name: String;
+    city: String?;
+}
+
+struct Item {
+    name: String;
+    quantity: Int;
+    price: Float;
+    supplier: Supplier?;
+}
+
+enum Flaw {
+    Missing(String),
+    NotANumber(String, String),
+    UnknownSupplier(String),
+}
+
+impl Flaw {
+    fn describe() -> String {
+        match self {
+            case Flaw.Missing(column): {
+                return "no ${column}";
+            }
+
+            case Flaw.NotANumber(column, text): {
+                return "${column} is '${text}', not a number";
+            }
+
+            case Flaw.UnknownSupplier(code): {
+                return "nobody is known as '${code}'";
+            }
+        }
+    }
+}
+
+// "acme = Acme Tools, Leeds" as the code and who it stands for.
+fn supplier(line: String) -> (String, Supplier)? {
+    let (code, rest) = line.cut("=")?;
+    let (name, city) = rest.cut(",") ?? (rest, "");
+    let where: String? = null;
+
+    if !city.isBlank() {
+        where = city.trim();
+    }
+
+    return (code.trim(), Supplier { name: name.trim(), city: where });
+}
+
+fn known() -> Dict<Supplier> {
+    let all = dict.empty<Supplier>();
+
+    for line in suppliers.lines() {
+        let entry = supplier(line);
+
+        if entry != null {
+            all.set(entry.0, entry.1);
+        }
+    }
+
+    return all;
+}
+
+// A column of a row, which has to be there and not be empty.
+fn column(cells: [String], at: Int, name: String) -> Result<String, Flaw> {
+    let text = (cells.at(at) ?? "").trim();
+
+    if text == "" {
+        return Err(Flaw.Missing(name));
+    }
+
+    return Ok(text);
+}
+
+fn whole(cells: [String], at: Int, name: String) -> Result<Int, Flaw> {
+    let text = column(cells, at, name)?;
+    let n = text.parseInt();
+
+    if n == null {
+        return Err(Flaw.NotANumber(name, text));
+    }
+
+    return Ok(n);
+}
+
+fn item(line: String, suppliers: Dict<Supplier>) -> Result<Item, Flaw> {
+    let cells = line.split(",");
+    let name = column(cells, 0, "name")?;
+    let quantity = whole(cells, 1, "quantity")?;
+    let priceText = column(cells, 2, "price")?;
+    let price = priceText.parseFloat();
+
+    if price == null {
+        return Err(Flaw.NotANumber("price", priceText));
+    }
+
+    // The supplier may be left out; one that is named has to be known
+    let from: Supplier? = null;
+    let code = (cells.at(3) ?? "").trim();
+
+    if code != "" {
+        from = suppliers.get(code);
+
+        if from == null {
+            return Err(Flaw.UnknownSupplier(code));
+        }
+    }
+
+    return Ok(Item { name: name, quantity: quantity, price: price, supplier: from });
+}
+
+// The items that could be read, and the lines that could not with why.
+fn load() -> ([Item], [(Int, Flaw)]) {
+    let suppliers = known();
+    let items: [Item] = [];
+    let flawed: [(Int, Flaw)] = [];
+
+    for i, line in stock.lines() {
+        if line.startsWith("#") || line.isBlank() {
+            continue;
+        }
+
+        match item(line, suppliers) {
+            case Ok(read): {
+                items.push(read);
+            }
+
+            case Err(flaw): {
+                flawed.push((i + 1, flaw));
+            }
+        }
+    }
+
+    return (items, flawed);
+}
+
+// The cheapest and the dearest, if there is anything at all.
+fn range(items: [Item]) -> (Item, Item)? {
+    let cents = fn(item: Item) -> Int {
+        return (item.price * 100.0).round();
+    };
+
+    return (items.minBy(cents)?, items.maxBy(cents)?);
+}
+
+fn worth(item: Item) -> Float {
+    return item.quantity.toFloat() * item.price;
+}
+
+fn level(item: Item) -> String {
+    match (item.quantity < 10, item.supplier != null) {
+        case (true, true): {
+            return "reorder";
+        }
+
+        case (true, false): {
+            return "find a supplier";
+        }
+
+        case (false, _): {
+            return "ok";
+        }
+    }
+}
+
+fn main() -> Int {
+    let (items, flawed) = load();
+
+    let rows = items.map(fn(item: Item) -> [String] {
+        return [
+            item.name,
+            toString(item.quantity),
+            format.money(worth(item)),
+            item.supplier?.name ?? "-",
+            item.supplier?.city ?? "-",
+            level(item),
+        ];
+    });
+
+    print(format.table(["item", "qty", "worth", "supplier", "city", "level"], rows));
+
+    let ends = range(items);
+
+    if ends != null {
+        let (cheap, dear) = ends;
+        println("");
+        println("from ${cheap.name} at ${format.money(cheap.price)} to ${dear.name} at ${format.money(dear.price)}");
+    }
+
+    println("nothing in stock ranges from", range([]));
+
+    // What a test established holds in the function handed to filter
+    let wanted: String? = "acme";
+
+    if wanted != null {
+        let theirs = items.filter(fn(item: Item) -> Bool {
+            return (item.supplier?.name ?? "").len() == "Acme Tools".len() && wanted.len() == 4;
+        });
+
+        println(
+            "from acme:",
+            theirs.map(fn(item: Item) -> String {
+                return item.name;
+            }),
+        );
+    }
+
+    println("");
+
+    for (line, flaw) in flawed {
+        println("line ${line}: ${flaw.describe()}");
+    }
+
+    let (low, fine) = items.partition(fn(item: Item) -> Bool {
+        return item.quantity < 10;
+    });
+
+    println("${low.len()} low, ${fine.len()} fine, ${flawed.len()} unread");
+    return flawed.len();
+}

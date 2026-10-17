@@ -1,0 +1,33 @@
+// What nothing uses is said, and the program still runs: a variable, a
+// parameter, a name of a pattern, an import. A name that starts with _
+// is one that is there on purpose.
+import std.json;
+
+enum Reading {
+    Value(Float),
+    Missing(String),
+}
+
+fn average(readings: [Reading], label: String, _unit: String) -> Float {
+    let total = 0.0;
+    let count = 0;
+    let skipped = 0;
+
+    for reading in readings {
+        match reading {
+            case Value(v): {
+                total += v;
+                count++;
+            }
+
+            case Missing(why): {}
+        }
+    }
+
+    return count == 0 ? 0.0 : total / count;
+}
+
+fn main() -> Int {
+    println(average([Value(2.0), Missing("off"), Value(4.0)], "kitchen", "C"));
+    return 0;
+}

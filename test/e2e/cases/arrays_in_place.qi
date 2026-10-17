@@ -1,0 +1,382 @@
+// Arrays changed in place: items -> items.pop(), removeAt, insertAt and clear, in the
+// three shapes they are for. A stack machine runs on an array used as a
+// stack; an editor keeps what it did on two of them, to undo and redo; a
+// print shop serves jobs from the front of a queue and lets urgent ones in
+// ahead. Exercises enums holding values, Result, structs holding arrays,
+// closures kept in arrays, optionals and loops that remove as they go.
+
+// --- A stack machine ---
+
+enum Op {
+    Push(Int),
+    Add,
+    Mul,
+    Neg,
+    Dup,
+    Swap,
+    Drop,
+    Clear,
+}
+
+struct Machine {
+    stack: [Int] = [];
+    deepest: Int = 0;
+}
+
+impl Machine {
+    fn take() -> Result<Int, String> {
+        let top = self.stack.pop();
+
+        if top == null {
+            return Err("the stack is empty");
+        }
+
+        return Ok(top);
+    }
+
+    fn put(value: Int) {
+        self.stack.push(value);
+
+        if self.stack.len() > self.deepest {
+            self.deepest = self.stack.len();
+        }
+    }
+
+    fn step(op: Op) -> Result<Int, String> {
+        match op {
+            case Op.Push(n): {
+                self.put(n);
+            }
+
+            case Op.Add: {
+                let b = self.take()?;
+                let a = self.take()?;
+                self.put(a + b);
+            }
+
+            case Op.Mul: {
+                let b = self.take()?;
+                let a = self.take()?;
+                self.put(a * b);
+            }
+
+            case Op.Neg: {
+                let a = self.take()?;
+                self.put(-a);
+            }
+
+            case Op.Dup: {
+                let a = self.take()?;
+                self.put(a);
+                self.put(a);
+            }
+
+            case Op.Swap: {
+                let b = self.take()?;
+                let a = self.take()?;
+                self.put(b);
+                self.put(a);
+            }
+
+            case Op.Drop: {
+                self.take()?;
+            }
+
+            case Op.Clear: {
+                self.stack.clear();
+            }
+        }
+
+        return Ok(self.stack.len());
+    }
+
+    fn run(program: [Op]) -> Result<Int, String> {
+        for i, op in program {
+            match self.step(op) {
+                case Err(message): {
+                    return Err("step ${i}: ${message}");
+                }
+
+                case Ok(_): {}
+            }
+        }
+
+        return self.take();
+    }
+}
+
+fn calculate(name: String, program: [Op]) {
+    let machine = Machine {};
+
+    match machine.run(program) {
+        case Ok(value): {
+            println(name, "=", value, "left", machine.stack, "deepest", machine.deepest);
+        }
+
+        case Err(message): {
+            println(name, "failed:", message, "left", machine.stack);
+        }
+    }
+}
+
+// --- An editor that can undo ---
+
+enum Edit {
+    Insert(Int, String),  // a line put at a position
+    Remove(Int, String),  // the line taken from a position
+    Wipe([String]),       // the lines there were before everything went
+}
+
+struct Editor {
+    lines: [String] = [];
+    done: [Edit] = [];
+    undone: [Edit] = [];
+}
+
+impl Editor {
+    fn apply(edit: Edit) {
+        match edit {
+            case Edit.Insert(at, line): {
+                self.lines.insertAt(at, line);
+            }
+
+            case Edit.Remove(at, _): {
+                self.lines.removeAt(at);
+            }
+
+            case Edit.Wipe(_): {
+                self.lines.clear();
+            }
+        }
+    }
+
+    fn revert(edit: Edit) {
+        match edit {
+            case Edit.Insert(at, _): {
+                self.lines.removeAt(at);
+            }
+
+            case Edit.Remove(at, line): {
+                self.lines.insertAt(at, line);
+            }
+
+            case Edit.Wipe(before): {
+                for line in before {
+                    self.lines.push(line);
+                }
+            }
+        }
+    }
+
+    fn perform(edit: Edit) {
+        self.apply(edit);
+        self.done.push(edit);
+        // What was undone cannot be redone once something new is done
+        self.undone.clear();
+    }
+
+    // A position past the end is the end. The edit keeps where the line
+    // really went, which is where undoing it has to look.
+    fn insert(at: Int, line: String) {
+        if at < 0 {
+            return;
+        }
+
+        let place = self.lines.len();
+
+        if at < place {
+            place = at;
+        }
+
+        self.perform(Edit.Insert(place, line));
+    }
+
+    fn remove(at: Int) -> Bool {
+        let line = self.lines.at(at);
+
+        if line == null {
+            return false;
+        }
+
+        self.perform(Edit.Remove(at, line));
+        return true;
+    }
+
+    fn wipe() {
+        self.perform(Edit.Wipe(self.lines.copy()));
+    }
+
+    fn undo() -> Bool {
+        let edit = self.done.pop();
+
+        if edit == null {
+            return false;
+        }
+
+        self.revert(edit);
+        self.undone.push(edit);
+        return true;
+    }
+
+    fn redo() -> Bool {
+        let edit = self.undone.pop();
+
+        if edit == null {
+            return false;
+        }
+
+        self.apply(edit);
+        self.done.push(edit);
+        return true;
+    }
+
+    fn show(what: String) {
+        println("${what}: ${self.lines.join(" | ")} (${self.done.len()} done, ${self.undone.len()} undone)");
+    }
+}
+
+// --- A print shop ---
+
+struct Job {
+    name: String;
+    pages: Int;
+    urgent: Bool = false;
+}
+
+struct Shop {
+    waiting: [Job] = [];
+    // What to do with a job once printed, last added first
+    after: [fn(Job) -> String] = [];
+}
+
+impl Shop {
+    // An urgent job goes ahead of those that are not, behind the urgent
+    // ones already waiting.
+    fn accept(job: Job) {
+        if !job.urgent {
+            self.waiting.push(job);
+            return;
+        }
+
+        let at = self.waiting.findIndex(waiting -> !waiting.urgent) ?? self.waiting.len();
+
+        self.waiting.insertAt(at, job);
+    }
+
+    // Prints for as long as there is paper; a job that needs more than is
+    // left stays at the front.
+    fn serve(paper: Int) -> Int {
+        while !self.waiting.isEmpty() {
+            let next = self.waiting[0];
+
+            if next.pages > paper {
+                break;
+            }
+
+            self.waiting.removeAt(0);
+            paper -= next.pages;
+            let notes: [String] = [];
+            let i = self.after.len() - 1;
+
+            while i >= 0 {
+                notes.push(self.after[i](next));
+                i--;
+            }
+
+            println("printed", next.name, notes.join(", "));
+        }
+
+        return paper;
+    }
+
+    // Takes out the jobs a function accepts, and gives them back.
+    fn cancel(wanted: fn(Job) -> Bool) -> [Job] {
+        let cancelled: [Job] = [];
+        let i = 0;
+
+        while i < self.waiting.len() {
+            if wanted(self.waiting[i]) {
+                let job = self.waiting.removeAt(i);
+
+                if job != null {
+                    cancelled.push(job);
+                }
+            } else {
+                i++;
+            }
+        }
+
+        return cancelled;
+    }
+
+    fn names() -> [String] {
+        return self.waiting.map(job -> job.name);
+    }
+}
+
+fn main() -> Int {
+    calculate("(2 + 3) * 4", [Op.Push(2), Op.Push(3), Op.Add, Op.Push(4), Op.Mul]);
+    calculate("-(7 * 7)", [Op.Push(7), Op.Dup, Op.Mul, Op.Neg]);
+    calculate("swap", [Op.Push(1), Op.Push(2), Op.Push(3), Op.Swap, Op.Drop]);
+    calculate("too few", [Op.Push(1), Op.Add, Op.Push(5)]);
+    calculate("cleared", [Op.Push(1), Op.Push(2), Op.Clear, Op.Push(9), Op.Dup, Op.Add]);
+    calculate("nothing", []);
+
+    let editor = Editor {};
+    editor.insert(0, "one");
+    editor.insert(1, "three");
+    editor.insert(1, "two");
+    editor.insert(99, "four");
+    editor.insert(-1, "nowhere");
+    editor.show("written");
+    println(editor.remove(1), editor.remove(7), editor.remove(-1));
+    editor.show("removed");
+    editor.wipe();
+    editor.show("wiped");
+    println(editor.undo(), editor.undo());
+    editor.show("undone twice");
+    println(editor.redo());
+    editor.show("redone");
+    editor.insert(0, "zero");
+    editor.show("written again");
+    println(editor.redo());
+    let undos = 0;
+
+    while editor.undo() {
+        undos++;
+    }
+
+    editor.show("all ${undos} undone");
+    println(editor.undo());
+    while editor.redo() {}
+    editor.show("all redone");
+
+    let shop = Shop {};
+    let printed = 0;
+    shop.after.insertAt(0, job -> "${job.pages} pages");
+
+    shop.after.insertAt(1, job -> {
+        printed += job.pages;
+        return "total ${printed}";
+    });
+
+    shop.accept(Job { name: "thesis", pages: 120 });
+    shop.accept(Job { name: "flyer", pages: 2 });
+    shop.accept(Job { name: "boarding pass", pages: 1, urgent: true });
+    shop.accept(Job { name: "menu", pages: 4 });
+    shop.accept(Job { name: "contract", pages: 12, urgent: true });
+    shop.accept(Job { name: "poster", pages: 2 });
+    println(shop.names());
+
+    let left = shop.serve(50);
+    println("paper left", left, "waiting", shop.names());
+    let cancelled = shop.cancel(job -> job.pages <= 2);
+    println("cancelled", cancelled.map(job -> job.name), "waiting", shop.names());
+    shop.after.pop();
+    left = shop.serve(left + 200);
+    println("paper left", left, "waiting", shop.names(), "printed", printed);
+
+    println(shop.serve(10), shop.waiting.pop() == null, shop.waiting.removeAt(0) == null);
+
+    return 0;
+}

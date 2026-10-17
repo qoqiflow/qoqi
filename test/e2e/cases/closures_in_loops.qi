@@ -1,0 +1,52 @@
+// Closures created in a loop keep the variables of their own iteration.
+struct Task {
+    name: String;
+    run: fn() -> String;
+}
+
+fn schedule(names: [String]) -> [Task] {
+    let tasks: [Task] = [];
+
+    for i, name in names {
+        let attempts = 0;
+
+        tasks.push(Task {
+            name: name,
+            run: fn() -> String {
+                attempts++;
+                return toString(i) + " " + name + " (attempt " + toString(attempts) + ")";
+            },
+        });
+    }
+
+    return tasks;
+}
+
+fn main() -> Int {
+    let tasks = schedule(["build", "test", "deploy"]);
+
+    for task in tasks {
+        println(task.run());
+    }
+
+    // Each task counts its own attempts
+    println(tasks[1].run());
+    println(tasks[1].run());
+    println(tasks[0].run());
+
+    let multipliers: [fn(Int) -> Int] = [];
+    let factor = 1;
+
+    while factor <= 3 {
+        let by = factor;
+
+        multipliers.push(fn(n: Int) -> Int {
+            return n * by;
+        });
+
+        factor++;
+    }
+
+    println(multipliers[0](10), multipliers[1](10), multipliers[2](10));
+    return 0;
+}

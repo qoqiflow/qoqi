@@ -1,0 +1,77 @@
+// Values that may be missing: methods every optional has, and value! for
+// the ones that cannot be.
+import std.dict;
+import std.dict.{Dict};
+
+struct Employee {
+    name: String;
+    manager: String?;
+    salary: Int;
+}
+
+struct Staff {
+    people: Dict<Employee>;
+}
+
+impl Staff {
+    fn get(name: String) -> Employee? {
+        return self.people.get(name);
+    }
+
+    // The manager's manager, through two lookups that may each find nobody
+    fn skipLevel(name: String) -> Employee? {
+        return self.get(name)
+            .then(person -> person.manager)
+            .then(boss -> self.get(boss))
+            .then(boss -> boss.manager)
+            .then(top -> self.get(top));
+    }
+
+    fn salaryOf(name: String) -> Result<Int, String> {
+        let person = self.get(name).okOr("nobody called ${name}")?;
+        return Result.Ok(person.salary);
+    }
+}
+
+// A user's own method for every optional
+impl<T> T? {
+    fn shown(what: String) -> String {
+        return self.mapOr("no ${what}", value -> "${what} ${value}");
+    }
+}
+
+fn main() -> Int {
+    let staff = Staff { people: dict.empty<Employee>() };
+
+    for person in [
+        Employee { name: "ada", manager: null, salary: 300 },
+        Employee { name: "bob", manager: "ada", salary: 200 },
+        Employee { name: "cy", manager: "bob", salary: 100 },
+    ] {
+        staff.people.set(person.name, person);
+    }
+
+    println(staff.skipLevel("cy").map(boss -> boss.name) ?? "nobody");
+    println(staff.skipLevel("bob").map(boss -> boss.name) ?? "nobody");
+    println(staff.get("bob").then(p -> p.manager).shown("manager"));
+    println(staff.get("ada").then(p -> p.manager).shown("manager"));
+
+    let raises = ["ada", "cy", "dee"].map(name -> staff.salaryOf(name).map(n -> n + 10));
+    println(raises);
+
+    // Filters, fallbacks worked out only when needed, and tests
+    let wellPaid = staff.get("bob").filter(p -> p.salary > 150);
+    println(wellPaid.isSome(), staff.get("cy").filter(p -> p.salary > 150).isNone());
+    println(staff.get("zed").map(p -> p.name).orElse(() -> "made up"));
+    staff.get("cy").each(p -> println("cy earns", p.salary));
+
+    // value!: the value is known to be there; if it were not, the
+    // program would stop at that line
+    let ada = staff.get("ada")!;
+    println(ada.name, staff.salaryOf("bob")!, "12".parseInt()! + 1);
+    println(staff.get("bob").expect("bob works here").salary);
+
+    defer println("staff closed");
+    println(staff.get("eve")!.name);
+    return 0;
+}

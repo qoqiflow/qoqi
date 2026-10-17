@@ -1,0 +1,320 @@
+// A calculator: a tokenizer and a recursive-descent parser building a tree
+// of trait objects, then evaluating it. Exercises string indexing, loops
+// with an index, optionals for "no result", recursion through traits,
+// generic containers and casts.
+
+struct Token {
+    kind: String;  // "num", "op", "(", ")", "end"
+    text: String;
+    value: Int;
+}
+
+fn isDigit(ch: String) -> Bool {
+    return ch >= "0" && ch <= "9";
+}
+
+fn digitValue(ch: String) -> Int {
+    for i, digit in "0123456789" {
+        if digit == ch {
+            return i;
+        }
+    }
+
+    return 0;
+}
+
+// Splits the input into tokens, or returns null at an unknown character.
+fn tokenize(input: String) -> [Token]? {
+    let tokens: [Token] = [];
+    let i = 0;
+
+    while i < input.len() {
+        let ch = input[i];
+
+        if ch == " " {
+            i++;
+            continue;
+        }
+
+        if isDigit(ch) {
+            let value = 0;
+            let text = "";
+
+            while i < input.len() && isDigit(input[i]) {
+                value = value * 10 + digitValue(input[i]);
+                text += input[i];
+                i++;
+            }
+
+            tokens.push(Token { kind: "num", text: text, value: value });
+            continue;
+        }
+
+        if ch == "(" || ch == ")" {
+            tokens.push(Token { kind: ch, text: ch, value: 0 });
+        } else if ch == "+" || ch == "-" || ch == "*" || ch == "/" {
+            tokens.push(Token { kind: "op", text: ch, value: 0 });
+        } else {
+            return null;
+        }
+
+        i++;
+    }
+
+    tokens.push(Token { kind: "end", text: "", value: 0 });
+    return tokens;
+}
+
+trait Expr {
+    fn eval() -> Int?;
+    fn show() -> String;
+}
+
+struct Num {
+    value: Int;
+}
+
+struct Neg {
+    inner: Expr;
+}
+
+struct Binary {
+    op: String;
+    left: Expr;
+    right: Expr;
+}
+
+impl Expr for Num {
+    fn eval() -> Int? {
+        return self.value;
+    }
+
+    fn show() -> String {
+        return toString(self.value);
+    }
+}
+
+impl Expr for Neg {
+    fn eval() -> Int? {
+        let v = self.inner.eval();
+
+        if v == null {
+            return null;
+        }
+
+        return 0 - v;
+    }
+
+    fn show() -> String {
+        return "(-" + self.inner.show() + ")";
+    }
+}
+
+impl Expr for Binary {
+    // null means the expression has no value: a division by zero somewhere
+    fn eval() -> Int? {
+        let l = self.left.eval();
+        let r = self.right.eval();
+
+        if l == null || r == null {
+            return null;
+        }
+
+        match self.op {
+            case "+": {
+                return l + r;
+            }
+
+            case "-": {
+                return l - r;
+            }
+
+            case "*": {
+                return l * r;
+            }
+
+            default: {
+                if r == 0 {
+                    return null;
+                }
+
+                return l / r;
+            }
+        }
+    }
+
+    fn show() -> String {
+        return "(" + self.left.show() + " " + self.op + " " + self.right.show() + ")";
+    }
+}
+
+struct Parser {
+    tokens: [Token];
+    pos: Int;
+    errors: [String];
+}
+
+impl Parser {
+    fn peek() -> Token {
+        return self.tokens[self.pos];
+    }
+
+    fn advance() -> Token {
+        let token = self.tokens[self.pos];
+
+        if token.kind != "end" {
+            self.pos++;
+        }
+
+        return token;
+    }
+
+    fn fail(message: String) -> Expr {
+        self.errors.push(message + " at token " + toString(self.pos));
+        return Num { value: 0 };
+    }
+
+    // expr := term { ("+" | "-") term }
+    fn expr() -> Expr {
+        let left = self.term();
+
+        while self.peek().kind == "op" && (self.peek().text == "+" || self.peek().text == "-") {
+            let op = self.advance().text;
+            left = Binary { op: op, left: left, right: self.term() };
+        }
+
+        return left;
+    }
+
+    // term := unary { ("*" | "/") unary }
+    fn term() -> Expr {
+        let left = self.unary();
+
+        while self.peek().kind == "op" && (self.peek().text == "*" || self.peek().text == "/") {
+            let op = self.advance().text;
+            left = Binary { op: op, left: left, right: self.unary() };
+        }
+
+        return left;
+    }
+
+    // unary := "-" unary | primary
+    fn unary() -> Expr {
+        if self.peek().kind == "op" && self.peek().text == "-" {
+            self.advance();
+            return Neg { inner: self.unary() };
+        }
+
+        return self.primary();
+    }
+
+    // primary := number | "(" expr ")"
+    fn primary() -> Expr {
+        let token = self.advance();
+
+        if token.kind == "num" {
+            return Num { value: token.value };
+        }
+
+        if token.kind == "(" {
+            let inner = self.expr();
+
+            if self.advance().kind != ")" {
+                return self.fail("expected ')'");
+            }
+
+            return inner;
+        }
+
+        return self.fail("expected a number");
+    }
+}
+
+// The result of one calculation, in a generic wrapper
+struct Outcome<T> {
+    input: String;
+    value: T?;
+    note: String;
+}
+
+fn calculate(input: String) -> Outcome<Int> {
+    let tokens = tokenize(input);
+
+    if tokens == null {
+        return Outcome<Int> { input: input, value: null, note: "unknown character" };
+    }
+
+    let parser = Parser { tokens: tokens, pos: 0, errors: [] };
+    let tree = parser.expr();
+
+    if parser.peek().kind != "end" {
+        parser.fail("unexpected input");
+    }
+
+    if parser.errors.len() > 0 {
+        return Outcome<Int> { input: input, value: null, note: parser.errors[0] };
+    }
+
+    let value = tree.eval();
+
+    if value == null {
+        return Outcome<Int> {
+            input: input,
+            value: null,
+            note: "division by zero in " + tree.show(),
+        };
+    }
+
+    return Outcome<Int> { input: input, value: value, note: tree.show() };
+}
+
+fn countNodes(e: Expr) -> Int {
+    match e {
+        case Num: {
+            return 1;
+        }
+
+        case Neg: {
+            return 1 + countNodes(e.inner);
+        }
+
+        case Binary: {
+            return 1 + countNodes(e.left) + countNodes(e.right);
+        }
+
+        default: {
+            return 0;
+        }
+    }
+}
+
+fn main() -> Int {
+    let inputs = [
+        "1 + 2 * 3", "(1 + 2) * 3", "10 - 4 - 3", "-(2 + 3) * -4", "100 / 7 / 2",
+        "2 * (3 + (4 - 1)) * 5", "8 / (4 - 2 * 2)", "7 +", "(1 + 2", "3 $ 4", "42",
+    ];
+
+    let failures = 0;
+    let sum = 0;
+
+    for i, input in inputs {
+        let outcome = calculate(input);
+        let value = outcome.value;
+
+        if value != null {
+            sum += value;
+            println(toString(i) + ":", input, "=", value, "  " + outcome.note);
+        } else {
+            failures++;
+            println(toString(i) + ":", input, "!", outcome.note);
+        }
+    }
+
+    println("sum of results:", sum, "failures:", failures);
+
+    let tokens = tokenize("1 + 2 * -(3 - 4)") as [Token];
+    let parser = Parser { tokens: tokens, pos: 0, errors: [] };
+    let tree = parser.expr();
+    println(tree.show(), "has", countNodes(tree), "nodes and", tokens.len(), "tokens");
+    return failures;
+}

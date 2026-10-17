@@ -1,0 +1,8 @@
+{
+    "name": "shop",
+    "entry": "orders.qi",
+    "queues": {
+        "warehouse": { "url": "env:WAREHOUSE_URL", "secret": "env:SHOP_SECRET", "concurrency": 4 },
+        "payments": { "url": "env:PAYMENTS_URL", "secret": "env:SHOP_SECRET", "concurrency": 2 }
+    }
+}

@@ -1,0 +1,29 @@
+// Fingerprints: a short text worked out from a longer one, the same every
+// time, and different for a text that differs at all.
+//
+// For telling whether two contents are the same, and for signing. Not for
+// storing passwords: these are made to be fast, which is what that job
+// must not be.
+
+// 64 hexadecimal digits. The one to use when in doubt.
+pub extern fn sha256(text: String) -> String;
+
+// 40 hexadecimal digits. What git names things with; no longer safe
+// against someone who wants two texts to collide.
+pub extern fn sha1(text: String) -> String;
+
+// 32 hexadecimal digits. For checking a download against a published
+// sum, nothing more.
+pub extern fn md5(text: String) -> String;
+
+// A number of 32 bits that catches accidental changes.
+pub extern fn crc32(text: String) -> Int;
+
+// A signature: only someone with the key can make the one that goes with
+// a text. 64 hexadecimal digits.
+pub extern fn hmacSha256(key: String, text: String) -> String;
+
+// Whether a text has that sha256.
+pub fn matches(text: String, sha256Sum: String) -> Bool {
+    return sha256(text) == sha256Sum;
+}

@@ -1,0 +1,63 @@
+// Variants whose values have names: built and taken apart by the names,
+// in any order, and still by position where that reads better.
+
+enum Event {
+    Login { user: String, at: Int },
+    Purchase { user: String, item: String, cents: Int },
+    Refund { order: Int, cents: Int, reason: String },
+    Logout(String),
+}
+
+fn line(event: Event) -> String {
+    return match event {
+        case Login { user, at }: "${at}: ${user} logs in";
+        case Purchase { user, cents: 0, item }: "${user} takes ${item} for free";
+
+        case Purchase { item, user, cents } if cents
+            > 1000: "${user} buys ${item}, a big one (${cents})";
+
+        case Purchase { user, item }: "${user} buys ${item}";
+
+        case Refund { order, reason: "damaged" }
+            | Refund { order, reason: "late" }: "order ${order} refunded for cause";
+
+        case Refund { order, cents }: "order ${order} refunded ${cents}";
+        case Logout(user): "${user} logs out";
+    };
+}
+
+fn spent(events: [Event], user: String) -> Int {
+    let total = 0;
+
+    for event in events {
+        if event is Purchase(who, _, cents) && who == user {
+            total += cents;
+        }
+    }
+
+    return total;
+}
+
+fn main() -> Int {
+    let user = "ada";
+
+    let events = [
+        Login { user, at: 900 },
+        Purchase { user, item: "lamp", cents: 4500 },
+        Purchase { item: "sticker", cents: 0, user },
+        Event.Purchase { user: "bob", item: "book", cents: 900 },
+        Refund { order: 17, cents: 900, reason: "late" },
+        Refund { reason: "changed mind", cents: 300, order: 18 },
+        Logout(user),
+    ];
+
+    for event in events {
+        println(line(event));
+    }
+
+    println(spent(events, "ada"), spent(events, "bob"));
+
+    // The same values, by position: names only say which is which
+    println(Purchase("cy", "pen", 120) == Purchase { cents: 120, item: "pen", user: "cy" });
+    return 0;
+}

@@ -1,0 +1,110 @@
+// An order of the shop, whose steps the shop's application carries out:
+// written in Go, in app/, it serves two queues, the warehouse and
+// payments. The flow holds the stock, charges the card, ships; should
+// the parcel not leave, the card is refunded and the stock released.
+//
+//     go run ./examples/shop/app-go &
+//     cd examples/shop
+//     export SHOP_SECRET=dev WAREHOUSE_URL=http://127.0.0.1:8090/warehouse PAYMENTS_URL=http://127.0.0.1:8090/payments
+//     qoqi serve orders.qi
+//     qoqi start Order order:1 '{"id": "1", "customer": "ada", "items": [{"sku": "mug", "quantity": 2, "cents": 1200}], "speed": "Standard"}'
+//
+// The Go of the steps is written from this file:
+//
+//     qoqi gen go orders.qi --package steps > app-go/steps/steps_gen.go
+
+import std.flow.{Flow};
+
+pub struct Item {
+    sku: String;
+    quantity: Int;
+    cents: Int;  // for one
+}
+
+// What the warehouse holds for an order until it ships.
+pub struct Hold {
+    id: String;
+}
+
+// Why a card is not charged.
+pub enum Decline {
+    Insufficient,
+    Fraud(String),
+    Expired,
+}
+
+pub enum Problem {
+    OutOfStock(String),
+    Declined(Decline),
+    Undeliverable(String),
+}
+
+// How fast a parcel goes: express in so many days.
+pub enum Speed {
+    Standard,
+    Express(Int),
+}
+
+pub struct Receipt {
+    charge: String;
+    parcel: String;
+}
+
+pub struct Order {
+    id: String;
+    customer: String;
+    items: [Item];
+    speed: Speed;
+}
+
+impl Flow<Result<Receipt, Problem>> for Order {
+    fn run() -> Result<Receipt, Problem> {
+        let hold = reserve(self.id, self.items)?;
+
+        let charge = charge(self.customer, total(self.items)).mapErr(declined)?;
+
+        let parcel = ship(hold, self.customer, self.speed)?;
+        return Ok(Receipt { charge: charge, parcel: parcel });
+    }
+}
+
+// What the items cost, in cents.
+fn total(items: [Item]) -> Int {
+    let sum = 0;
+
+    for item in items {
+        sum += item.quantity * item.cents;
+    }
+
+    return sum;
+}
+
+fn declined(decline: Decline) -> Problem {
+    return Problem.Declined(decline);
+}
+
+// Holds the stock of the items for the order.
+pub step fn reserve(
+    order: String,
+    items: [Item],
+) -> Result<Hold, Problem> by warehouse undo release;
+
+// Gives back what a hold kept.
+pub step fn release(hold: Hold) -> Result<Void, Problem> by warehouse;
+
+// Hands the parcel to the carrier: its tracking number.
+pub step fn ship(hold: Hold, to: String, speed: Speed) -> Result<String, Problem> by warehouse;
+
+// Charges the customer's card, the step's key as the idempotency key.
+// The bank has half a minute to answer.
+pub step fn charge(
+    customer: String,
+    cents: Int,
+) -> Result<String, Decline> within 30.seconds() by payments undo refund;
+
+// Gives the money of a charge back.
+pub step fn refund(charge: String) -> Result<Void, Decline> by payments;
+
+fn main() {
+    println("The flows of this program are served by: qoqi serve examples/shop/orders.qi");
+}

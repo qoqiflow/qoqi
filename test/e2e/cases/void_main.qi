@@ -1,0 +1,5 @@
+// A main that returns nothing exits with 0.
+fn main() -> Void {
+    println("done");
+    return;
+}

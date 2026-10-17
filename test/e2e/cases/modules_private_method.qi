@@ -1,0 +1,11 @@
+// A method without 'pub' can only be called in the module that declares it.
+
+import game.world;
+
+fn main() -> Int {
+    let w = world.create(10);
+    let thing = w.spawn("a", 1, 1, 1);
+    w.step();
+    w.keepInside(thing);
+    return 0;
+}

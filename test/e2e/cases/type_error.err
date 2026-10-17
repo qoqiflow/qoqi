@@ -1,0 +1,4 @@
+[ERROR] E2001: cannot assign type Int to String
+type_error.qi:8:25
+[ERROR] E2010: cannot use type String as argument of type Int
+type_error.qi:9:19

@@ -1,0 +1,292 @@
+// A sales report from a file of orders.
+//
+//     qoqi run examples/sales                     the orders next to this file
+//     qoqi run examples/sales orders.csv out.json your own, with a summary written as JSON
+//
+// A file exported from somewhere else is never quite clean. Every row is
+// checked as it is turned into an Order; a row that fails is set aside
+// with its reason, and the report is made of the rest and says so.
+
+import std.csv.{Table};
+import std.json.{Json};
+import std.time.{Date};
+import std.format.{Align};
+
+struct Order {
+    number: Int;
+    date: Date;
+    customer: String;
+    product: String;
+    category: String;
+    quantity: Int;
+    unitPrice: Float;
+}
+
+impl Order {
+    fn total() -> Float {
+        return self.quantity.toFloat() * self.unitPrice;
+    }
+}
+
+// What can be wrong with a row.
+enum Flaw {
+    NotANumber(String, String),  // the column, and what it holds
+    NotADate(String),
+    Nothing(String),             // a quantity of zero, an empty name
+}
+
+impl Flaw {
+    fn describe() -> String {
+        return match self {
+            case Flaw.NotANumber(column, value): "${column} is '${value}', not a number";
+            case Flaw.NotADate(value): "'${value}' is not a date";
+            case Flaw.Nothing(column): "no ${column}";
+        };
+    }
+}
+
+// A whole number from a column of a row.
+fn whole(row: Dict<String>, column: String) -> Result<Int, Flaw> {
+    let text = row.getOr(column, "");
+    let n = text.parseInt();
+
+    if n == null {
+        return Err(Flaw.NotANumber(column, text));
+    }
+
+    return Ok(n);
+}
+
+// The order a row describes, or the first thing wrong with it. Each `?`
+// goes on with the value if there is one, and otherwise returns the flaw
+// to whoever asked for the order.
+fn order(row: Dict<String>) -> Result<Order, Flaw> {
+    let number = whole(row, "order")?;
+    let quantity = whole(row, "quantity")?;
+
+    if quantity <= 0 {
+        return Err(Flaw.Nothing("quantity"));
+    }
+
+    let priceText = row.getOr("unit_price", "");
+    let price = priceText.parseFloat();
+
+    if price == null {
+        return Err(Flaw.NotANumber("unit_price", priceText));
+    }
+
+    let dateText = row.getOr("date", "");
+    let date = time.parse(dateText);
+
+    if date == null {
+        return Err(Flaw.NotADate(dateText));
+    }
+
+    let customer = row.getOr("customer", "").trim();
+
+    if customer == "" {
+        return Err(Flaw.Nothing("customer"));
+    }
+
+    return Ok(Order {
+        number: number,
+        date: date,
+        customer: customer,
+        product: row.getOr("product", ""),
+        category: row.getOr("category", "other"),
+        quantity: quantity,
+        unitPrice: price,
+    });
+}
+
+// A line of a summary: a name, how many units, how much money.
+struct Line {
+    name: String;
+    orders: Int;
+    units: Int;
+    revenue: Float;
+}
+
+// The orders summed up by a name worked out from each, best first.
+fn summed(orders: [Order], name: fn(Order) -> String) -> [Line] {
+    let groups = orders.groupBy(name);
+
+    let lines = groups.keys().map(fn(key: String) -> Line {
+        let group = groups.get(key) ?? [];
+
+        return Line {
+            name: key,
+            orders: group.len(),
+            units: group.sumOf(o -> o.quantity),
+            revenue: group.fold(0.0, (sum, o) -> sum + o.total()),
+        };
+    });
+
+    return lines.sorted((a, b) -> a.revenue > b.revenue);
+}
+
+fn revenueOf(lines: [Line]) -> Float {
+    return lines.fold(0.0, (sum, line) -> sum + line.revenue);
+}
+
+// `total` is what the shares are of: all the revenue, also when only
+// the first lines are shown.
+fn section(title: String, first: String, lines: [Line], total: Float) {
+    let aligns = [Align.Left, Align.Right, Align.Right, Align.Right, Align.Right];
+
+    let rows = lines.map(fn(line: Line) -> [String] {
+        return [
+            line.name,
+            toString(line.orders),
+            toString(line.units),
+            format.money(line.revenue),
+            format.percent(line.revenue / total, 1),
+        ];
+    });
+
+    println("");
+    println(title);
+    print(format.tableWith([first, "orders", "units", "revenue", "share"], aligns, rows));
+}
+
+fn asJson(lines: [Line]) -> Json {
+    return json.array(lines, fn(line: Line) -> Json {
+        return json.object()
+            .text("name", line.name)
+            .int("orders", line.orders)
+            .int("units", line.units)
+            .number("revenue", (line.revenue * 100.0).round().toFloat() / 100.0)
+            .done();
+    });
+}
+
+fn report(table: Table, source: String, output: String?) -> Int {
+    let orders: [Order] = [];
+    let flawed: [String] = [];
+
+    for i, row in table.records() {
+        match order(row) {
+            case Ok(read): {
+                orders.push(read);
+            }
+
+            // Row 1 of the file is the header
+            case Err(flaw): {
+                flawed.push("row ${i + 2} (order ${row.getOr("order", "?")}): ${flaw.describe()}");
+            }
+        }
+    }
+
+    if orders.len() == 0 {
+        println("no order could be read from ${source}");
+        return 1;
+    }
+
+    let byDate = orders.sortedBy(o -> o.date.timestamp());
+    let first = byDate[0].date;
+    let last = byDate[byDate.len() - 1].date;
+    let categories = summed(orders, o -> o.category);
+    let customers = summed(orders, o -> o.customer);
+    let products = summed(orders, o -> o.product);
+    let total = revenueOf(categories);
+
+    println("Sales, ${first.format("D MMMM")} to ${last.format("D MMMM YYYY")}");
+    println("${format.plural(orders.len(), "order", "orders")} over ${format.plural(first.daysUntil(last) + 1, "day", "days")}, ${format.money(total)} in all, ${format.money(total / orders.len().toFloat())} an order");
+
+    section("By category", "category", categories, total);
+    section("By customer", "customer", customers, total);
+    section("Best sellers", "product", products.take(3), total);
+
+    // Weeks start on Monday; an order belongs to the week of its date
+    println("");
+    println("By week");
+
+    let weeks = byDate.groupBy(fn(o: Order) -> String {
+        return o.date.plusDays(-weekdayIndex(o.date)).format("DD MMM");
+    });
+
+    let best = weeks.values().fold(0.0, (most, week) -> most.max(weekRevenue(week)));
+
+    for (start, week) in weeks.entries() {
+        let revenue = weekRevenue(week);
+
+        println(
+            "week of ${start}",
+            format.pad(format.money(revenue), 9, Align.Right),
+            " " + format.bar(revenue.round(), best.round(), 24),
+        );
+    }
+
+    if flawed.len() > 0 {
+        println("");
+        println("${format.plural(flawed.len(), "row", "rows")} left out of ${table.len()}");
+
+        for line in flawed {
+            println("  " + line);
+        }
+    }
+
+    if output != null {
+        let summary = json.object()
+            .text("from", first.iso())
+            .text("to", last.iso())
+            .int("orders", orders.len())
+            .int("left_out", flawed.len())
+            .set("categories", asJson(categories))
+            .set("customers", asJson(customers))
+            .done()
+            .pretty()
+            + "\n";
+
+        match io.writeFile(output, summary) {
+            case Ok(_): {
+                println("");
+                println("summary written to ${path.base(output)}, sha256 ${hash.sha256(summary).first(12)}");
+            }
+
+            case Err(error): {
+                println(error.describe());
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+// 0 for Monday up to 6 for Sunday.
+fn weekdayIndex(date: Date) -> Int {
+    let monday = time.date(2026, 1, 5);  // a Monday
+    return ((monday.daysUntil(date) % 7) + 7) % 7;
+}
+
+fn weekRevenue(week: [Order]) -> Float {
+    return week.fold(0.0, (sum, o) -> sum + o.total());
+}
+
+fn main() -> Int {
+    let args = os.args();
+    let source = args.at(0) ?? path.inside(path.dir(os.program()), "orders.csv");
+    let output = args.at(1);
+
+    match load(source) {
+        case Ok(orders): {
+            return report(orders, source, output);
+        }
+
+        case Err(problem): {
+            println(problem);
+            return 1;
+        }
+    }
+}
+
+// Reading the file and reading it as a table fail in different ways; both
+// end as a sentence for the person at the terminal.
+fn load(source: String) -> Result<Table, String> {
+    let text = io.readFile(source).mapErr(error -> error.describe())?;
+
+    return csv.table(text).mapErr(fn(error: csv.ParseError) -> String {
+        return "${path.base(source)}, ${error.describe()}";
+    });
+}

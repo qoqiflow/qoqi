@@ -1,0 +1,5 @@
+[ERROR] R0002: index out of bounds: 3 (length 2)
+--> test/e2e/cases/game/util/pick.qi:4:22 in function 'game.util.pick.nth_Int'
+return list.items[index];
+Suggestion: Compare the index with the length (items.len()) before using it, or use items.at(index), which gives null instead of failing
+called from test/e2e/cases/modules_runtime_error.qi:11:16 in function 'main'

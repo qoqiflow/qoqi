@@ -1,0 +1,5 @@
+import game.util.list.{List};
+
+pub fn nth<T>(list: List<T>, index: Int) -> T {
+    return list.items[index];
+}

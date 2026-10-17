@@ -1,0 +1,355 @@
+// The results of a small tournament: traits that give structs operators,
+// loops and brackets, traits with type parameters and methods of their
+// own, requirements on type parameters, fields with values of their own,
+// and methods handed around as values.
+
+import std.ops;
+import std.ops.{Equal, Ordered, Add, Show, Iterable, Indexed};
+import std.dict;
+
+// --- A score: compared, added, shown ---
+
+struct Score {
+    points: Int = 0;
+    wins: Int = 0;
+    played: Int = 0;
+}
+
+impl Add for Score {
+    fn plus(other: Score) -> Score {
+        return Score {
+            points: self.points + other.points,
+            wins: self.wins + other.wins,
+            played: self.played + other.played,
+        };
+    }
+}
+
+impl Ordered for Score {
+    // More points first; with as many, more wins
+    fn compare(other: Score) -> Int {
+        if self.points != other.points {
+            return self.points - other.points;
+        }
+
+        return self.wins - other.wins;
+    }
+}
+
+impl Equal for Score {
+    fn equals(other: Score) -> Bool {
+        return self.compare(other) == 0;
+    }
+}
+
+impl Show for Score {
+    fn show() -> String {
+        return "${self.points} pts (${self.wins}/${self.played})";
+    }
+}
+
+enum Result { Win, Draw, Loss }
+
+impl Result {
+    fn score() -> Score {
+        match self {
+            case Result.Win: {
+                return Score { points: 3, wins: 1, played: 1 };
+            }
+
+            case Result.Draw: {
+                return Score { points: 1, played: 1 };
+            }
+
+            case Result.Loss: {
+                return Score { played: 1 };
+            }
+        }
+    }
+
+    fn other() -> Result {
+        match self {
+            case Result.Win: {
+                return Result.Loss;
+            }
+
+            case Result.Draw: {
+                return Result.Draw;
+            }
+
+            case Result.Loss: {
+                return Result.Win;
+            }
+        }
+    }
+}
+
+// --- What has a name and a score, whatever it is ---
+
+trait Entrant {
+    fn name() -> String;
+    fn score() -> Score;
+
+    // The same for every entrant, unless it says otherwise
+    fn line() -> String {
+        return "${self.name().padRight(8)} ${self.score()}";
+    }
+
+    fn leads(other: Self) -> Bool {
+        return self.score() > other.score();
+    }
+}
+
+struct Player {
+    nick: String;
+    total: Score = Score {};
+    seed: Int = 99;
+}
+
+impl Entrant for Player {
+    fn name() -> String {
+        return self.nick;
+    }
+
+    fn score() -> Score {
+        return self.total;
+    }
+}
+
+struct Team {
+    label: String;
+    members: [Player] = [];
+}
+
+impl Entrant for Team {
+    fn name() -> String {
+        return self.label;
+    }
+
+    fn score() -> Score {
+        let sum = Score {};
+
+        for member in self.members {
+            sum += member.total;
+        }
+
+        return sum;
+    }
+
+    fn line() -> String {
+        return "${self.label} (${self.members.len()} players): ${self.score()}";
+    }
+}
+
+// --- A table of anything that can be ranked ---
+
+struct Table<T: Entrant> {
+    rows: [T] = [];
+    title: String = "standings";
+}
+
+impl<T: Entrant> Table<T> {
+    fn add(row: T) -> Table<T> {
+        self.rows.push(row);
+        return self;
+    }
+
+    // Best first. The order is the one Score gives itself
+    fn ranked() -> [T] {
+        return self.rows.sorted(fn(a: T, b: T) -> Bool {
+            return a.score() > b.score();
+        });
+    }
+
+    fn leader() -> T? {
+        return self.ranked().first();
+    }
+}
+
+impl<T: Entrant> Iterable<T> for Table<T> {
+    fn iterate() -> [T] {
+        return self.ranked();
+    }
+}
+
+impl<T: Entrant> Indexed<Int, T> for Table<T> {
+    fn at(key: Int) -> T {
+        return self.ranked()[key];
+    }
+}
+
+// --- Where results come from ---
+
+trait Source<T> {
+    fn next() -> T?;
+
+    fn all() -> [T] {
+        let out: [T] = [];
+        let item = self.next();
+
+        while item != null {
+            out.push(item);
+            item = self.next();
+        }
+
+        return out;
+    }
+}
+
+// "ada beat bob", "cy drew dee", one per line
+struct Fixtures {
+    lines: [String];
+    at: Int = 0;
+}
+
+impl Source<(String, Result, String)> for Fixtures {
+    fn next() -> (String, Result, String)? {
+        while self.at < self.lines.len() {
+            let words = self.lines[self.at].words();
+            self.at++;
+
+            if words.len() != 3 {
+                continue;
+            }
+
+            match words[1] {
+                case "beat": {
+                    return (words[0], Result.Win, words[2]);
+                }
+
+                case "drew": {
+                    return (words[0], Result.Draw, words[2]);
+                }
+
+                case "lost": {
+                    return (words[0], Result.Loss, words[2]);
+                }
+
+                default: {}
+            }
+        }
+
+        return null;
+    }
+}
+
+// The widest of anything that says how it reads
+fn widest<T: Show>(items: [T]) -> Int {
+    let most = 0;
+
+    for item in items {
+        most = most.max(item.show().len());
+    }
+
+    return most;
+}
+
+fn podium<T: Entrant>(table: Table<T>) -> String {
+    let names = table.ranked()
+        .take(3)
+        .map(fn(row: T) -> String {
+            return row.name();
+        });
+
+    return names.join(" > ");
+}
+
+fn main() -> Int {
+    let fixtures = Fixtures { lines: """
+        ada beat bob
+        cy drew dee
+        ada beat cy
+        this line is not a result
+        bob lost dee
+        dee drew ada
+        bob beat cy
+        """.lines() };
+
+    // Scores by name, added up as the results come
+    let scores = dict.empty<Score>();
+
+    for (home, result, away) in fixtures.all() {
+        scores[home] = (scores[home] ?? Score {}) + result.score();
+        scores[away] = (scores[away] ?? Score {}) + result.other().score();
+    }
+
+    let players = Table<Player> { title: "players" };
+
+    for name in scores {
+        players.add(Player { nick: name, total: scores[name] ?? Score {} });
+    }
+
+    println(players.title);
+
+    for i, player in players {
+        println(" ${i + 1}. ${player.line()}");
+    }
+
+    println("leader: ${players[0].name()}, last: ${players[players.rows.len() - 1].name()}, podium: ${podium(players)}");
+
+    let ada = players[0];
+    let dee = players[1];
+
+    println(
+        ada.leads(dee),
+        dee.leads(ada),
+        ada.score() == dee.score(),
+        ada.score() > dee.score(),
+        ops.max(ada.score(), dee.score()),
+    );
+
+    // Teams are entrants too, with a line of their own
+    let find = fn(name: String) -> Player {
+        return Player { nick: name, total: scores[name] ?? Score {} };
+    };
+
+    let teams = Table<Team> {}
+        .add(Team { label: "north", members: [find("ada"), find("cy")] })
+        .add(Team { label: "south", members: [find("bob"), find("dee")] })
+        .add(Team { label: "bench" });
+
+    println("");
+    println(teams.title);
+
+    for team in teams {
+        println(" " + team.line());
+    }
+
+    println("podium: ${podium(teams)}, leader: ${teams.leader()?.name() ?? "nobody"}, empty: ${Table<Team> { }.leader()?.name() ?? "nobody"}");
+
+    // Everything through the trait, each doing what its own type says
+    let everyone: [Entrant] = [ada, teams[0], dee];
+
+    println(
+        everyone.map(fn(entrant: Entrant) -> String {
+            return entrant.name();
+        }),
+        everyone[1].line().len(),
+    );
+
+    // Methods as values, and what the library does with types that say
+    // how they compare and read
+    let all = players.ranked().map(fn(player: Player) -> Score {
+        return player.total;
+    });
+
+    let lookup = scores.get;
+
+    println(
+        ["dee", "eve"].map(lookup),
+        ops.largest(all),
+        ops.smallest(all),
+        widest(all),
+        widest([1, 22, 333]),
+    );
+
+    println(ops.join(ops.sorted(all), " < "));
+
+    println(
+        all.contains(Score { points: 4, wins: 1, played: 3 }),
+        ops.indexOf(all, Score { points: 4, wins: 1 }),
+        all.len(),
+    );
+
+    return 0;
+}

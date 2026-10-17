@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -64 406 226" width="406" height="226">
+  <title>qoqi</title>
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3D5AFE"/><stop offset="1" stop-color="#00C2E0"/></linearGradient></defs>
+  <g fill="#FFFFFF">
+    <g><path fill-rule="evenodd" d="M50 0a50 50 0 1 0 0 100a50 50 0 1 0 0-100zM50 22a28 28 0 1 1 0 56a28 28 0 1 1 0-56z"/><path d="M78 0H100V139A11 11 0 0 1 78 139Z"/></g>
+    <g transform="translate(120 0)"><path fill-rule="evenodd" d="M50 0a50 50 0 1 0 0 100a50 50 0 1 0 0-100zM50 22a28 28 0 1 1 0 56a28 28 0 1 1 0-56z"/></g>
+    <g transform="translate(240 0)"><path fill-rule="evenodd" d="M50 0a50 50 0 1 0 0 100a50 50 0 1 0 0-100zM50 22a28 28 0 1 1 0 56a28 28 0 1 1 0-56z"/><path d="M78 0H100V139A11 11 0 0 1 78 139Z"/></g>
+    <rect x="360" y="0" width="22" height="100" rx="0"/>
+  </g>
+  <circle cx="371" cy="-27" r="13" fill="url(#g)"/>
+</svg>

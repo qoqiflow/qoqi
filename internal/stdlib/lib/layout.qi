@@ -1,0 +1,746 @@
+// Text laid out to fit a width.
+//
+// What is to be written is described once, as a document: pieces of
+// text, and the places where a line may end. Writing it out decides which
+// of those places are used, so that no line is longer than the width
+// asked for when that can be helped.
+//
+//     let list = layout.group(layout.concat([
+//         layout.text("["),
+//         layout.indent(layout.concat([Doc.Soft, layout.join(items, layout.concat([layout.text(","), Doc.Line]))])),
+//         Doc.Soft,
+//         layout.text("]"),
+//     ]));
+//     println(layout.render(list, 80, 4));
+//
+// A group is written on one line if it fits, and otherwise every line end
+// directly in it is taken: [1, 2, 3] or one item per line, never
+// something in between. It is what the formatter of Qoqi is written
+// with (`qoqi fmt`), and serves as well for printing any tree: JSON, a
+// query, a program in another language.
+
+import std.strings;
+import std.arrays;
+
+pub enum Doc {
+    Nothing,
+    Text(String),
+
+    // Text over several lines, written as it is. The number is how far
+    // its first line was indented where it comes from: the lines after
+    // it move as far as the first one did.
+    Verbatim(String, Int),
+    Concat([Doc]),
+
+    // What is inside starts its lines one step further in
+    Indent(Doc),
+
+    // On one line if it fits; true for one that takes its line ends
+    // whether it fits or not
+    Group(Doc, Bool),
+
+    // Where a line may end. In a group that fits: a space for Line,
+    // nothing for Soft
+    Line,
+    Soft,
+
+    // Where a line ends. Two in a row leave an empty line, more leave no
+    // more than that
+    Hard,
+
+    // Where a line starts: a line end, unless nothing was written on the
+    // line yet
+    Fresh,
+
+    // The first in a group that takes its line ends, the second in one
+    // that fits
+    IfBroken(Doc, Doc),
+
+    // A comma, then a space if the document still fits on the line, and a
+    // line end if it does not: for lists that fill their lines
+    Glue(Doc),
+
+    // A comment for the end of the line, wherever that comes to be. One
+    // that runs to the end of its line, as // does, keeps the groups
+    // around it from being written on one line: what followed it would
+    // come before it
+    Trailing(String),
+
+    // One of several things written under each other, and the line end
+    // between two of them. An item that comes to take several lines gets
+    // an empty line after it, and one before it if the boolean says a Gap
+    // is what separates it from the item before: what is long stands
+    // apart, what is short stays together.
+    Item(Doc, Bool),
+    Gap,
+}
+
+pub fn text(text: String) -> Doc {
+    return Doc.Text(text);
+}
+
+pub fn concat(parts: [Doc]) -> Doc {
+    return Doc.Concat(parts);
+}
+
+pub fn indent(inner: Doc) -> Doc {
+    return Doc.Indent(inner);
+}
+
+// A group that is written on one line if it fits. One that holds a line
+// end that is always taken cannot.
+pub fn group(inner: Doc) -> Doc {
+    return Doc.Group(inner, forces(inner));
+}
+
+// A group that takes its line ends whether it fits or not.
+pub fn broken(inner: Doc) -> Doc {
+    return Doc.Group(inner, true);
+}
+
+// The items with a separator between each two.
+pub fn join(items: [Doc], separator: Doc) -> Doc {
+    let parts: [Doc] = [];
+
+    for i, item in items {
+        if i > 0 {
+            parts.push(separator);
+        }
+
+        parts.push(item);
+    }
+
+    return Doc.Concat(parts);
+}
+
+// The items, filling each line before starting the next.
+pub fn fill(items: [Doc]) -> Doc {
+    let parts: [Doc] = [];
+
+    for i, item in items {
+        if i > 0 {
+            parts.push(Doc.Glue(item));
+        }
+
+        parts.push(item);
+    }
+
+    return Doc.Concat(parts);
+}
+
+// Whether a document holds a line end that is always taken, which is
+// what keeps the groups around it from being written on one line.
+pub fn forces(doc: Doc) -> Bool {
+    match doc {
+        case Doc.Hard | Doc.Fresh | Doc.Gap: {
+            return true;
+        }
+
+        case Doc.Trailing(comment): {
+            return comment.startsWith("//");
+        }
+
+        case Doc.Group(_, must): {
+            return must;
+        }
+
+        case Doc.Indent(inner): {
+            return forces(inner);
+        }
+
+        case Doc.Item(inner, _): {
+            return forces(inner);
+        }
+
+        case Doc.Concat(parts): {
+            return parts.any(forces);
+        }
+
+        default: {
+            return false;
+        }
+    }
+}
+
+// The document as text, with lines no longer than `width` where it can
+// be helped, and `step` spaces for each level of indentation. It ends
+// with a line end unless it is empty.
+pub fn render(doc: Doc, width: Int, step: Int) -> String {
+    let printer = Printer { width: width, step: step };
+    printer.print(doc);
+    return printer.finish();
+}
+
+// --- Writing out ---
+
+// What is left to write: a document, how far its lines are indented, and
+// whether it is being written on one line.
+struct Command {
+    indent: Int;
+    flat: Bool;
+    doc: Doc;
+
+    // For the end of an item: the line it started on, and the line the
+    // gap before it started, or -1
+    ends: Bool = false;
+    start: Int = 0;
+    gap: Int = -1;
+}
+
+// A line that was written.
+struct Row {
+    indent: Int;
+    code: String;
+    comment: String;
+
+    // A line from inside a text over several lines: kept to the letter
+    raw: Bool;
+}
+
+// A line of code longer than this does not say where the comments of the
+// lines around it go.
+const widest = 60;
+
+struct Printer {
+    width: Int;
+    step: Int;
+    rows: [Row] = [];
+    stack: [Command] = [];
+
+    // The line being written
+    parts: [String] = [];
+    indent: Int = 0;
+    column: Int = 0;
+    comment: String = "";
+    raw: Bool = false;
+
+    // Whether the item just written took several lines, and the line the
+    // last gap started
+    tall: Bool = false;
+    gap: Int = -1;
+}
+
+impl Printer {
+    fn print(doc: Doc) {
+        self.stack.push(Command { indent: 0, flat: false, doc: doc });
+
+        while true {
+            let command = self.stack.pop();
+
+            if command == null {
+                break;
+            }
+
+            self.take(command);
+        }
+    }
+
+    fn later(indent: Int, flat: Bool, doc: Doc) {
+        self.stack.push(Command { indent: indent, flat: flat, doc: doc });
+    }
+
+    // Writes one document, or puts what it is made of on the stack.
+    fn take(command: Command) {
+        let indent = command.indent;
+        let flat = command.flat;
+
+        if command.ends {
+            self.endItem(command);
+            return;
+        }
+
+        match command.doc {
+            case Doc.Nothing: {}
+
+            case Doc.Text(text): {
+                self.write(text);
+            }
+
+            case Doc.Verbatim(text, was): {
+                self.verbatim(text, was);
+            }
+
+            case Doc.Concat(parts): {
+                let i = parts.len() - 1;
+
+                while i >= 0 {
+                    self.later(indent, flat, parts[i]);
+                    i--;
+                }
+            }
+
+            case Doc.Indent(inner): {
+                self.later(indent + self.step, flat, inner);
+            }
+
+            case Doc.Group(inner, must): {
+                let whole = flat
+                    || (!must && self.fits(Command { indent: indent, flat: true, doc: inner }));
+
+                self.later(indent, whole, inner);
+            }
+
+            case Doc.Line: {
+                if flat {
+                    self.write(" ");
+                } else {
+                    self.newline(indent);
+                }
+            }
+
+            case Doc.Soft: {
+                if !flat {
+                    self.newline(indent);
+                }
+            }
+
+            case Doc.Hard: {
+                self.newline(indent);
+            }
+
+            case Doc.Fresh: {
+                if !self.parts.isEmpty() || self.comment != "" {
+                    self.newline(indent);
+                }
+            }
+
+            case Doc.IfBroken(taken, fitting): {
+                if flat {
+                    self.later(indent, flat, fitting);
+                } else {
+                    self.later(indent, flat, taken);
+                }
+            }
+
+            case Doc.Glue(next): {
+                self.write(",");
+
+                // The comma that follows what comes next has to fit too
+                if flat || self.column + 2 + flatWidth(next) < self.width {
+                    self.write(" ");
+                } else {
+                    self.newline(indent);
+                }
+            }
+
+            case Doc.Trailing(comment): {
+                if self.comment == "" {
+                    self.comment = comment;
+                } else {
+                    self.comment = "${self.comment} ${comment}";
+                }
+            }
+
+            case Doc.Item(inner, open): {
+                let gap = -1;
+
+                if open {
+                    gap = self.gap;
+                }
+
+                self.stack.push(Command {
+                    indent: indent,
+                    flat: flat,
+                    doc: Doc.Nothing,
+                    ends: true,
+                    start: self.rows.len(),
+                    gap: gap,
+                });
+
+                self.later(indent, flat, inner);
+            }
+
+            case Doc.Gap: {
+                let apart = self.tall;
+                self.newline(indent);
+
+                if apart {
+                    self.newline(indent);
+                }
+
+                self.gap = self.rows.len();
+            }
+        }
+    }
+
+    // An item is written: if it took several lines, an empty one goes
+    // before it, and the gap that follows will leave one after it.
+    fn endItem(command: Command) {
+        self.tall = self.rows.len() > command.start;
+        let gap = command.gap;
+
+        if !self.tall || gap < 1 || isEmpty(self.rows[gap - 1]) {
+            return;
+        }
+
+        self.rows.insertAt(gap, Row { indent: 0, code: "", comment: "", raw: false });
+    }
+
+    // Whether a document fits in what is left of the line, with what
+    // follows it up to the next place a line ends.
+    fn fits(first: Command) -> Bool {
+        let left = self.width - self.column;
+        let ahead = [first];
+        let rest = self.stack.len();
+
+        while left >= 0 {
+            let command = ahead.pop();
+
+            if command == null {
+                // What follows the document, as it is going to be written
+                if rest == 0 {
+                    return true;
+                }
+
+                rest--;
+            }
+
+            let next = command ?? self.stack[rest];
+            let flat = next.flat;
+
+            match next.doc {
+                case Doc.Text(text): {
+                    left -= text.len();
+                }
+
+                case Doc.Verbatim(text, _): {
+                    // Its first line is what there is to fit
+                    let end = text.indexOf("\n") ?? text.len();
+                    return left >= end;
+                }
+
+                case Doc.Concat(parts): {
+                    let i = parts.len() - 1;
+
+                    while i >= 0 {
+                        ahead.push(Command { indent: 0, flat: flat, doc: parts[i] });
+                        i--;
+                    }
+                }
+
+                case Doc.Indent(inner): {
+                    ahead.push(Command { indent: 0, flat: flat, doc: inner });
+                }
+
+                case Doc.Group(inner, must): {
+                    ahead.push(Command { indent: 0, flat: flat && !must, doc: inner });
+                }
+
+                case Doc.Line: {
+                    if !flat {
+                        return true;
+                    }
+
+                    left--;
+                }
+
+                case Doc.Soft: {
+                    if !flat {
+                        return true;
+                    }
+                }
+
+                case Doc.Hard | Doc.Fresh | Doc.Gap: {
+                    return true;
+                }
+
+                case Doc.Item(inner, _): {
+                    ahead.push(Command { indent: 0, flat: flat, doc: inner });
+                }
+
+                case Doc.IfBroken(taken, fitting): {
+                    if flat {
+                        ahead.push(Command { indent: 0, flat: flat, doc: fitting });
+                    } else {
+                        ahead.push(Command { indent: 0, flat: flat, doc: taken });
+                    }
+                }
+
+                case Doc.Glue(_): {
+                    if !flat {
+                        return true;
+                    }
+
+                    left -= 2;
+                }
+
+                default: {}
+            }
+        }
+
+        return false;
+    }
+
+    fn write(text: String) {
+        if text == "" {
+            return;
+        }
+
+        self.parts.push(text);
+        self.column += text.len();
+    }
+
+    // Ends the line being written and starts one indented by `indent`.
+    fn newline(indent: Int) {
+        self.endRow();
+        self.indent = indent;
+        self.column = indent;
+        self.tall = false;
+    }
+
+    fn endRow() {
+        let code = self.parts.join("");
+
+        if !self.raw {
+            code = code.trimEnd();
+        }
+
+        let row = Row { indent: self.indent, code: code, comment: self.comment, raw: self.raw };
+        self.parts = [];
+        self.comment = "";
+        self.raw = false;
+
+        // No empty line at the top, and never two in a row
+        let last = self.rows.last();
+
+        if isEmpty(row) && (last == null || isEmpty(last)) {
+            return;
+        }
+
+        self.rows.push(row);
+    }
+
+    // Text over several lines: its first line goes on the line being
+    // written, and the others follow it as far as it moved from where it
+    // was, when they can.
+    fn verbatim(text: String, was: Int) {
+        let lines = text.split("\n");
+        let (shift, margin) = shiftOf(lines, self.indent - was);
+
+        for i, line in lines {
+            if i == 0 {
+                self.write(line);
+                continue;
+            }
+
+            self.endRow();
+            self.indent = 0;
+            self.column = 0;
+            self.raw = true;
+            self.write(shifted(line, shift, margin));
+        }
+    }
+
+    fn finish() -> String {
+        self.endRow();
+
+        // No empty line at the bottom
+        while true {
+            let last = self.rows.last();
+
+            if last == null || !isEmpty(last) {
+                break;
+            }
+
+            self.rows.pop();
+        }
+
+        if self.rows.isEmpty() {
+            return "";
+        }
+
+        let columns = self.commentColumns();
+        let lines: [String] = [];
+
+        for i, row in self.rows {
+            let line = row.code;
+
+            if !row.raw && line != "" {
+                line = " ".repeat(row.indent) + line;
+            }
+
+            if row.comment != "" {
+                if line == "" {
+                    line = " ".repeat(row.indent) + row.comment;
+                } else {
+                    let gap = columns[i] - line.len();
+
+                    if gap < 2 {
+                        gap = 2;
+                    }
+
+                    line = line + " ".repeat(gap) + row.comment;
+                }
+            }
+
+            lines.push(line);
+        }
+
+        return lines.join("\n") + "\n";
+    }
+
+    // For each line, the column its comment starts in: the comments of
+    // lines that follow each other at the same depth start in the same
+    // column, as in the fields of a struct.
+    fn commentColumns() -> [Int] {
+        let columns = arrays.fill(self.rows.len(), 0);
+        let i = 0;
+
+        while i < self.rows.len() {
+            if !self.commented(i) {
+                i++;
+                continue;
+            }
+
+            // The lines of the run: up to the last commented one before
+            // an empty line or a line at another depth
+            let end = i;
+            let next = i + 1;
+
+            while next < self.rows.len() && self.continues(i, next) {
+                if self.commented(next) {
+                    end = next;
+                }
+
+                next++;
+            }
+
+            let column = 0;
+
+            for at in i..=end {
+                let reach = self.rows[at].indent + self.rows[at].code.len();
+
+                if self.commented(at) && reach <= widest && reach > column {
+                    column = reach;
+                }
+            }
+
+            for at in i..=end {
+                columns[at] = column + 2;
+            }
+
+            i = end + 1;
+        }
+
+        return columns;
+    }
+
+    fn commented(at: Int) -> Bool {
+        let row = self.rows[at];
+        return row.comment != "" && row.code != "" && !row.raw;
+    }
+
+    // Whether a line can be part of the run of comments that starts at
+    // another.
+    fn continues(start: Int, at: Int) -> Bool {
+        let row = self.rows[at];
+        return row.code != "" && !row.raw && row.indent == self.rows[start].indent;
+    }
+}
+
+fn isEmpty(row: Row) -> Bool {
+    return row.code == "" && row.comment == "" && !row.raw;
+}
+
+// How wide a document is on one line.
+fn flatWidth(doc: Doc) -> Int {
+    match doc {
+        case Doc.Text(text): {
+            return text.len();
+        }
+
+        case Doc.Verbatim(text, _): {
+            return text.len();
+        }
+
+        case Doc.Concat(parts): {
+            return parts.fold(0, (total, part) -> total + flatWidth(part));
+        }
+
+        case Doc.Indent(inner): {
+            return flatWidth(inner);
+        }
+
+        case Doc.Group(inner, _): {
+            return flatWidth(inner);
+        }
+
+        case Doc.Item(inner, _): {
+            return flatWidth(inner);
+        }
+
+        case Doc.Line: {
+            return 1;
+        }
+
+        case Doc.IfBroken(_, fitting): {
+            return flatWidth(fitting);
+        }
+
+        case Doc.Glue(_): {
+            return 2;
+        }
+
+        default: {
+            return 0;
+        }
+    }
+}
+
+fn leadingSpaces(line: String) -> Int {
+    let count = 0;
+
+    while count < line.len() && line[count] == " " {
+        count++;
+    }
+
+    return count;
+}
+
+// How far the lines after the first can move, and how many spaces a line
+// needs in front of it to move at all.
+//
+// The lines of a comment move freely. Those of a text between """ are
+// part of a value: what the closing quotes are indented by is taken off
+// the front of every line that starts with it, so the lines that do move
+// with the quotes and the others stay, and the text is the same text
+// after. Where that cannot be had, nothing moves.
+fn shiftOf(lines: [String], wanted: Int) -> (Int, Int) {
+    let last = lines[lines.len() - 1];
+    let margin = 0;
+
+    if lines[0].startsWith("\"\"\"") {
+        margin = leadingSpaces(last);
+
+        if last.from(margin) != "\"\"\"" || margin + wanted < 0 {
+            return (0, 0);
+        }
+    }
+
+    if wanted >= 0 {
+        return (wanted, margin);
+    }
+
+    for i, line in lines {
+        let room = leadingSpaces(line);
+        let stays = i == 0 || line == "" || (margin == 0 && line.isBlank());
+
+        if !stays && (room < margin || room < -wanted) {
+            return (0, 0);
+        }
+    }
+
+    return (wanted, margin);
+}
+
+fn shifted(line: String, shift: Int, margin: Int) -> String {
+    if line == "" || leadingSpaces(line) < margin || (margin == 0 && line.isBlank()) {
+        return line;
+    }
+
+    if shift >= 0 {
+        return " ".repeat(shift) + line;
+    }
+
+    return line.from(-shift);
+}

@@ -1,0 +1,15 @@
+// A call into the standard library that fails stops the program like any
+// runtime error: the function by the name the program used, and the line
+// of the program that called it.
+
+import std.strings;
+
+fn shorten(name: String) -> String {
+    return name.substring(0, 5) + "...";
+}
+
+fn main() -> Int {
+    println(shorten("ada lovelace"));
+    println(shorten("ada"));
+    return 0;
+}

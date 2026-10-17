@@ -1,0 +1,9 @@
+[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59]
+3 withdrawals, 10 left
+10 careless withdrawals, 70 left
+true the inner task failed: index out of bounds: 7 (length 3)
+job 0 by worker 1: and=1 cat=1 hat=1 the=2
+job 1 by worker 2: a=2 cat=2 is=1
+job 2 by worker 3: 
+job 3 by worker 1: end=1 the=1
+last words from task true

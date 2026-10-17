@@ -1,0 +1,6 @@
+// Each broken statement is reported once; parsing continues after it.
+fn main() -> Int {
+    let a = 1
+    let b = ;
+    return a;
+}

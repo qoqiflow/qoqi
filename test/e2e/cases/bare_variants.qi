@@ -1,0 +1,95 @@
+// Variants written without their enum: Ok(n), case Circle(r):. The enum
+// is the one in scope that has the variant, or, when two have it, the one
+// the value has to be.
+
+enum Shape {
+    Circle(Float),
+    Rect(Float, Float),
+    Empty,
+}
+
+enum Slot {
+    Taken(String),
+    Empty,
+}
+
+enum Expr {
+    Num(Int),
+    Add(Expr, Expr),
+    Mul(Expr, Expr),
+    Neg(Expr),
+}
+
+fn area(shape: Shape) -> Float {
+    return match shape {
+        case Circle(r): 3.0 * r * r;
+        case Rect(w, h): w * h;
+        case Empty: 0.0;
+    };
+}
+
+fn eval(e: Expr) -> Int {
+    return match e {
+        case Num(n): n;
+        case Add(a, b): eval(a) + eval(b);
+        case Mul(Num(0), _) | Mul(_, Num(0)): 0;
+        case Mul(a, b): eval(a) * eval(b);
+        case Neg(Neg(inner)): eval(inner);
+        case Neg(inner): -eval(inner);
+    };
+}
+
+fn shown(e: Expr) -> String {
+    return match e {
+        case Num(n): "${n}";
+        case Add(a, b): "(${shown(a)} + ${shown(b)})";
+        case Mul(a, b): "${shown(a)} * ${shown(b)}";
+        case Neg(inner): "-${shown(inner)}";
+    };
+}
+
+// Result's variants are no different
+fn halve(n: Int) -> Result<Int, String> {
+    if n % 2 != 0 {
+        return Err("${n} is odd");
+    }
+
+    return Ok(n / 2);
+}
+
+fn seat(slots: [Slot], name: String) -> Result<Int, String> {
+    for i, slot in slots {
+        if slot is Empty {
+            slots[i] = Taken(name);
+            return Ok(i);
+        }
+    }
+
+    return Err("no seat for ${name}");
+}
+
+fn main() -> Int {
+    let shapes = [Circle(1.0), Rect(2.0, 3.0), Empty];
+    println(shapes, shapes.map(area));
+
+    let e = Add(Num(2), Mul(Num(3), Neg(Neg(Num(4)))));
+    println(shown(e), "=", eval(e), eval(Mul(Num(0), e)));
+
+    println([4, 7, 10].map(halve));
+
+    // Empty is a Slot here, because a Slot is what the array holds
+    let slots: [Slot] = [Taken("ada"), Empty, Empty];
+    println(seat(slots, "bob"), seat(slots, "cy"), seat(slots, "dee"), slots);
+    println(slots[0] == Taken("ada"), shapes[2] == Empty);
+
+    for shape in shapes {
+        if shape is Rect(w, h) && w < h {
+            println("a tall rectangle", w, h);
+        }
+    }
+
+    // A variable of the same name is the variable
+    let Circle = "not a shape";
+    println(Circle);
+    return 0;
+}

@@ -1,0 +1,398 @@
+// A dictionary: values found by a text key.
+//
+//     let ages = dict.empty<Int>();
+//     ages.set("ada", 36);
+//     ages.get("ada") ?? 0
+//
+// Finding a key takes about the same time however many there are, and a
+// dictionary of a few keys costs next to nothing to make. Keys come back
+// in the order they were first set.
+
+import std.arrays;
+import std.ops.{Iterable, Indexed, IndexedSet, Equal, Show};
+
+// The keys and the values are two arrays, in the order the keys were set:
+// the value of keys[i] is values[i].
+//
+// Where a key is among the keys is found by looking through them while
+// there are few, which is quick and makes a dictionary cost nothing to
+// have: a program can make one for every little thing. Past SMALL keys an
+// index says where each key is, and finding one takes the same time
+// however many there are.
+pub struct Dict<V> {
+    priv keys: [String] = [];
+    priv values: [V] = [];
+    priv count: Int = 0;
+    priv index: Any? = null;    // Where each key is; null while the keys are few
+    priv dead: [Bool]? = null;  // The positions removed since the index was made; null if none
+    priv removed: Int = 0;      // How many of them
+}
+
+// Up to that many keys are looked through.
+const SMALL = 8;
+
+// Where a key is among keys, or -1; asked of the index when there is one.
+extern fn find(keys: [String], index: Any?, key: String) -> Int;
+
+// The index of keys: where each is.
+extern fn indexed(keys: [String]) -> Any;
+extern fn indexPut(index: Any, key: String, at: Int);
+extern fn indexDrop(index: Any, key: String);
+
+// An empty dictionary. Say what it holds: dict.empty<Int>().
+pub fn empty<V>() -> Dict<V> {
+    return Dict<V> {};
+}
+
+// A dictionary of the keys and values of an array of pairs; a key given
+// twice has the value given last. A literal is one: {"ada": 36}.
+pub fn of<V>(entries: [(String, V)]) -> Dict<V> {
+    let made = Dict<V> {};
+
+    for (key, value) in entries {
+        made.set(key, value);
+    }
+
+    return made;
+}
+
+// A dictionary takes brackets and loops: `ages["ada"]` is what `get`
+// gives, a value or null; `ages["ada"] = 36;` is `set`; and
+// `for name in ages` goes through the keys.
+impl<V> Iterable<String> for Dict<V> {
+    fn iterate() -> [String] {
+        return self.keys();
+    }
+}
+
+// `counts[word]` and `counts[word] = n` are these: what get and set do,
+// written here again rather than called, which would be a call more for
+// each in a loop that counts.
+impl<V> Indexed<String, V?> for Dict<V> {
+    fn at(key: String) -> V? {
+        let at = find(self.keys, self.index, key);
+
+        if at < 0 {
+            return null;
+        }
+
+        return self.values[at];
+    }
+}
+
+impl<V> IndexedSet<String, V> for Dict<V> {
+    fn put(key: String, value: V) {
+        let at = find(self.keys, self.index, key);
+
+        if at >= 0 {
+            self.values[at] = value;
+            return;
+        }
+
+        self.add(key, value);
+    }
+}
+
+// Two dictionaries are equal when they have the same keys, with equal
+// values, whatever order the keys were set in.
+impl<V> Equal for Dict<V> {
+    fn equals(other: Dict<V>) -> Bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        for key in self.keys() {
+            if !other.has(key) || self.get(key) != other.get(key) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+// A dictionary is written as its literal is: {"ada": 36, "alan": 41}.
+impl<V> Show for Dict<V> {
+    fn show() -> String {
+        let parts: [String] = [];
+
+        for (key, value) in self.entries() {
+            parts.push("${shownInside(key)}: ${shownInside(value)}");
+        }
+
+        return "{" + parts.join(", ") + "}";
+    }
+}
+
+// A value as it is written inside another: a text in quotes.
+pub fn shownInside(value: Any) -> String {
+    let inside = toString([value]);
+    return inside[1..inside.len() - 1];
+}
+
+impl<V> Dict<V> {
+    pub fn len() -> Int {
+        return self.count;
+    }
+
+    pub fn isEmpty() -> Bool {
+        return self.count == 0;
+    }
+
+    // Sets the value of a key, replacing the one it had.
+    pub fn set(key: String, value: V) {
+        let at = find(self.keys, self.index, key);
+
+        if at >= 0 {
+            self.values[at] = value;
+            return;
+        }
+
+        self.add(key, value);
+    }
+
+    // Adds a key the dictionary does not have.
+    fn add(key: String, value: V) {
+        self.keys.push(key);
+        self.values.push(value);
+        self.count++;
+
+        let dead = self.dead;
+
+        if dead != null {
+            dead.push(false);
+        }
+
+        let index = self.index;
+
+        if index != null {
+            indexPut(index, key, self.keys.len() - 1);
+        } else if self.keys.len() > SMALL {
+            self.index = indexed(self.keys);
+        }
+    }
+
+    // The value of a key, or null if it has none.
+    pub fn get(key: String) -> V? {
+        let at = find(self.keys, self.index, key);
+
+        if at < 0 {
+            return null;
+        }
+
+        return self.values[at];
+    }
+
+    // The value of a key, or `fallback` if it has none.
+    pub fn getOr(key: String, fallback: V) -> V {
+        let at = find(self.keys, self.index, key);
+
+        if at < 0 {
+            return fallback;
+        }
+
+        return self.values[at];
+    }
+
+    // Changes the value of a key to what a function makes of it, the
+    // function being given `start` if the key has none. Counting:
+    // counts.update(word, 0, n -> n + 1).
+    pub fn update(key: String, start: V, change: fn(V) -> V) {
+        let at = find(self.keys, self.index, key);
+
+        if at >= 0 {
+            self.values[at] = change(self.values[at]);
+        } else {
+            self.set(key, change(start));
+        }
+    }
+
+    // The value of a key, which is first set to what `make` gives when the
+    // key has none. Grouping:
+    //
+    //     groups.getOrSet(word.first(1), () -> []).push(word);
+    pub fn getOrSet(key: String, make: fn() -> V) -> V {
+        let at = find(self.keys, self.index, key);
+
+        if at >= 0 {
+            return self.values[at];
+        }
+
+        let value = make();
+        self.add(key, value);
+        return value;
+    }
+
+    pub fn has(key: String) -> Bool {
+        return find(self.keys, self.index, key) >= 0;
+    }
+
+    // Removes a key. Returns whether it was there.
+    pub fn remove(key: String) -> Bool {
+        let at = find(self.keys, self.index, key);
+
+        if at < 0 {
+            return false;
+        }
+
+        self.count--;
+
+        let index = self.index;
+
+        if index == null {
+            // Few keys: the ones after it move up
+            self.keys = without<String>(self.keys, at);
+            self.values = without<V>(self.values, at);
+            return true;
+        }
+
+        // Many: the place is left empty, which costs nothing now, and the
+        // empty places are taken out together once they are half of all
+        indexDrop(index, key);
+        let dead = self.marks();
+        dead[at] = true;
+        self.removed++;
+
+        if self.removed * 2 > self.keys.len() {
+            self.compact(dead);
+        }
+
+        return true;
+    }
+
+    // The keys, in the order they were first set.
+    pub fn keys() -> [String] {
+        let out: [String] = [];
+        let dead = self.dead;
+
+        for at, key in self.keys {
+            if dead == null || !dead[at] {
+                out.push(key);
+            }
+        }
+
+        return out;
+    }
+
+    // The values, in the order of their keys.
+    pub fn values() -> [V] {
+        let out: [V] = [];
+        let dead = self.dead;
+
+        for at, value in self.values {
+            if dead == null || !dead[at] {
+                out.push(value);
+            }
+        }
+
+        return out;
+    }
+
+    // Each key with its value, in the order of the keys.
+    //
+    //     for (name, age) in ages.entries() { ... }
+    pub fn entries() -> [(String, V)] {
+        let out: [(String, V)] = [];
+        let dead = self.dead;
+
+        for at, key in self.keys {
+            if dead == null || !dead[at] {
+                out.push((key, self.values[at]));
+            }
+        }
+
+        return out;
+    }
+
+    // The keys in alphabetical order.
+    pub fn sortedKeys() -> [String] {
+        let keys = self.keys();
+
+        // Insertion sort: std.arrays builds on this module, not the reverse
+        for i in 1..keys.len() {
+            let key = keys[i];
+            let j = i - 1;
+
+            while j >= 0 && keys[j] > key {
+                keys[j + 1] = keys[j];
+                j--;
+            }
+
+            keys[j + 1] = key;
+        }
+
+        return keys;
+    }
+
+    // Calls the function with each key and its value.
+    pub fn each(action: fn(String, V) -> Void) {
+        let dead = self.dead;
+
+        for at, key in self.keys {
+            if dead == null || !dead[at] {
+                action(key, self.values[at]);
+            }
+        }
+    }
+
+    // A dictionary of its own, with the same keys and values: setting a key
+    // of one does not change the other. The values are the same values: an
+    // array held in both is one array.
+    pub fn copy() -> Dict<V> {
+        return of(self.entries());
+    }
+
+    // Which positions are empty, all of them full if none was removed yet
+    fn marks() -> [Bool] {
+        let dead = self.dead;
+
+        if dead != null {
+            return dead;
+        }
+
+        let fresh: [Bool] = [];
+
+        for i in 0..self.keys.len() {
+            fresh.push(false);
+        }
+
+        self.dead = fresh;
+        return fresh;
+    }
+
+    // Takes the empty places out, and makes the index of what is left
+    fn compact(dead: [Bool]) {
+        let keys: [String] = [];
+        let values: [V] = [];
+
+        for at, key in self.keys {
+            if !dead[at] {
+                keys.push(key);
+                values.push(self.values[at]);
+            }
+        }
+
+        self.keys = keys;
+        self.values = values;
+        self.dead = null;
+        self.removed = 0;
+        self.index = null;
+
+        if keys.len() > SMALL {
+            self.index = indexed(keys);
+        }
+    }
+}
+
+// An array without the item at a position.
+fn without<T>(items: [T], at: Int) -> [T] {
+    let out: [T] = [];
+
+    for i, item in items {
+        if i != at {
+            out.push(item);
+        }
+    }
+
+    return out;
+}

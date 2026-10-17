@@ -1,0 +1,20 @@
+p-1 again is refused: true
+nonsense is refused: true
+priced 2
+p-1 1200 true 12.5 false null
+p-2 300 false 12.5 false null
+p-3 5000 true null true null
+before:
+   Douala 2 5250
+   Lyon 2 1500
+not moved: too heavy for the van
+moved 2
+after:
+   Douala 2 5250
+   Paris 2 1500
+{id: "p-2", city: "Paris"}
+null
+{big: "140737488355328", text: "é ü 漢"}
+audit given up: true
+{audited: 0}
+{parcels: 0}

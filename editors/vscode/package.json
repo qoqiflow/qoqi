@@ -1,0 +1,75 @@
+{
+  "name": "qoqi",
+  "displayName": "Qoqi",
+  "description": "Qoqi Flow: colours for .qi files, the language server (mistakes as you type, what a name is, where it is declared, what a file declares, what to write next), formatting and running tests.",
+  "version": "0.1.0",
+  "publisher": "qoqiflow",
+  "license": "MIT",
+  "icon": "icons/qoqi.png",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "qoqi",
+        "aliases": ["Qoqi", "qoqi"],
+        "extensions": [".qi"],
+        "icon": { "light": "./icons/qoqi-file.svg", "dark": "./icons/qoqi-file.svg" },
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "qoqi",
+        "scopeName": "source.qoqi",
+        "path": "./syntaxes/qoqi.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      { "command": "qoqi.restartServer", "title": "Qoqi: Restart the language server" },
+      { "command": "qoqi.runTests", "title": "Qoqi: Run the tests" },
+      { "command": "qoqi.runFileTests", "title": "Qoqi: Run the tests of this file" }
+    ],
+    "configurationDefaults": {
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": [
+              "comment.line.double-slash.qoqi",
+              "keyword.control.qoqi",
+              "keyword.control.import.qoqi",
+              "keyword.operator.word.qoqi",
+              "storage.type.qoqi",
+              "storage.type.function.qoqi",
+              "storage.modifier.qoqi",
+              "variable.language.self.qoqi"
+            ],
+            "settings": { "fontStyle": "italic" }
+          }
+        ]
+      },
+      "[qoqi]": {
+        "editor.defaultFormatter": "qoqiflow.qoqi",
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+      }
+    },
+    "configuration": {
+      "title": "Qoqi",
+      "properties": {
+        "qoqi.path": {
+          "type": "string",
+          "default": "",
+          "description": "Qoqi Flow: colours for .qi files, the language server (mistakes as you type, what a name is, where it is declared, what a file declares, what to write next), formatting and running tests."
+        },
+        "qoqi.server.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Qoqi Flow: colours for .qi files, the language server (mistakes as you type, what a name is, where it is declared, what a file declares, what to write next), formatting and running tests."
+        }
+      }
+    }
+  }
+}

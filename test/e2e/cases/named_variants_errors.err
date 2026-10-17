@@ -1,0 +1,8 @@
+[ERROR] E8008: Shape.Circle needs a value for 'radius'
+named_variants_errors.qi:9:13
+[ERROR] E8008: Shape.Circle has no value 'color'
+named_variants_errors.qi:10:42
+[ERROR] E8008: Shape.Square holds its values by position, not by name
+named_variants_errors.qi:11:13
+[ERROR] E8008: Shape.Circle has no value 'diameter'
+named_variants_errors.qi:14:14

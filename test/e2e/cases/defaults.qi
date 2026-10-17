@@ -1,0 +1,71 @@
+// Parameters with values of their own: a call leaves out the last ones it
+// has nothing to say about.
+
+const PAGE = 3;
+
+struct Table {
+    rows: [[String]];
+}
+
+impl Table {
+    // As text: the columns as wide as they need, separated by `gap`
+    fn render(gap: String = "  ", header: Bool = true) -> String {
+        let widths: [Int] = [];
+
+        for row in self.rows {
+            for i, cell in row {
+                if i >= widths.len() {
+                    widths.push(0);
+                }
+
+                if cell.len() > widths[i] {
+                    widths[i] = cell.len();
+                }
+            }
+        }
+
+        let lines: [String] = [];
+
+        for r, row in self.rows {
+            let cells: [String] = [];
+
+            for i, cell in row {
+                cells.push(cell.padRight(widths[i]));
+            }
+
+            lines.push(cells.join(gap));
+
+            if r == 0 && header {
+                lines.push("-".repeat(widths.sum() + gap.len() * (widths.len() - 1)));
+            }
+        }
+
+        return lines.join("\n");
+    }
+}
+
+// One page of items, from the first page and PAGE to a page
+fn page(items: [String], number: Int = 1, size: Int = PAGE) -> [String] {
+    return items[(number - 1) * size..number * size];
+}
+
+// A greeting, plain or not
+fn greet(name: String, punctuation: String = "!", times: Int = 1) -> String {
+    return "hello ${name}${punctuation.repeat(times)}";
+}
+
+fn main() -> Int {
+    let fruit = ["apple", "pear", "plum", "fig", "kiwi", "lime", "date"];
+    println(page(fruit), page(fruit, 2), page(fruit, 3), page(fruit, 1, 5));
+
+    println(greet("ada"), greet("ada", "?"), greet("ada", "!", 3));
+
+    let table = Table { rows: [["name", "age"], ["ada", "36"], ["alan", "41"]] };
+    println(table.render());
+    println(table.render(" | ", false));
+
+    // A function value keeps the defaults of the function it names
+    let short = greet;
+    println(short("bob"));
+    return 0;
+}

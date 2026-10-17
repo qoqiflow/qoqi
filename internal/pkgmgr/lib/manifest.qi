@@ -1,0 +1,261 @@
+// qoqi.json as the package manager reads it: what a project or a
+// package is called, what it requires, and where packages come from.
+//
+//     {
+//         "name": "acme/shop",
+//         "require": { "acme/textkit": "^1.2" },
+//         "require-dev": { "acme/testkit": "^0.3" },
+//         "repositories": [
+//             { "type": "git", "url": "https://git.example.com/textkit.git" },
+//             { "type": "path", "url": "../testkit" }
+//         ]
+//     }
+//
+// The keys the compiler reads (entry, root, packages, ...) are kept as
+// they are when the file is written back.
+
+import std.json;
+import std.json.{Json};
+import std.dict;
+import std.dict.{Dict};
+import std.io;
+import std.path;
+import std.regex;
+
+pub const FILE = "qoqi.json";
+
+// Where packages come from, besides the default.
+pub enum Repository {
+    // A git repository: its tags are the versions, its branches dev-<branch>.
+    Git(String),
+
+    // A folder on this machine, used where it is.
+    Path(String),
+}
+
+impl Repository {
+    pub fn url() -> String {
+        return match self {
+            case Repository.Git(url): url;
+            case Repository.Path(url): url;
+        };
+    }
+
+    pub fn kind() -> String {
+        return match self {
+            case Repository.Git(_): "git";
+            case Repository.Path(_): "path";
+        };
+    }
+}
+
+// What qoqi.json says, for the package manager.
+pub struct Manifest {
+    // The package name, vendor/name; "" for a project nobody requires.
+    name: String = "";
+
+    // The name its modules are imported by: import textkit.format;
+    importName: String = "";
+
+    // The folder its module paths start at, relative to its own folder.
+    root: String = "";
+
+    // The version of a package kept in a folder; "" when its versions
+    // are the tags of a repository.
+    version: String = "";
+
+    description: String = "";
+    require: Dict<String> = dict.empty<String>();
+    requireDev: Dict<String> = dict.empty<String>();
+    repositories: [Repository] = [];
+
+    // The whole document, to write back with what it holds.
+    document: Json = json.object().done();
+}
+
+impl Manifest {
+    // The requirements to resolve: those of require-dev too, with dev.
+    pub fn requirements(dev: Bool) -> [(String, String)] {
+        let all = self.require.entries();
+
+        if dev {
+            all = all.concat(self.requireDev.entries());
+        }
+
+        return all;
+    }
+}
+
+// A package name: vendor/name, lower case, as Composer has them.
+pub fn isPackageName(name: String) -> Bool {
+    return regex.must("^[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*$").matches(name);
+}
+
+// The name a package is imported by when it does not say: the last part
+// of its name, with what an import cannot hold turned into _.
+pub fn defaultImport(name: String) -> String {
+    let last = name.from((name.indexOf("/") ?? -1) + 1);
+    return last.replace("-", "_").replace(".", "_");
+}
+
+// Reads a qoqi.json. A missing file is an empty project.
+pub fn load(file: String) -> Result<Manifest, String> {
+    if !io.exists(file) {
+        return Err("${file}: no such file");
+    }
+
+    let text = io.readFile(file).mapErr(error -> error.describe())?;
+    return parse(text).mapErr(reason -> "${file}: ${reason}");
+}
+
+// Reads the text of a qoqi.json.
+pub fn parse(text: String) -> Result<Manifest, String> {
+    let document = json.parse(text).mapErr(error -> error.describe())?;
+    let fields = document.fields();
+
+    if fields == null {
+        return Err("the file must hold an object: {}");
+    }
+
+    let manifest = Manifest { document: document };
+    manifest.name = textField(fields, "name")?;
+    manifest.root = textField(fields, "root")?;
+    manifest.version = textField(fields, "version")?;
+    manifest.description = textField(fields, "description")?;
+    manifest.require = requirements(fields, "require")?;
+    manifest.requireDev = requirements(fields, "require-dev")?;
+    manifest.repositories = repositories(fields)?;
+    manifest.importName = textField(fields, "import")?;
+
+    if manifest.importName == "" && isPackageName(manifest.name) {
+        manifest.importName = defaultImport(manifest.name);
+    }
+
+    return Ok(manifest);
+}
+
+fn textField(fields: Dict<Json>, key: String) -> Result<String, String> {
+    let value = fields.get(key);
+
+    if value == null {
+        return Ok("");
+    }
+
+    let text = value.text();
+
+    if text == null {
+        return Err("\"${key}\" must be a string");
+    }
+
+    return Ok(text);
+}
+
+fn requirements(fields: Dict<Json>, key: String) -> Result<Dict<String>, String> {
+    let found = dict.empty<String>();
+    let value = fields.get(key);
+
+    if value == null {
+        return Ok(found);
+    }
+
+    let entries = value.fields();
+
+    if entries == null {
+        return Err("\"${key}\" must be an object of packages and versions, as in {\"acme/textkit\": \"^1.2\"}");
+    }
+
+    for (name, wanted) in entries.entries() {
+        if !isPackageName(name) {
+            return Err("\"${name}\" in \"${key}\" is not a package name: write vendor/name, in lower case");
+        }
+
+        let text = wanted.text();
+
+        if text == null {
+            return Err("the version of ${name} in \"${key}\" must be a string, as in \"^1.2\"");
+        }
+
+        found.set(name, text);
+    }
+
+    return Ok(found);
+}
+
+fn repositories(fields: Dict<Json>) -> Result<[Repository], String> {
+    let found: [Repository] = [];
+    let value = fields.get("repositories");
+
+    if value == null {
+        return Ok(found);
+    }
+
+    let items = value.items();
+
+    if items == null {
+        return Err("\"repositories\" must be an array, as in [{\"type\": \"git\", \"url\": \"...\"}]");
+    }
+
+    for i, item in items {
+        let kind = item.get("type")?.text();
+        let url = item.get("url")?.text();
+
+        if url == null || url == "" {
+            return Err("repository ${i + 1} has no \"url\"");
+        }
+
+        match kind ?? "" {
+            case "git": {
+                found.push(Repository.Git(url));
+            }
+
+            case "path": {
+                found.push(Repository.Path(url));
+            }
+
+            default: {
+                return Err("repository ${i + 1} has a \"type\" that is not \"git\" or \"path\"");
+            }
+        }
+    }
+
+    return Ok(found);
+}
+
+// Sets or removes a requirement in the document, keeping every other key
+// and the order of those that stay. An empty `wanted` removes it.
+pub fn setRequirement(manifest: Manifest, key: String, name: String, wanted: String) {
+    let fields = manifest.document.fields() ?? dict.empty<Json>();
+    let section = fields.get(key)?.fields() ?? dict.empty<Json>();
+
+    if wanted == "" {
+        section.remove(name);
+    } else {
+        section.set(name, Json.String(wanted));
+    }
+
+    if section.isEmpty() {
+        fields.remove(key);
+    } else {
+        fields.set(key, Json.Object(section));
+    }
+
+    manifest.document = Json.Object(fields);
+
+    let table = if key == "require" { manifest.require } else { manifest.requireDev };
+
+    if wanted == "" {
+        table.remove(name);
+    } else {
+        table.set(name, wanted);
+    }
+}
+
+// The document as text, indented the way qoqi.json files are.
+pub fn text(manifest: Manifest) -> String {
+    return manifest.document.prettyWith("    ") + "\n";
+}
+
+// The path of the qoqi.json of a folder.
+pub fn inside(folder: String) -> String {
+    return path.inside(folder, FILE);
+}

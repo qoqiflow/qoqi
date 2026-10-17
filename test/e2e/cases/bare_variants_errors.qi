@@ -1,0 +1,18 @@
+// What the compiler says about variants written alone that it cannot
+// place.
+
+enum Shape {
+    Circle(Float),
+    Empty,
+}
+
+enum Slot {
+    Taken(String),
+    Empty,
+}
+
+fn main() -> Int {
+    let nothing = Empty;
+    let s: Shape = Taken("ada");
+    return 0;
+}

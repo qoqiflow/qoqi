@@ -1,0 +1,48 @@
+// A failure nothing catches: every call in progress still runs what it
+// deferred, the innermost first, and then the program stops as it would
+// have, with the place of the failure.
+
+struct Account {
+    owner: String;
+    balance: Int;
+    locked: Bool = false;
+}
+
+fn withdraw(account: Account, amount: Int) -> Int {
+    account.locked = true;
+
+    defer {
+        account.locked = false;
+        println("unlocked", account.owner);
+    }
+
+    if amount > account.balance {
+        panic("${account.owner} has ${account.balance}, not ${amount}");
+    }
+
+    account.balance -= amount;
+    return account.balance;
+}
+
+fn pay(accounts: [Account], amount: Int) {
+    defer println("payment over");
+
+    for i in 0..3 {
+        defer println("tried", accounts[i].owner);
+        println(accounts[i].owner, "has", withdraw(accounts[i], amount), "left");
+    }
+}
+
+fn main() -> Int {
+    defer println("main leaves");
+
+    let accounts = [
+        Account { owner: "Ada", balance: 100 },
+        Account { owner: "Bob", balance: 20 },
+        Account { owner: "Cy", balance: 500 },
+    ];
+
+    pay(accounts, 50);
+    println("never printed");
+    return 0;
+}

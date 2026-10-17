@@ -1,0 +1,6 @@
+["tea", "bread", "jam"] ["TEA", "BREAD", "JAM"] [3, 5, 3]
+["bread 220", "tea 350", "jam 410"]
+[350, 600]
+350 SLS
+jam 410 7 [2, 3, 4]
+DONE

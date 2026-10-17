@@ -1,0 +1,188 @@
+// Input, files and the environment.
+//
+// Output goes through the builtins print and println. Reading or writing
+// a file can fail for reasons outside the program (the file is not there,
+// may not be touched); those functions return a Result, which holds what
+// was asked for or the reason there is none, and never stop the program.
+
+import std.result;
+import std.result.{Result, Location};
+import std.strings;
+import std.ops.{Show};
+
+// A line typed by the user, or the next line of the input when it comes
+// from a file or another program; without its line end. Null at the end
+// of the input.
+pub extern fn readLine() -> String?;
+
+// The next `count` bytes of the input, as a text. Null if the input ends
+// before that many came. For input that is not made of lines: a message
+// that says first how long it is.
+pub extern fn readBytes(count: Int) -> String?;
+
+// Prints a question, then reads the answer. Null at the end of the input.
+pub fn ask(question: String) -> String? {
+    print(question);
+    return readLine();
+}
+
+// Every remaining line of the input.
+pub fn readLines() -> [String] {
+    let out: [String] = [];
+    let line = readLine();
+
+    while line != null {
+        out.push(line);
+        line = readLine();
+    }
+
+    return out;
+}
+
+// --- Files ---
+
+// Why a file could not be read or written.
+pub enum ErrorKind {
+    NotFound,          // there is no file at that path
+    PermissionDenied,  // the file may not be read, or written
+    IsDirectory,       // the path is a folder
+    NotDirectory,      // part of the path is a file, where a folder is needed
+    AlreadyExists,
+    Other,             // anything else; the message says what
+}
+
+// A failure to read or write a file: what kind it is, for the program to
+// act on, and the rest for telling a person.
+//
+// The operation is one of "read", "write", "append" and "remove" here;
+// "inspect", "list", "walk", "create", "remove", "rename" and "copy" in
+// std.fs; "run" in std.os.
+pub struct Error {
+    kind: ErrorKind;
+    operation: String;  // what was being done: see below
+    path: String;
+    message: String;    // as the operating system puts it: "no such file or directory"
+    stack: [Location];  // where it was asked for: the call of readFile, then the calls that led to it
+}
+
+impl Error {
+    // In one sentence: cannot read notes.txt: no such file or directory
+    pub fn describe() -> String {
+        return "cannot ${self.operation} ${self.path}: ${self.message}";
+    }
+
+    // The sentence, then where the program asked for the file and the
+    // calls that led there.
+    pub fn trace() -> String {
+        return result.trace(self.describe(), self.stack);
+    }
+}
+
+// Printed, and put in a text, as its sentence.
+impl Show for Error {
+    fn show() -> String {
+        return self.describe();
+    }
+}
+
+// The whole content of a file, or why it cannot be read.
+//
+//     match io.readFile("notes.txt") {
+//         case Ok(text): { ... }
+//         case Err(error): {
+//             match error.kind {
+//                 case ErrorKind.NotFound: { ... }       // start with an empty one
+//                 default: { println(error.describe()); }
+//             }
+//         }
+//     }
+pub fn readFile(path: String) -> Result<String, Error> {
+    let text = readText(path);
+
+    if text == null {
+        return Err(failure("read", path));
+    }
+
+    return Ok(text);
+}
+
+// Writes a text to a file, replacing what was in it. Gives how many
+// characters were written, or why it could not be done.
+pub fn writeFile(path: String, text: String) -> Result<Int, Error> {
+    if writeText(path, text) {
+        return Ok(text.len());
+    }
+
+    return Err(failure("write", path));
+}
+
+// Adds a text to the end of a file, creating it if needed. Gives how many
+// characters were added, or why it could not be done.
+pub fn appendFile(path: String, text: String) -> Result<Int, Error> {
+    if appendText(path, text) {
+        return Ok(text.len());
+    }
+
+    return Err(failure("append", path));
+}
+
+// Deletes a file, or a folder that is empty. Gives the path, or why it
+// could not be done. A folder with everything in it: fs.removeAll.
+pub fn remove(path: String) -> Result<String, Error> {
+    if removeFile(path) {
+        return Ok(path);
+    }
+
+    return Err(failure("remove", path));
+}
+
+// The lines of a file, or why it cannot be read.
+pub fn readFileLines(path: String) -> Result<[String], Error> {
+    return readFile(path).map(text -> text.lines());
+}
+
+// The error for the operation on a file that just failed. For the modules
+// of the library that work with files (std.fs, std.os): called by the
+// function the program calls, so that the trace starts at the program.
+pub fn failure(operation: String, path: String) -> Error {
+    // The runtime keeps two things about it: the kind and the message
+    let parts = problem();
+
+    // Without this function and the one that called it: the trace starts
+    // at the program's own call
+    return Error {
+        kind: kindOf(parts[0]),
+        operation: operation,
+        path: path,
+        message: parts[1],
+        stack: result.stack(2),
+    };
+}
+
+fn kindOf(name: String) -> ErrorKind {
+    return match name {
+        case "not found": ErrorKind.NotFound;
+        case "permission denied": ErrorKind.PermissionDenied;
+        case "is a directory": ErrorKind.IsDirectory;
+        case "not a directory": ErrorKind.NotDirectory;
+        case "already exists": ErrorKind.AlreadyExists;
+        default: ErrorKind.Other;
+    };
+}
+
+// Provided by the runtime: the operations themselves, which only say
+// whether they worked, and what is known about the last one that did not.
+extern fn readText(path: String) -> String?;
+extern fn writeText(path: String, text: String) -> Bool;
+extern fn appendText(path: String, text: String) -> Bool;
+extern fn removeFile(path: String) -> Bool;
+extern fn problem() -> [String];
+
+pub extern fn exists(path: String) -> Bool;
+
+// Writes a text to the error output, where messages go that are not part
+// of the program's result. No line end is added.
+pub extern fn printError(text: String);
+
+// The value of an environment variable, or null if it is not set.
+pub extern fn env(name: String) -> String?;

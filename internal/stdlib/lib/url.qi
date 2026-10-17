@@ -1,0 +1,217 @@
+// Addresses on the web, taken apart and put back together.
+//
+//     let page = url.parse("https://shop.example:8443/search?q=red+shoes&page=2#top").expect("an address");
+//     page.host                      // "shop.example"
+//     page.port                      // 8443
+//     page.param("q")                // "red shoes"
+//     page.withParam("page", "3")    // the same address, on page 3
+//     page.resolve("../help")        // a link found on that page, made whole
+
+import std.result.{Result};
+import std.ops.{Show};
+import std.encoding;
+import std.strings;
+import std.arrays;
+
+// Why a text is not an address.
+pub struct ParseError {
+    text: String;
+    message: String;
+}
+
+impl ParseError {
+    pub fn describe() -> String {
+        return "\"${self.text}\" is not an address: ${self.message}";
+    }
+}
+
+impl Show for ParseError {
+    fn show() -> String {
+        return self.describe();
+    }
+}
+
+// An address, in its parts. The path and the values of the query are
+// decoded: "/a%20b" is the path "/a b". They are encoded again when the
+// address is written out.
+pub struct Url {
+    scheme: String;                  // "https"; "" for a relative address
+    user: String? = null;            // who, in ftp://ada@host
+    host: String = "";               // "example.com", without the port
+    port: Int? = null;               // 8080, when the address says one
+    path: String = "";               // "/docs/index.html"
+    query: [(String, String)] = [];  // the names and values after ?, in order
+    fragment: String? = null;        // what follows #
+}
+
+// The address a text spells. A relative one ("../a.html", "/b?c=d") is an
+// address too, without a scheme and a host: resolve it against the page it
+// was found on.
+pub fn parse(text: String) -> Result<Url, ParseError> {
+    return fromParts(text, split(text));
+}
+
+impl Url {
+    // The first value of a name in the query, or null.
+    pub fn param(name: String) -> String? {
+        for (key, value) in self.query {
+            if key == name {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    // Every value of a name in the query: ?tag=a&tag=b gives both.
+    pub fn params(name: String) -> [String] {
+        return self.query.filter(pair -> pair.0 == name).map(pair -> pair.1);
+    }
+
+    // The same address with a name of the query set to one value: the first
+    // one replaced, the others left out, or the name added at the end.
+    pub fn withParam(name: String, value: String) -> Url {
+        let query: [(String, String)] = [];
+        let placed = false;
+
+        for (key, old) in self.query {
+            if key != name {
+                query.push((key, old));
+            } else if !placed {
+                query.push((key, value));
+                placed = true;
+            }
+        }
+
+        if !placed {
+            query.push((name, value));
+        }
+
+        return self.with(query, self.path);
+    }
+
+    // The same address without a name in its query.
+    pub fn withoutParam(name: String) -> Url {
+        return self.with(self.query.filter(pair -> pair.0 != name), self.path);
+    }
+
+    // The same address with another path.
+    pub fn withPath(path: String) -> Url {
+        return self.with(self.query, path);
+    }
+
+    // Where the address is: scheme, host and port, "https://example.com:8443".
+    pub fn origin() -> String {
+        let port = if self.port != null { ":${self.port}" } else { "" };
+        return "${self.scheme}://${self.host}${port}";
+    }
+
+    // Whether the address says where it is, and does not need a page to be
+    // resolved against.
+    pub fn isAbsolute() -> Bool {
+        return self.scheme != "";
+    }
+
+    // A link found at this address, made whole: "../b" from
+    // "https://x.org/a/c" is "https://x.org/b".
+    pub fn resolve(link: String) -> Result<Url, ParseError> {
+        return fromParts(link, against(self.toString(), link));
+    }
+
+    // The query as it is written after the ?, encoded: "q=red+shoes&page=2".
+    pub fn queryText() -> String {
+        return self.query.map(
+            pair -> "${encoding.toUrl(pair.0)}=${encoding.toUrl(pair.1)}",
+        ).join("&");
+    }
+
+    // The address written out, with what needs it encoded.
+    pub fn toString() -> String {
+        return join(
+            self.scheme,
+            self.user ?? "",
+            self.host,
+            self.port ?? 0,
+            self.path,
+            self.queryText(),
+            self.fragment ?? "",
+        );
+    }
+
+    fn with(query: [(String, String)], path: String) -> Url {
+        return Url {
+            scheme: self.scheme,
+            user: self.user,
+            host: self.host,
+            port: self.port,
+            path: path,
+            query: query,
+            fragment: self.fragment,
+        };
+    }
+}
+
+impl Show for Url {
+    fn show() -> String {
+        return self.toString();
+    }
+}
+
+// "a=1&b=x+y" as names and values, decoded, in the order written.
+pub fn queryOf(text: String) -> [(String, String)] {
+    let out: [(String, String)] = [];
+
+    for pair in text.split("&") {
+        if pair == "" {
+            continue;
+        }
+
+        let (name, value) = pair.cut("=") ?? (pair, "");
+        out.push((encoding.fromUrl(name) ?? name, encoding.fromUrl(value) ?? value));
+    }
+
+    return out;
+}
+
+// The Url of the parts the runtime found, or why there is none.
+fn fromParts(text: String, parts: [String]) -> Result<Url, ParseError> {
+    if parts[0] != "" {
+        return Err(ParseError { text: text, message: parts[0] });
+    }
+
+    return Ok(
+        Url {
+            scheme: parts[1],
+            user: orNull(parts[2]),
+            host: parts[3],
+            port: parts[4].parseInt(),
+            path: parts[5],
+            query: queryOf(parts[6]),
+            fragment: orNull(parts[7]),
+        },
+    );
+}
+
+fn orNull(text: String) -> String? {
+    if text == "" {
+        return null;
+    }
+
+    return text;
+}
+
+// Provided by the runtime. split and against give the reason a text is no
+// address first, "" when it is one, then scheme, user, host, port, path,
+// query and fragment.
+extern fn split(text: String) -> [String];
+extern fn against(base: String, link: String) -> [String];
+
+extern fn join(
+    scheme: String,
+    user: String,
+    host: String,
+    port: Int,
+    path: String,
+    query: String,
+    fragment: String,
+) -> String;

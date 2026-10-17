@@ -1,0 +1,19 @@
+// What is said of a method only some arrays have, of an order that is
+// not there, of a field misspelt, with types written as the program
+// writes them.
+
+struct Job {
+    title: String;
+    hours: Float;
+}
+
+fn main() -> Int {
+    let jobs = [Job { title: "roof", hours: 6.5 }, Job { title: "door", hours: 2.0 }];
+    let _titles = jobs.map(job -> job.title).sum();
+    let _ordered = jobs.sorted();
+    let _first = jobs[0].tilte;
+    let _found: Job = jobs.firstWhere(job -> job.hours > 3.0);
+    let late: String? = null;
+    println(late.len());
+    return 0;
+}

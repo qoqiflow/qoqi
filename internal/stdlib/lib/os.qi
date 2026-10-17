@@ -1,0 +1,195 @@
+// The system the program runs on: what it was started with, the
+// environment, other programs.
+
+import std.io;
+import std.io.{Error};
+import std.result.{Result};
+import std.dict;
+import std.dict.{Dict};
+import std.strings;
+import std.task;
+import std.task.{Channel};
+
+// What was written after the name of the program on the command line:
+// `qoqi run notes.qi add milk` gives ["add", "milk"].
+pub extern fn args() -> [String];
+
+// The file the program was run from: the entry file given to `qoqi run`,
+// or the bytecode given to `qoqi run`. Files that come with a program
+// are found from it: path.inside(path.dir(os.program()), "data.csv").
+pub extern fn program() -> String;
+
+// Ends the program now, with a status: 0 says it went well. Nothing
+// after it runs, not even an `attempt` around it.
+pub extern fn exit(status: Int);
+
+// "linux", "darwin" (macOS), "windows", ...
+pub extern fn platform() -> String;
+
+// The name of the machine, or "" if it has none.
+pub extern fn hostname() -> String;
+
+// Every environment variable. One alone: io.env.
+pub fn environment() -> Dict<String> {
+    let all = dict.empty<String>();
+
+    for line in variables() {
+        let (name, value) = line.cut("=") ?? (line, "");
+        all.set(name, value);
+    }
+
+    return all;
+}
+
+// What a program that was run left behind.
+pub struct Output {
+    status: Int;  // 0 when the program says it went well
+    out: String;  // what it wrote
+    err: String;  // what it wrote as errors
+}
+
+impl Output {
+    pub fn succeeded() -> Bool {
+        return self.status == 0;
+    }
+
+    // What it wrote, as lines.
+    pub fn lines() -> [String] {
+        return self.out.lines();
+    }
+}
+
+// Runs another program and waits for it to end.
+//
+//     match os.run("git", ["status", "--short"]) {
+//         case Ok(output): { println(output.out); }
+//         case Err(error): { println(error.describe()); }    // git is not installed
+//     }
+//
+// A program that ran and reports a failure is not an error here: look at
+// output.status. The error is for a program that could not be started.
+pub fn run(program: String, arguments: [String]) -> Result<Output, Error> {
+    let parts = execute(program, arguments, "");
+
+    if parts == null {
+        return Err(io.failure("run", program));
+    }
+
+    return Ok(outputOf(parts));
+}
+
+// The same, with a text for the program to read as its input.
+pub fn runWithInput(program: String, arguments: [String], input: String) -> Result<Output, Error> {
+    let parts = execute(program, arguments, input);
+
+    if parts == null {
+        return Err(io.failure("run", program));
+    }
+
+    return Ok(outputOf(parts));
+}
+
+// A program to run, told a part at a time where and how:
+//
+//     let output = os.command("git", ["status", "--short"])
+//         .inDir("checkout")
+//         .env("GIT_TERMINAL_PROMPT", "0")
+//         .run()?;
+pub struct Command {
+    program: String;
+    arguments: [String];
+    folder: String = "";
+    variables: [String] = [];
+    input: String = "";
+}
+
+pub fn command(program: String, arguments: [String]) -> Command {
+    return Command { program: program, arguments: arguments };
+}
+
+impl Command {
+    // Runs it in that folder instead of the current one.
+    pub fn inDir(folder: String) -> Command {
+        self.folder = folder;
+        return self;
+    }
+
+    // Gives it one more environment variable, or another value for one.
+    pub fn env(name: String, value: String) -> Command {
+        self.variables.push("${name}=${value}");
+        return self;
+    }
+
+    // Gives it a text to read as its input.
+    pub fn withInput(text: String) -> Command {
+        self.input = text;
+        return self;
+    }
+
+    // Runs it and waits for it, as os.run does.
+    pub fn run() -> Result<Output, Error> {
+        let parts = executeIn(
+            self.program,
+            self.arguments,
+            self.input,
+            self.folder,
+            self.variables,
+        );
+
+        if parts == null {
+            return Err(io.failure("run", self.program));
+        }
+
+        return Ok(outputOf(parts));
+    }
+}
+
+// The status, what was written, what was written as errors.
+fn outputOf(parts: [String]) -> Output {
+    return Output { status: parts[0].parseInt() ?? -1, out: parts[1], err: parts[2] };
+}
+
+// The signals the program is sent, as they come: "interrupt" for Ctrl-C,
+// "terminate" for kill or a service manager stopping it. Once a program
+// listens, they no longer stop it: it stops its own way, when it has
+// finished what it was doing, and a second Ctrl-C stops it at once.
+//
+//     let stop = os.signals();
+//     task.run(fn() {
+//         wait stop.receive();
+//         server.close();             // the requests in progress are answered first
+//     });
+//
+// Waiting for a signal does not keep the program alive: once its other
+// tasks are done, it ends.
+pub fn signals() -> Channel<String> {
+    let heard = task.channel<String>(4);
+    let listener = listenSignals();
+
+    task.run(fn() {
+        while true {
+            let name = nextSignal(listener);
+
+            if name == null {
+                return;
+            }
+
+            wait heard.send(name);
+        }
+    });
+
+    return heard;
+}
+
+extern fn listenSignals() -> Int;
+extern fn nextSignal(listener: Int) -> String?;
+extern fn variables() -> [String];
+extern fn execute(program: String, arguments: [String], input: String) -> [String]?;
+
+extern fn executeIn(
+    program: String,
+    arguments: [String],
+    input: String,
+    folder: String,
+    variables: [String],
+) -> [String]?;

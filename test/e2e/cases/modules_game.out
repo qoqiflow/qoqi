@@ -1,0 +1,7 @@
+["ball", "crate"] 5 12
+touching after 2 steps: body 10..13 and body 10..14
+[13, 20, 23] 2
+body 10..13 true false
+label mine false true
+some other shape false false
+not a shape false false

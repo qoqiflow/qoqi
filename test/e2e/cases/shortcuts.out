@@ -1,0 +1,14 @@
+item    qty   worth  supplier     city   level
+------  ---  ------  -----------  -----  ---------------
+nails   500   10.00  Acme Tools   Leeds  ok
+hammer   12  174.00  Acme Tools   Leeds  ok
+saw       3   66.00  -            -      find a supplier
+tape     40   90.00  Bond & Sons  -      ok
+
+from nails at 0.02 to saw at 22.00
+nothing in stock ranges from null
+from acme: ["nails", "hammer"]
+
+line 5: no quantity
+line 7: quantity is 'two', not a number
+1 low, 3 fine, 2 unread

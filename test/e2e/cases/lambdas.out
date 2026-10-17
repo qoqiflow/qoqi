@@ -1,0 +1,18 @@
+["Dune", "Emma", "Neuromancer", "Persuasion", "Foundation"]
+["1815 Emma", "1817 Persuasion", "1951 Foundation", "1965 Dune", "1984 Neuromancer"]
+1861 pages, 1 unrated
+4 classics, the best rated: Persuasion
+author   books  pages
+-------  -----  -----
+Asimov       1    255
+Austen       2    723
+Gibson       1    271
+Herbert      1    612
+long                   Dune, Emma
+science fiction        Dune, Neuromancer, Foundation
+long science fiction   Dune, Neuromancer
+before 1900            Emma, Persuasion
+["NEU", "PER", "FOU"]
+Gibson null
+Ok(600) Err("'many' is not a number of pages") 120
+[("sf", 3), ("classic", 4)] 5

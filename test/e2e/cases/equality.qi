@@ -1,0 +1,96 @@
+// == compares what values hold: arrays item by item, structs field by
+// field, values of enums by variant and contents, and a type with its own
+// equals by that, wherever it is found. reflect.identical asks whether two
+// names are of the one value.
+
+struct Point {
+    x: Int;
+    y: Int;
+}
+
+struct Route {
+    name: String;
+    stops: [Point];
+}
+
+// Names that differ only by case are the same name
+struct Tag {
+    text: String;
+}
+
+impl Equal for Tag {
+    fn equals(other: Tag) -> Bool {
+        return self.text.lower() == other.text.lower();
+    }
+}
+
+enum Event {
+    Moved(Point),
+    Tagged([Tag]),
+    Idle,
+}
+
+struct Cell {
+    value: Int;
+    next: Cell?;
+}
+
+fn route(name: String, stops: [(Int, Int)]) -> Route {
+    return Route { name: name, stops: stops.map(stop -> Point { x: stop.0, y: stop.1 }) };
+}
+
+fn main() -> Int {
+    let morning = route("bus 7", [(0, 0), (2, 3), (5, 5)]);
+    let evening = route("bus 7", [(0, 0), (2, 3), (5, 5)]);
+    let shortcut = route("bus 7", [(0, 0), (5, 5)]);
+    println(morning == evening, morning == shortcut, morning.stops[1..] == evening.stops[1..]);
+
+    // Finding by content, in arrays and as keys of a match
+    let routes = [shortcut, evening];
+    println(routes.indexOf(morning)!, routes.contains(route("bus 9", [])));
+
+    // A type's own equality holds inside arrays and enums too
+    let tags = [Tag { text: "Urgent" }, Tag { text: "home" }];
+
+    println(
+        tags == [Tag { text: "URGENT" }, Tag { text: "Home" }],
+        tags.contains(Tag { text: "HOME" }),
+    );
+
+    println(Event.Tagged(tags) == Event.Tagged([Tag { text: "urgent" }, Tag { text: "HOME" }]));
+
+    println(
+        Event.Moved(Point { x: 1, y: 2 }) == Event.Moved(Point { x: 1, y: 2 }),
+        Event.Idle == Event.Moved(Point { x: 0, y: 0 }),
+    );
+
+    // Collections of the library compare by content
+    let first = dict.empty<[Int]>();
+    first.set("a", [1, 2]);
+    first.set("b", [3]);
+    let second = dict.empty<[Int]>();
+    second.set("b", [3]);
+    second.set("a", [1, 2]);
+
+    println(
+        first == second,
+        list.of(["x", "y"]) == list.of(["x", "y"]),
+        set.of(["p", "q"]) == set.of(["q", "p"]),
+    );
+
+    // Values that hold themselves are compared without going round for ever
+    let ring = Cell { value: 1, next: null };
+    ring.next = ring;
+    let other = Cell { value: 1, next: null };
+    other.next = other;
+    println(ring == other);
+
+    // Equal, and yet two values: a change through one is not seen in the other
+    let copy = evening.stops.map(p -> Point { x: p.x, y: p.y });
+
+    println(copy == evening.stops);
+
+    copy[0].x = 99;
+    println(copy == evening.stops, evening.stops[0]);
+    return 0;
+}

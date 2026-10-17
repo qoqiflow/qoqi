@@ -1,0 +1,120 @@
+// Readings of a few weather stations: Float arrays summed, ranged and
+// sorted without a function, texts and whole numbers sorted the same way
+// or with one, and a report made of JSON values built one by one.
+import std.json;
+
+enum Reading {
+    Celsius(Float),
+    Missing(String),
+}
+
+struct Station {
+    name: String;
+    readings: [Reading];
+}
+
+impl Station {
+    fn temperatures() -> [Float] {
+        let found: [Float] = [];
+
+        for reading in self.readings {
+            if reading is Reading.Celsius(degrees) {
+                found.push(degrees);
+            }
+        }
+
+        return found;
+    }
+
+    fn gaps() -> [String] {
+        let reasons: [String] = [];
+
+        for reading in self.readings {
+            if reading is Reading.Missing(why) {
+                reasons.push(why);
+            }
+        }
+
+        return reasons.sorted();
+    }
+}
+
+fn average(values: [Float]) -> Result<Float, String> {
+    if values.isEmpty() {
+        return Err("no readings");
+    }
+
+    return Ok(values.sum() / values.len());
+}
+
+fn report(station: Station) -> Result<json.Json, String> {
+    let temperatures = station.temperatures();
+    let mean = average(temperatures)?;
+
+    return Ok(
+        json.object()
+            .set("station", json.text(station.name))
+            .set("mean", json.number(mean))
+            .set("coldest", json.number(temperatures.smallest()!))
+            .set("warmest", json.number(temperatures.largest()!))
+            .set("sorted", json.array(temperatures.sorted(), json.number))
+            .set("complete", json.bool(station.gaps().isEmpty()))
+            .set("gaps", json.texts(station.gaps()))
+            .done(),
+    );
+}
+
+fn main() -> Int {
+    let stations = [
+        Station {
+            name: "harbour",
+            readings: [
+                Reading.Celsius(12.5),
+                Reading.Missing("storm"),
+                Reading.Celsius(9.25),
+                Reading.Celsius(14.0),
+            ],
+        },
+        Station {
+            name: "summit",
+            readings: [
+                Reading.Celsius(-2.5),
+                Reading.Celsius(-6.0),
+                Reading.Missing("ice"),
+                Reading.Missing("battery"),
+            ],
+        },
+        Station { name: "cellar", readings: [Reading.Missing("flooded")] },
+    ];
+
+    for station in stations {
+        match report(station) {
+            case Ok(document): {
+                println(document.stringify());
+            }
+
+            case Err(reason): {
+                println("${station.name}: ${reason}");
+            }
+        }
+    }
+
+    // Warmest first, with the function that says which comes first
+    let all = stations.flatMap(s -> s.temperatures());
+    println(all.sorted((a, b) -> a > b));
+    println(all.sum(), all.sortedNumbers().first());
+
+    // Whole numbers and texts: their own order, or one given
+    let counts = stations.map(s -> s.readings.len());
+    println(counts.sorted(), counts.sorted((a, b) -> a > b), counts.sum());
+
+    println(
+        stations.map(s -> s.name).sorted(),
+        stations.map(s -> s.name).sorted((a, b) -> a.len() < b.len()),
+    );
+
+    // Nothing to sum is nothing at all
+    let none: [Float] = [];
+    println(none.sum(), none.smallest(), none.sorted());
+    return 0;
+}

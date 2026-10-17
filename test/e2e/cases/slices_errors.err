@@ -1,0 +1,5 @@
+[ERROR] E2006: a part of an array or a text cannot be assigned to
+slices_errors.qi:5:17
+Assign the items one at a time
+[ERROR] E2001: cannot assign type [Int] to Int
+slices_errors.qi:6:27

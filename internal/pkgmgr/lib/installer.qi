@@ -1,0 +1,222 @@
+// Puts the locked packages in vendor/ and writes vendor/installed.json,
+// which tells the compiler where each package's modules are:
+//
+//     {
+//         "dev": true,
+//         "packages": [
+//             { "name": "acme/textkit", "version": "1.4.0", "import": "textkit", "dir": "vendor/acme/textkit/src/textkit" }
+//         ]
+//     }
+//
+// A package of a git repository is copied out of the mirror at its
+// locked commit. A package of a path repository stays where it is, and
+// installed.json points there.
+
+import lockfile.{Lock, Locked};
+import sources;
+import sources.{Sources};
+import std.dict;
+import std.dict.{Dict};
+import std.fs;
+import std.io;
+import std.json;
+import std.json.{Json};
+import std.os;
+import std.path;
+import std.semver;
+import std.format;
+
+pub const VENDOR = "vendor";
+pub const MAP = "installed.json";
+
+// A package as vendor/installed.json says it is installed.
+pub struct Installed {
+    name: String;
+    version: String;
+    reference: String;
+    importName: String;
+    dir: String;
+}
+
+// What is installed now, by name.
+pub fn installed(project: String) -> Dict<Installed> {
+    let found = dict.empty<Installed>();
+    let text = io.readFile(path.join([project, VENDOR, MAP])).or("");
+    let document = json.parse(text).or(Json.Null);
+
+    for item in document.get("packages")?.items() ?? [] {
+        let name = item.get("name")?.text() ?? "";
+
+        if name != "" {
+            found.set(name, Installed {
+                name: name,
+                version: item.get("version")?.text() ?? "",
+                reference: item.get("reference")?.text() ?? "",
+                importName: item.get("import")?.text() ?? "",
+                dir: item.get("dir")?.text() ?? "",
+            });
+        }
+    }
+
+    return found;
+}
+
+// Installs the packages of the lock, those of require-dev too with `dev`,
+// and removes from vendor/ what the lock no longer has.
+pub fn install(from: Sources, lock: Lock, dev: Bool) -> Result<Void, String> {
+    let project = from.project;
+    let before = installed(project);
+    let wanted = lock.packages.filter(locked -> dev || !locked.dev);
+    let steps: [String] = [];
+    let changes: [Locked] = [];
+    let installs = 0;
+    let updates = 0;
+
+    for locked in wanted {
+        let old = before.get(locked.name);
+
+        let present = locked.source.kind == "path"
+            || fs.isDir(path.join([project, VENDOR, locked.name]));
+
+        if old != null
+            && old.version == locked.version
+            && old.reference == locked.source.reference
+            && present
+        {
+            continue;
+        }
+
+        changes.push(locked);
+
+        if old == null || !present {
+            installs++;
+            steps.push("  - Installing ${locked.name} (${locked.version})");
+        } else {
+            updates++;
+            steps.push("  - ${change(old.version, locked.version)} ${locked.name} (${old.version} => ${locked.version})");
+        }
+    }
+
+    let removed = before.values().filter(
+        old -> wanted.find(locked -> locked.name == old.name) == null,
+    );
+
+    if steps.isEmpty() && removed.isEmpty() {
+        from.say("Nothing to install, update or remove");
+    } else {
+        from.say("Package operations: ${format.plural(installs, "install", "installs")}, ${format.plural(updates, "update", "updates")}, ${format.plural(removed.len(), "removal", "removals")}");
+    }
+
+    for old in removed {
+        from.say("  - Removing ${old.name} (${old.version})");
+
+        if old.dir.startsWith(VENDOR + "/") {
+            fs.removeAll(path.join([project, VENDOR, old.name])).mapErr(error -> error.describe())?;
+        }
+    }
+
+    for i, locked in changes {
+        from.say(steps[i]);
+        put(from, locked)?;
+    }
+
+    return writeMap(project, wanted, dev);
+}
+
+// The folder a package's modules are in, as installed.json gives it.
+//
+// A package is laid out as a project is: its module paths start at its
+// root, and its modules are those under its import name there. For
+// acme/textkit, imported as textkit, `import textkit;` is <root>/textkit.qi
+// and `import textkit.format;` <root>/textkit/format.qi, where the
+// package's own files, and its tests, import them by the same names.
+pub fn dirOf(locked: Locked) -> String {
+    let base = if locked.source.kind == "path" {
+        locked.source.url
+    } else {
+        "${VENDOR}/${locked.name}"
+    };
+
+    return path.clean(path.join([base, locked.root, locked.importName]));
+}
+
+fn change(from: String, to: String) -> String {
+    let old = semver.parse(from).value();
+    let new = semver.parse(to).value();
+
+    if old == null || new == null || old == new {
+        return "Updating";
+    }
+
+    return if new > old { "Upgrading" } else { "Downgrading" };
+}
+
+// Copies a package out of its mirror into vendor/.
+fn put(from: Sources, locked: Locked) -> Result<Void, String> {
+    if locked.source.kind == "path" {
+        let folder = from.local(locked.source.url);
+
+        if !fs.isDir(folder) {
+            return Err("${locked.name} is to be found in ${locked.source.url}, which is not a folder");
+        }
+
+        return Ok();
+    }
+
+    let mirror = from.mirrorWith(locked.source.url, locked.source.reference)?;
+    let target = path.join([from.project, VENDOR, locked.name]);
+    let archive = path.join([from.cache, "${locked.source.reference}.tar"]);
+    defer io.remove(archive);
+
+    sources.git([
+        "-C",
+        mirror,
+        "archive",
+        "--format=tar",
+        "-o",
+        archive,
+        locked.source.reference,
+    ]).mapErr(
+        reason -> "${locked.name} ${locked.version}: commit ${locked.source.reference} is not in ${locked.source.url} any more: ${reason}",
+    )?;
+
+    fs.removeAll(target).mapErr(error -> error.describe())?;
+    fs.makeDir(target).mapErr(error -> error.describe())?;
+
+    match os.run("tar", ["-xf", archive, "-C", target]) {
+        case Ok(output): {
+            if !output.succeeded() {
+                return Err("tar could not unpack ${locked.name}: ${output.err.trim()}");
+            }
+        }
+
+        case Err(error): {
+            return Err("tar cannot be run, and packages are unpacked with it: ${error.message}");
+        }
+    }
+
+    return Ok();
+}
+
+fn writeMap(project: String, packages: [Locked], dev: Bool) -> Result<Void, String> {
+    let entries = json.array(packages, fn(locked: Locked) -> Json {
+        return json.object()
+            .text("name", locked.name)
+            .text("version", locked.version)
+            .text("reference", locked.source.reference)
+            .text("import", locked.importName)
+            .text("dir", dirOf(locked))
+            .done();
+    });
+
+    let document = json.object().bool("dev", dev).set("packages", entries).done();
+    let folder = path.join([project, VENDOR]);
+
+    fs.makeDir(folder).mapErr(error -> error.describe())?;
+
+    io.writeFile(path.inside(folder, MAP), document.prettyWith("    ") + "\n").mapErr(
+        error -> error.describe(),
+    )?;
+
+    return Ok();
+}

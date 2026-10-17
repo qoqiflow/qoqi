@@ -1,0 +1,8 @@
+{
+    "name": "acme/ledger",
+    "version": "0.3.1",
+    "description": "Lines of an invoice, with their taxes",
+    "require": {
+        "acme/money": "^1.0"
+    }
+}

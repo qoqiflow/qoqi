@@ -1,0 +1,22 @@
+// Using an optional without ruling out null is a compile error.
+
+import std.strings;
+
+struct User {
+    name: String;
+    manager: User?;
+}
+
+fn managerName(user: User) -> String {
+    return user.manager.name;
+}
+
+fn length(text: String?) -> Int {
+    return text.len();
+}
+
+fn main() -> Int {
+    let user = User { name: "ada", manager: null };
+    println(managerName(user), length(null));
+    return 0;
+}

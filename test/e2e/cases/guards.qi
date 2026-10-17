@@ -1,0 +1,87 @@
+// A test that leaves when it fails: what it names is there for the rest
+// of the block. The happy path reads down the page, not into the braces.
+
+enum Command {
+    Move(Int, Int),
+    Say(String),
+    Quit,
+}
+
+fn number(text: String) -> Result<Int, String> {
+    let n = text.parseInt();
+
+    if n == null {
+        return Err("'${text}' is no number");
+    }
+
+    return Ok(n);
+}
+
+fn command(line: String) -> Result<Command, String> {
+    let words = line.split(" ");
+
+    if words[0] == "say" {
+        return Ok(Say(words[1..].join(" ")));
+    }
+
+    if words[0] == "quit" {
+        return Ok(Quit);
+    }
+
+    if words.len() != 3 {
+        return Err("move takes two numbers");
+    }
+
+    // Each step names what it found, or leaves with why
+    let first = number(words[1]);
+
+    if !(first is Ok(x)) {
+        return Err(why(first));
+    }
+
+    let second = number(words[2]);
+
+    if !(second is Ok(y) && y >= 0) {
+        return Err("the second number has to be a number, and not below 0");
+    }
+
+    return Ok(Move(x, y));
+}
+
+// Why a step failed
+fn why<T>(result: Result<T, String>) -> String {
+    return match result {
+        case Ok(_): "no failure";
+        case Err(reason): reason;
+    };
+}
+
+fn main() -> Int {
+    let position = (0, 0);
+
+    for line in [
+        "move 2 3", "say hello there", "move x 1", "move 1 -4", "jump", "move 1 1", "quit",
+        "move 9 9",
+    ] {
+        let parsed = command(line);
+
+        if !(parsed is Ok(cmd)) {
+            println("skipped '${line}': ${why(parsed)}");
+            continue;
+        }
+
+        if cmd is Quit {
+            break;
+        }
+
+        if !(cmd is Move(dx, dy)) {
+            println("said:", cmd);
+            continue;
+        }
+
+        position = (position.0 + dx, position.1 + dy);
+        println("now at", position);
+    }
+
+    return 0;
+}

@@ -1,0 +1,32 @@
+== paid and shipped
+[warehouse] holds the goods of 1 as hold-1
+[bank] holds 4200 cents for 1
+[bank] captures 4200 cents on auth-1
+[vans] van-3 takes hold-1 to Lyon
+[mail] to ada@example.com: your order 1 leaves today with van-3
+-> done: Ok("van-3")
+
+== the card is refused
+[warehouse] holds the goods of 2 as hold-2
+[bank] refuses 900000 cents for 2
+[warehouse] releases hold-2
+-> done: Err(Refused("over the card's limit"))
+
+== paid, but no van goes there
+[warehouse] holds the goods of 3 as hold-3
+[bank] holds 4200 cents for 3
+[bank] captures 4200 cents on auth-3
+[vans] nothing goes to Atlantis
+[bank] refunds pay-auth-3
+[warehouse] releases hold-3
+-> done: Err(NoVan("no van goes to Atlantis"))
+
+== the bank is busy the first time
+[warehouse] holds the goods of 17 as hold-17
+[bank] is busy, ask again later
+[bank] holds 4200 cents for 17
+[bank] captures 4200 cents on auth-17
+[vans] van-3 takes hold-17 to Oslo
+[mail] to ada@example.com: your order 17 leaves today with van-3
+-> done: Ok("van-3")
+

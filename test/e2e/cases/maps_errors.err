@@ -1,0 +1,6 @@
+[ERROR] E2020: nothing says what an empty {} holds
+maps_errors.qi:4:19
+[ERROR] E2001: the keys of a dictionary are of one type: this one is Int, the first is String
+maps_errors.qi:5:27
+[ERROR] E2001: cannot assign type Int? to Int
+maps_errors.qi:7:26

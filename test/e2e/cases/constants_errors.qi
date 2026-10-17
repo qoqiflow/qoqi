@@ -1,0 +1,21 @@
+// What the compiler says about constants used wrongly.
+
+const FIRST = SECOND + 1;
+const SECOND = THIRD * 2;
+const THIRD = FIRST - 1;
+
+const NAMES = [1, clock()];
+const NOW = clock();
+const COUNT: Int = "three";
+const LIMIT = 10;
+
+fn clock() -> Int {
+    return 0;
+}
+
+fn main() -> Int {
+    LIMIT = 20;
+    LIMIT += 1;
+    let text: String = LIMIT;
+    return 0;
+}

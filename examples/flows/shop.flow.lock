@@ -1,0 +1,8 @@
+{
+  "format": "qoqi.flow.lock/1",
+  "version": "sha256:e3622b4ccb7a7ffa376c4836ff1c05aff8471928f7a503464bb0de2b71f1dcce",
+  "flows": {
+    "Order": {},
+    "Payment": {}
+  }
+}

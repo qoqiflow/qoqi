@@ -1,0 +1,55 @@
+// Random numbers.
+//
+// Without a seed the numbers differ on every run. After seed(n) they are
+// the same on every run, for the same n: useful to test, or to replay.
+import std.arrays;
+
+pub extern fn seed(n: Int);
+
+// A whole number from 0 up to, not including, `limit`. Fails if the limit
+// is below 1.
+pub extern fn below(limit: Int) -> Int;
+
+// A number from 0.0 up to, not including, 1.0.
+pub extern fn float() -> Float;
+
+// A random identifier, as good as unique: "3f2b8c1e-9d4a-4f6b-8a1c-0e5d7b9f2a4c".
+// It comes from the system's secure generator, not from the numbers above:
+// `seed` does not make it repeat, so it can name a session or a file.
+pub extern fn uuid() -> String;
+
+// A secret nobody can guess: that many random bytes from the system's
+// secure generator, in hexadecimal. token(16) is 32 characters, enough
+// for a session or a link that resets a password.
+pub extern fn token(bytes: Int) -> String;
+
+// A whole number from `low` to `high`, both included. Fails if low is
+// above high.
+pub extern fn between(low: Int, high: Int) -> Int;
+
+// True with the given probability: chance(0.25) is true one time in four.
+pub fn chance(probability: Float) -> Bool {
+    return float() < probability;
+}
+
+// One of the items, or null for an empty array.
+pub fn pick<T>(items: [T]) -> T? {
+    if items.len() == 0 {
+        return null;
+    }
+
+    return items[below(items.len())];
+}
+
+// Changes the array itself: puts its items in a random order.
+pub fn shuffle<T>(items: [T]) {
+    let i = items.len() - 1;
+
+    while i > 0 {
+        let j = below(i + 1);
+        let held = items[i];
+        items[i] = items[j];
+        items[j] = held;
+        i--;
+    }
+}

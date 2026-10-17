@@ -1,0 +1,96 @@
+// The tests of the shop. Run them with:  qoqi test examples/flows
+//
+// Each test runs an order in a trial: on a store in memory and a clock
+// of its own, which moves only when the test says so. Three seconds of
+// the bank settling cost nothing.
+
+import std.flow;
+import std.test;
+import std.time;
+import shop;
+import shop.{Order, Cart};
+
+fn cart(id: String, amount: Int, city: String) -> Cart {
+    return Cart { id: id, customer: "ada@example.com", amount: amount, city: city };
+}
+
+fn testAnOrderIsPaidAndShipped() {
+    let trial = flow.test(Order { cart: cart("1", 4200, "Lyon") });
+
+    trial.go();
+    test.equal(trial.status(), "waiting");  // for the bank to settle
+
+    trial.advance(3.seconds());
+    test.equal(trial.status(), "done");
+    test.equal("${trial.result()}", "Ok(\"van-3\")");
+}
+
+fn testARefusedCardReleasesTheGoods() {
+    let trial = flow.test(Order { cart: cart("2", 900000, "Lyon") });
+
+    trial.go();
+    test.equal("${trial.result()}", "Err(Refused(\"over the card's limit\"))");
+    test.equal(trial.calls(shop.release), 1);
+    test.equal(trial.calls(shop.capture), 0);
+}
+
+// Paid, but no van: the money goes back, then the goods; the last done
+// is the first undone.
+fn testNoVanRefundsThenReleases() {
+    let undone: [String] = [];
+    let trial = flow.test(Order { cart: cart("3", 4200, "Atlantis") });
+
+    trial.replace(shop.refund, fn(reference: String) -> Result<Void, shop.Problem> {
+        undone.push("refund ${reference}");
+        return Ok(null);
+    });
+
+    trial.replace(shop.release, fn(hold: String) -> Result<Void, shop.Problem> {
+        undone.push("release ${hold}");
+        return Ok(null);
+    });
+
+    trial.go();
+    trial.advance(3.seconds());
+    test.equal("${trial.result()}", "Err(NoVan(\"no van goes to Atlantis\"))");
+    test.equal(undone, ["refund pay-auth-3", "release hold-3"]);
+}
+
+// The bank is busy the first time: it is asked again two seconds later,
+// under the same key.
+fn testABusyBankIsAskedAgain() {
+    let trial = flow.test(Order { cart: cart("17", 4200, "Lyon") });
+
+    trial.go();
+    test.equal(trial.calls(shop.authorize), 1);
+
+    trial.advance(2.seconds());
+    test.equal(trial.calls(shop.authorize), 2);
+
+    trial.advance(3.seconds());
+    test.equal("${trial.result()}", "Ok(\"van-3\")");
+}
+
+// Cancelled while the bank settles: the payment is cancelled first, and
+// voids its authorization, then the order releases the goods.
+fn testCancellingWhileTheBankSettles() {
+    let trial = flow.test(Order { cart: cart("4", 4200, "Lyon") });
+
+    trial.go();
+    trial.cancel("the customer changed their mind");
+    test.equal(trial.status(), "failed");
+    test.equal(trial.calls(shop.voidAuthorization), 1);
+    test.equal(trial.calls(shop.release), 1);
+    test.equal(trial.calls(shop.capture), 0);
+}
+
+// Stopped at any of the writes it makes, the order ends the same, and
+// the capture never runs twice.
+fn testEveryCrash() {
+    flow.test(Order { cart: cart("5", 4200, "Atlantis") }).everyCrash(fn(
+        t: flow.Trial<Result<String, shop.Problem>>,
+    ) {
+        t.go();
+        t.advance(3.seconds());
+    });
+}

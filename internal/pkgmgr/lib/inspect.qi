@@ -1,0 +1,261 @@
+// What a project's packages are, and could be: qoqi pkg show, qoqi pkg why,
+// qoqi pkg outdated. Nothing here changes a file.
+
+import catalog;
+import catalog.{Catalog, Candidate};
+import installer;
+import installer.{Installed};
+import lockfile.{Lock, Locked};
+import manifest;
+import manifest.{Manifest};
+import std.dict.{Dict};
+import std.semver;
+import std.semver.{Version};
+
+// One thing that requires a package: qoqi.json, or a locked package.
+pub struct Dependent {
+    by: String;
+    wanted: String;
+}
+
+// Who requires a package: qoqi.json first, then the packages, by name.
+pub fn dependents(lock: Lock, project: Manifest, name: String) -> [Dependent] {
+    let found: [Dependent] = [];
+
+    for section in [project.require, project.requireDev] {
+        let wanted = section.get(name);
+
+        if wanted != null {
+            found.push(Dependent { by: manifest.FILE, wanted: wanted });
+        }
+    }
+
+    for locked in lock.packages {
+        let wanted = locked.require.get(name);
+
+        if wanted != null {
+            found.push(Dependent { by: "${locked.name} ${locked.version}", wanted: wanted });
+        }
+    }
+
+    return found;
+}
+
+// qoqi pkg why vendor/name: who requires it, and with what constraint.
+pub fn why(lock: Lock, project: Manifest, name: String) -> Result<[String], String> {
+    if lock.find(name) == null {
+        return Err("${name} is not a package of this project");
+    }
+
+    return Ok(
+        dependents(lock, project, name).map(
+            dependent -> "${dependent.by} requires ${name} (${dependent.wanted})",
+        ),
+    );
+}
+
+// qoqi pkg show: one line per package. With a name: all about that one.
+pub fn show(
+    lock: Lock,
+    project: Manifest,
+    installed: Dict<Installed>,
+    name: String?,
+) -> Result<[String], String> {
+    if name == null {
+        return Ok(lock.packages.map(locked -> summary(locked, installed)));
+    }
+
+    let locked = lock.find(name);
+
+    if locked == null {
+        return Err("${name} is not a package of this project");
+    }
+
+    let source = locked.source;
+
+    let where = if source.reference == "" {
+        source.url
+    } else {
+        "${source.url} ${source.reference.first(12)}"
+    };
+
+    let rows = [
+        ["name", locked.name],
+        ["description", locked.description],
+        [
+            "version",
+            locked.version + (if installed.has(locked.name) { "" } else { " (not installed)" }),
+        ],
+        ["source", "${source.kind} ${where}"],
+        ["import", "import ${locked.importName};"],
+        ["folder", installer.dirOf(locked)],
+        ["requires", requirements(locked.require)],
+        [
+            "required by",
+            dependents(lock, project, locked.name)
+                .map(dependent -> "${dependent.by} (${dependent.wanted})")
+                .join(", "),
+        ],
+    ];
+
+    let width = rows.map(row -> row[0].len()).largest() ?? 0;
+
+    return Ok(rows.filter(row -> row[1] != "").map(row -> "${row[0].padRight(width)} : ${row[1]}"));
+}
+
+fn summary(locked: Locked, installed: Dict<Installed>) -> String {
+    let state = if installed.has(locked.name) { "" } else { " (not installed)" };
+    let tag = if locked.dev { " [dev]" } else { "" };
+
+    let parts = [
+        locked.name + tag,
+        locked.version + state,
+        "import ${locked.importName}",
+        locked.description,
+    ];
+
+    return parts.join("  ").trim();
+}
+
+fn requirements(require: Dict<String>) -> String {
+    return require.entries().map(entry -> "${entry.0} ${entry.1}").join(", ");
+}
+
+// How far behind a package is.
+pub enum Behind {
+    // A newer version the requirements accept: qoqi pkg update brings it
+    Update(String),
+
+    // A newer version only beyond what is required: a constraint to change
+    Major(String),
+
+    // A branch that moved on since the lock was written
+    Moved(String),
+}
+
+pub struct Outdated {
+    locked: Locked;
+    behind: Behind;
+}
+
+// The packages for which there is something newer, as qoqi pkg outdated
+// lists them. A package kept in a folder is what it is, and never is.
+pub fn outdated(lock: Lock, project: Manifest, source: Catalog) -> Result<[Outdated], String> {
+    let found: [Outdated] = [];
+
+    for locked in lock.packages {
+        if locked.source.kind == "path" {
+            continue;
+        }
+
+        let candidates = source.candidates(locked.name)?;
+        let behind = behindOf(locked, candidates, dependents(lock, project, locked.name))?;
+
+        if behind != null {
+            found.push(Outdated { locked: locked, behind: behind });
+        }
+    }
+
+    return Ok(found);
+}
+
+fn behindOf(
+    locked: Locked,
+    candidates: [Candidate],
+    wants: [Dependent],
+) -> Result<Behind?, String> {
+    let current = semver.parse(locked.version).value();
+
+    if current == null {
+        // A branch: the commit it is at now
+        let head = candidates.find(candidate -> candidate.label == locked.version);
+
+        if head != null && head.source.reference != locked.source.reference {
+            return Ok(Behind.Moved(head.source.reference.first(7)));
+        }
+
+        return Ok(null);
+    }
+
+    // Releases only, unless a pre-release is what is installed
+    let releases = candidates.filter(
+        candidate -> candidate.version != null
+            && (!candidate.version.isPrerelease() || current.isPrerelease()),
+    );
+
+    let newest = newestOf(releases);
+
+    if newest == null || newest <= current {
+        return Ok(null);
+    }
+
+    let fitting: [Candidate] = [];
+
+    for candidate in releases {
+        let fits = true;
+
+        for want in wants {
+            fits = fits && catalog.accepts(candidate, want.wanted)?;
+        }
+
+        if fits {
+            fitting.push(candidate);
+        }
+    }
+
+    let reachable = newestOf(fitting);
+
+    if reachable != null && reachable > current {
+        return Ok(Behind.Update(toString(reachable)));
+    }
+
+    return Ok(Behind.Major(toString(newest)));
+}
+
+fn newestOf(candidates: [Candidate]) -> Version? {
+    let best: Version? = null;
+
+    for candidate in candidates {
+        let version = candidate.version;
+
+        if version != null && (best == null || version > best) {
+            best = version;
+        }
+    }
+
+    return best;
+}
+
+// The lines qoqi pkg outdated prints: the packages behind, aligned, then
+// what the signs mean.
+pub fn outdatedLines(found: [Outdated]) -> [String] {
+    if found.isEmpty() {
+        return ["All the packages are up to date"];
+    }
+
+    let rows = found.map(entry -> {
+        let (sign, newer, note) = match entry.behind {
+            case Behind.Update(version): ("!", version, "qoqi pkg update ${entry.locked.name}");
+            case Behind.Major(version): ("~", version, "beyond what is required");
+
+            case Behind.Moved(commit): (
+                "!",
+                "${entry.locked.version} ${commit}",
+                "qoqi pkg update ${entry.locked.name}",
+            );
+        };
+
+        return [entry.locked.name, entry.locked.version, sign, newer, note];
+    });
+
+    let widths = [0, 1, 3].map(column -> rows.map(row -> row[column].len()).largest() ?? 0);
+
+    let lines = rows.map(
+        row -> "${row[0].padRight(widths[0])}  ${row[1].padRight(widths[1])}  ${row[2]} ${row[3].padRight(widths[2])}  ${row[4]}",
+    );
+
+    lines.push("");
+    lines.push("! an update the requirements allow: qoqi pkg update brings it");
+    lines.push("~ a new major version, beyond the requirements: change them to have it");
+    return lines;
+}

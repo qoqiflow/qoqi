@@ -1,0 +1,19 @@
+[ERROR] E2028: match on Light does not handle Light.Amber, Light.Green
+control_errors.qi:8:12
+[ERROR] E2028: a match that gives a value needs a case for every value, and this one has no 'default'
+Add a case for what is left: default: value;
+[ERROR] E2001: this case gives String, the cases above give Int
+Every case of a match that gives a value gives the same type
+[ERROR] E2040: this case gives no value
+control_errors.qi:28:9
+[ERROR] E2029: 'w' is not named by the first pattern of the case
+control_errors.qi:38:43
+[ERROR] E2029: this pattern does not name 'r', which the first one does
+control_errors.qi:45:22
+[ERROR] E2038: the bounds of a range are whole numbers, this is Float
+[ERROR] E2026: cannot assign to loop variable 'i'
+'i' follows the range; use a while loop to control the count
+[ERROR] E2029: a value of type String is never in a range of Int
+[ERROR] E2039: 'return' inside a defer
+[ERROR] E2039: 'break' inside a defer would leave it
+control_errors.qi:67:13

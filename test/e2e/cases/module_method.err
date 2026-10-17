@@ -1,0 +1,2 @@
+[ERROR] E8002: module 'std.json' has no 'stringify'
+Suggestion: 'stringify' is a method of Json, not a function of the module: call it on the value, as in value.stringify(...)

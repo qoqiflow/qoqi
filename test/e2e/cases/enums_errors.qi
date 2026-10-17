@@ -1,0 +1,66 @@
+// What the compiler says about enums used wrongly.
+
+enum Light { Red, Amber, Green }
+
+enum Option<T> { Some(T), None }
+
+enum Order { Placed(Int), Shipped(Int, String), Cancelled }
+
+fn next(light: Light) -> Light {
+    match light {
+        case Light.Red: {
+            return Light.Green;
+        }
+
+        case Light.Green: {
+            return Light.Amber;
+        }
+    }
+}
+
+fn weight(order: Option<Order>) -> Int {
+    match order {
+        case Option.Some(Order.Placed(n)): {
+            return n;
+        }
+
+        case Option.Some(Order.Cancelled): {
+            return 0;
+        }
+
+        case Option.None: {
+            return 0;
+        }
+    }
+}
+
+fn describe(order: Order) -> String {
+    match order {
+        case Order.Placed(n, extra): {
+            return "placed";
+        }
+
+        case Order.Shiped(n, by): {
+            return by;
+        }
+
+        case Light.Red: {
+            return "red";
+        }
+
+        default: {
+            return "other";
+        }
+    }
+}
+
+fn main() -> Int {
+    let a = Order.Placed("three");
+    let b = Order.Shipped(1);
+    let c = Order.Cancelled();
+    let d = Light.Blue;
+    let e = Option.None;
+    let f = Light;
+    let g: Light = Order.Cancelled;
+    return 0;
+}

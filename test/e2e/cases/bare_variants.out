@@ -1,0 +1,7 @@
+[Circle(1), Rect(2, 3), Empty] [3, 6, 0]
+(2 + 3 * --4) = 14 0
+[Ok(2), Err("7 is odd"), Ok(5)]
+Ok(1) Ok(2) Err("no seat for dee") [Taken("ada"), Taken("bob"), Taken("cy")]
+true true
+a tall rectangle 2 3
+not a shape

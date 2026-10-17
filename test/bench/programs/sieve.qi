@@ -1,0 +1,49 @@
+// Loops and arrays: the primes below a limit, then sums over them.
+import std.arrays;
+
+fn primesBelow(limit: Int) -> [Int] {
+    let composite = arrays.fill(limit, false);
+    let primes: [Int] = [];
+
+    for n in 2..limit {
+        if composite[n] {
+            continue;
+        }
+
+        primes.push(n);
+        let multiple = n * n;
+
+        while multiple < limit {
+            composite[multiple] = true;
+            multiple += n;
+        }
+    }
+
+    return primes;
+}
+
+fn main() -> Int {
+    let primes = primesBelow(300000);
+    let count = primes.len();
+    let gaps = 0;
+    let widest = 0;
+
+    for i in 1..count {
+        let gap = primes[i] - primes[i - 1];
+
+        if gap > widest {
+            widest = gap;
+        }
+
+        gaps += gap;
+    }
+
+    let checksum = 0;
+
+    for p in primes {
+        checksum = (checksum * 31 + p) % 1000003;
+    }
+
+    println(count, primes[count - 1], widest, gaps, checksum);
+    return 0;
+}

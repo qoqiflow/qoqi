@@ -1,0 +1,111 @@
+// An invoice from a file of items, with two packages doing the sums.
+//
+//     qoqi install                       once: the packages of qoqi.lock
+//     qoqi run examples/invoices         the items next to this file
+//     qoqi run examples/invoices my.csv  your own
+//
+// acme/ledger and acme/money are packages of their own, required in
+// qoqi.json. They are kept in packages/ and found through "path"
+// repositories, so that the example works without a network; a real
+// project would get them from git, with the same qoqi.json otherwise.
+// acme/ledger requires acme/money too: one version of it serves both.
+
+import ledger;
+import ledger.{Ledger, Line};
+import money;
+import std.format.{Align};
+
+const CURRENCY = "EUR";
+
+// A row of the file as a line of the invoice, or why it is not one.
+fn lineOf(row: Dict<String>) -> Result<Line, String> {
+    let description = row.get("description") ?? "";
+    let quantity = (row.get("quantity") ?? "").parseInt();
+
+    if quantity == null {
+        return Err("${description}: no quantity");
+    }
+
+    let price = money.parse(row.get("price") ?? "", CURRENCY).mapErr(
+        reason -> "${description}: price ${reason}",
+    )?;
+
+    let rate = ledger.rate(row.get("tax") ?? "").mapErr(reason -> "${description}: ${reason}")?;
+
+    return Ok(Line {
+        description: description,
+        quantity: quantity,
+        price: price,
+        taxRate: rate,
+    });
+}
+
+fn printInvoice(invoice: Ledger) {
+    let rows = invoice.lines.map(
+        line -> [
+            line.description,
+            toString(line.quantity),
+            toString(line.price),
+            toString(line.amount()),
+        ],
+    );
+
+    let aligns = [Align.Left, Align.Right, Align.Right, Align.Right];
+    println(format.tableWith(["Item", "Qty", "Price", "Amount"], aligns, rows));
+
+    let width = 46;
+    println("Subtotal".padRight(width - 16), toString(invoice.subtotal()).padLeft(15));
+
+    for tax in invoice.taxes() {
+        let label = "Tax ${tax.label()} on ${tax.base}";
+        println(label.padRight(width - 16), toString(tax.amount).padLeft(15));
+    }
+
+    println("Total".padRight(width - 16), toString(invoice.total()).padLeft(15));
+}
+
+fn main() -> Int {
+    let arguments = os.args();
+
+    let file = if arguments.isEmpty() {
+        path.inside(path.dir(os.program()), "items.csv")
+    } else {
+        arguments[0]
+    };
+
+    let table = match io.readFile(file) {
+        case Ok(text): csv.table(text).mapErr(error -> error.describe());
+        case Err(error): Err(error.describe());
+    };
+
+    if table is Err(reason) {
+        io.printError("${file}: ${reason}\n");
+        return 1;
+    }
+
+    let invoice = ledger.open(CURRENCY);
+    let skipped: [String] = [];
+
+    for row in table.value()?.records() ?? [] {
+        match lineOf(row).then(line -> invoice.add(line)) {
+            case Ok(_): {}
+
+            case Err(reason): {
+                skipped.push(reason);
+            }
+        }
+    }
+
+    printInvoice(invoice);
+
+    if !skipped.isEmpty() {
+        println();
+        println("Left out, ${format.plural(skipped.len(), "row", "rows")}:");
+
+        for reason in skipped {
+            println("  ${reason}");
+        }
+    }
+
+    return 0;
+}

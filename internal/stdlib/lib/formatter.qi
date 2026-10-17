@@ -1,0 +1,2832 @@
+// The formatter of Qoqi: the text of a program, written the one way.
+//
+//     match formatter.format(source) {
+//         case Ok(tidy): { io.writeFile("main.qi", tidy); }
+//         case Err(problem): { println(problem.describe()); }
+//     }
+//
+// What it decides: four spaces for each level, lines of a hundred
+// characters at most, one statement on a line, and room to read. A block
+// is never written on the line of its brace, declarations stand apart,
+// and so does a statement that takes several lines from the ones around
+// it. What a line holds is the writer's: the formatter moves, it does
+// not rename, reorder or remove, and comments stay with what they are
+// about.
+//
+// It reads a program by its shape and knows nothing of names and types,
+// so a program that does not compile yet is formatted all the same, as
+// long as its brackets and semicolons are in place. It is what `qoqi
+// fmt` and the language server run.
+
+import std.strings;
+import std.arrays;
+import std.result;
+import std.result.{Result};
+import std.layout;
+import std.layout.{Doc};
+
+// How long a line may be, and how far a level is indented.
+pub const width = 100;
+pub const step = 4;
+
+// Why a text was not formatted: where it stops reading as a program.
+pub struct Problem {
+    line: Int;
+    column: Int;
+    message: String;
+}
+
+impl Problem {
+    // 12:5: expected ';', found '}'
+    pub fn describe() -> String {
+        return "${self.line}:${self.column}: ${self.message}";
+    }
+}
+
+// The text of a program, formatted. A text that is formatted already
+// comes back as it is.
+pub fn format(source: String) -> Result<String, Problem> {
+    let report = Report {};
+
+    let made = result.attempt(fn() -> String {
+        let tokens = scan(source, report);
+
+        // Reading takes the comments off the tokens they come before
+        let comments = commentsOf(tokens);
+        let parser = Parser { tokens: tokens, report: report };
+        let tidy = layout.render(parser.file(), width, step);
+        unchanged(tokens, comments, scan(tidy, report), report);
+        return tidy;
+    });
+
+    match made {
+        case Ok(tidy): {
+            return Ok(tidy);
+        }
+
+        case Err(failure): {
+            let problem = report.problem
+                ?? Problem { line: 1, column: 1, message: "qoqi fmt failed: ${failure.message}" };
+
+            return Err(problem);
+        }
+    }
+}
+
+// Where the reading of a text stopped. Saying it ends the reading: `fail`
+// does not return.
+struct Report {
+    problem: Problem? = null;
+}
+
+impl Report {
+    fn fail(line: Int, column: Int, message: String) {
+        self.problem = Problem { line: line, column: column, message: message };
+        panic(message);
+    }
+}
+
+// --- Tokens ---
+
+enum Kind { Name, Number, Text, Symbol, End }
+
+struct Comment {
+    text: String;
+
+    // An empty line comes before it
+    blank: Bool;
+
+    // Code follows it on its line: /* like this */ value
+    inline: Bool;
+
+    // It is the first thing on its line
+    fresh: Bool;
+
+    // How far the line it starts on is indented
+    indent: Int;
+}
+
+struct Token {
+    kind: Kind;
+
+    // As it is written, quotes and all
+    text: String;
+    line: Int;
+    column: Int;
+
+    // The positions of its first character and of the one after its last
+    start: Int;
+    end: Int;
+
+    // How far the line it starts on is indented
+    indent: Int;
+
+    // The comments between the token before it and this one
+    before: [Comment];
+
+    // An empty line comes before it; it is the first of its line
+    blank: Bool;
+    newline: Bool;
+
+    // The comment that ends its line, or ""
+    after: String = "";
+
+    // A keyword used as a name: for case in cases
+    name: Bool = false;
+}
+
+fn isDigit(c: String) -> Bool {
+    return c >= "0" && c <= "9";
+}
+
+fn isLetter(c: String) -> Bool {
+    return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_";
+}
+
+// The words that are not names.
+fn isReserved(word: String) -> Bool {
+    return match word {
+        case "if" | "else" | "match" | "case" | "while" | "for" | "in" | "break" | "continue": true;
+        case "defer" | "return" | "fn" | "let" | "const" | "struct" | "enum" | "trait": true;
+        case "impl" | "import" | "as" | "pub" | "extern" | "true" | "false" | "null": true;
+        default: isBuiltinType(word);
+    };
+}
+
+// Whether a token is a word that is not a name.
+fn reserved(token: Token) -> Bool {
+    return !token.name && isReserved(token.text);
+}
+
+fn isBuiltinType(word: String) -> Bool {
+    return match word {
+        case "Int" | "Float" | "Bool" | "String" | "Any" | "Void" | "Self": true;
+        default: false;
+    };
+}
+
+const symbols = "+-*/%<>!?=&|^~(){}[],;:.";
+
+fn isLongSymbol(text: String) -> Bool {
+    return match text {
+        case "..." | "..=" | ".." | "->" | "=>" | "==" | "!=" | "<=" | ">=" | "&&" | "||": true;
+        case "|>" | "??" | "?." | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=": true;
+        case "++" | "--": true;
+        default: false;
+    };
+}
+
+fn scan(source: String, report: Report) -> [Token] {
+    let lexer = Lexer { source: source, length: source.len(), report: report };
+    lexer.scan();
+    markNames(lexer.tokens);
+    return lexer.tokens;
+}
+
+// Most keywords may also be names, told from the tokens around them as
+// the compiler tells them: one after `let`, `fn`, `for` or a dot is a
+// name, and so is one followed by what only ever follows a value.
+fn markNames(tokens: [Token]) {
+    for i, token in tokens {
+        if token.kind != Kind.Name || !isSoftKeyword(token.text) {
+            continue;
+        }
+
+        let before = i > 0 ? tokens[i - 1].text : "";
+        let after = i + 1 < tokens.len() ? tokens[i + 1].text : "";
+
+        if token.text == "in" {
+            // The keyword comes after the variable of a loop and nowhere
+            // else: for x in items, for (k, v) in pairs
+            let afterName = i > 0 && tokens[i - 1].kind == Kind.Name && !reserved(tokens[i - 1]);
+            token.name = !afterName && before != ")";
+            continue;
+        }
+
+        token.name = softKeywordIsName(token.text, before, after);
+    }
+}
+
+fn isSoftKeyword(word: String) -> Bool {
+    return match word {
+        case "case" | "match" | "in" | "as" | "defer" | "import": true;
+        case "pub" | "extern" | "struct" | "enum" | "trait" | "impl": true;
+        default: false;
+    };
+}
+
+fn followsValue(text: String) -> Bool {
+    return match text {
+        case "." | "?." | "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=": true;
+        case "++" | "--" | ";" | "," | ":" | ")" | "]" | "}" | "->" | "==" | "!=": true;
+        case "<=" | ">=" | "+" | "*" | "/" | "%" | "&&" | "||" | "?" | "??" | "|>": true;
+        case ".." | "..=" | "&" | "^": true;
+        default: false;
+    };
+}
+
+fn softKeywordIsName(word: String, before: String, after: String) -> Bool {
+    let declares = match before {
+        case "let" | "const" | "fn" | "for" | "." | "?.": true;
+        default: false;
+    };
+
+    if declares {
+        return true;
+    }
+
+    let starts = match before {
+        case "" | ";" | "{" | "}": true;
+        default: false;
+    };
+
+    if after == ";" && starts {
+        return false;
+    }
+
+    if followsValue(after) {
+        return true;
+    }
+
+    return match after {
+        case "in": true;
+
+        case "{": match before {
+            case "if" | "while" | "match" | "in": true;
+            default: false;
+        };
+
+        case "(" | "[": match word {
+            case "match" | "case" | "as" | "impl": false;
+            default: true;
+        };
+
+        default: false;
+    };
+}
+
+struct Lexer {
+    source: String;
+    length: Int;
+    report: Report;
+    tokens: [Token] = [];
+    at: Int = 0;
+    line: Int = 1;
+
+    // Where the line being read starts
+    lineStart: Int = 0;
+}
+
+impl Lexer {
+    // The character at a position, "" past the end.
+    fn char(at: Int) -> String {
+        if at >= self.length {
+            return "";
+        }
+
+        return self.source[at];
+    }
+
+    fn fail(at: Int, message: String) {
+        self.report.fail(self.line, at - self.lineStart + 1, message);
+    }
+
+    // Moves on to a position, counting the lines on the way.
+    fn pass(to: Int) {
+        while self.at < to {
+            if self.source[self.at] == "\n" {
+                self.line++;
+                self.lineStart = self.at + 1;
+            }
+
+            self.at++;
+        }
+    }
+
+    fn indentHere() -> Int {
+        let at = self.lineStart;
+
+        while self.char(at) == " " {
+            at++;
+        }
+
+        return at - self.lineStart;
+    }
+
+    fn scan() {
+        // Line ends since the last token or comment, and the comments
+        // waiting for the token they come before
+        let newlines = 0;
+        let pending: [Comment] = [];
+
+        while true {
+            while self.at < self.length {
+                let c = self.source[self.at];
+
+                if c == "\n" {
+                    newlines++;
+                } else if c != " " && c != "\t" && c != "\r" {
+                    break;
+                }
+
+                self.pass(self.at + 1);
+            }
+
+            let start = self.at;
+            let line = self.line;
+            let column = start - self.lineStart + 1;
+            let indent = self.indentHere();
+            let first = self.tokens.isEmpty();
+            let c = self.char(start);
+            let next = self.char(start + 1);
+
+            // A line that starts the file with #! is for the system (it
+            // names the program that runs the file) and is kept as it is
+            let shebang = start == 0 && c == "#" && next == "!";
+
+            if (c == "/" && (next == "/" || next == "*")) || shebang {
+                self.pass(self.endOfComment(start));
+                let text = self.source.substring(start, self.at).trimEnd();
+                let followed = self.codeFollows();
+                let last = self.tokens.last();
+
+                if last != null && newlines == 0 && pending.isEmpty() && !followed {
+                    // At the end of the line of a token: it is about that line
+                    if last.after == "" {
+                        last.after = text;
+                    } else {
+                        last.after = "${last.after} ${text}";
+                    }
+                } else {
+                    pending.push(Comment {
+                        text: text,
+                        blank: newlines >= 2,
+                        inline: followed,
+                        fresh: newlines >= 1 || last == null,
+                        indent: indent,
+                    });
+                }
+
+                newlines = 0;
+                continue;
+            }
+
+            let kind = Kind.Symbol;
+            let end = start + 1;
+
+            if c == "" {
+                kind = Kind.End;
+                end = start;
+            } else if isLetter(c) {
+                kind = Kind.Name;
+
+                while isLetter(self.char(end)) || isDigit(self.char(end)) {
+                    end++;
+                }
+            } else if isDigit(c) {
+                kind = Kind.Number;
+                end = self.endOfNumber(start);
+            } else if c == "\"" {
+                kind = Kind.Text;
+                end = self.endOfText(start);
+            } else if isLongSymbol(c + next + self.char(start + 2)) {
+                end = start + 3;
+            } else if isLongSymbol(c + next) {
+                end = start + 2;
+            } else if !symbols.contains(c) {
+                self.fail(start, "unexpected character '${c}'");
+            }
+
+            self.pass(end);
+
+            self.tokens.push(Token {
+                kind: kind,
+                text: self.source.substring(start, end),
+                line: line,
+                column: column,
+                start: start,
+                end: end,
+                indent: indent,
+                before: pending,
+                blank: newlines >= 2,
+                newline: newlines >= 1 || first,
+            });
+
+            if kind == Kind.End {
+                return;
+            }
+
+            pending = [];
+            newlines = 0;
+        }
+    }
+
+    // Whether something other than a line end follows on the line.
+    fn codeFollows() -> Bool {
+        let at = self.at;
+
+        while self.char(at) == " " || self.char(at) == "\t" || self.char(at) == "\r" {
+            at++;
+        }
+
+        return self.char(at) != "\n" && self.char(at) != "";
+    }
+
+    fn endOfComment(start: Int) -> Int {
+        let at = start + 2;
+
+        if self.char(start + 1) == "/" || self.char(start + 1) == "!" {
+            while self.char(at) != "\n" && self.char(at) != "" {
+                at++;
+            }
+
+            return at;
+        }
+
+        while !(self.char(at) == "*" && self.char(at + 1) == "/") {
+            if at >= self.length {
+                self.fail(start, "unterminated block comment");
+            }
+
+            at++;
+        }
+
+        return at + 2;
+    }
+
+    fn endOfNumber(start: Int) -> Int {
+        let at = start;
+        let base = self.char(start + 1).lower();
+
+        if self.char(start) == "0" && (base == "x" || base == "b") {
+            // 0xFF, 0b1010
+            at += 2;
+
+            while isLetter(self.char(at)) || isDigit(self.char(at)) {
+                at++;
+            }
+
+            return at;
+        }
+
+        while isDigit(self.char(at)) {
+            at++;
+        }
+
+        if self.char(at) == "." && isDigit(self.char(at + 1)) {
+            at++;
+
+            while isDigit(self.char(at)) {
+                at++;
+            }
+        }
+
+        if self.char(at).lower() == "e" {
+            let sign = self.char(at + 1);
+            let signed = sign == "+" || sign == "-";
+
+            if isDigit(sign) || (signed && isDigit(self.char(at + 2))) {
+                at += 2;
+
+                while isDigit(self.char(at)) {
+                    at++;
+                }
+            }
+        }
+
+        return at;
+    }
+
+    // Where a text ends: the position after its closing quotes. What is
+    // inserted with ${...} is part of it, texts of its own included.
+    fn endOfText(start: Int) -> Int {
+        let long = self.char(start + 1) == "\"" && self.char(start + 2) == "\"";
+        let at = start + 1;
+
+        if long {
+            at = start + 3;
+        }
+
+        while true {
+            let c = self.char(at);
+
+            if c == "" || (c == "\n" && !long) {
+                self.fail(start, "unterminated string literal");
+            }
+
+            if c == "$" && self.char(at + 1) == "{" {
+                at = self.endOfInsert(start, at + 2);
+            } else if long && c == "\"" && self.char(at + 1) == "\"" && self.char(at + 2) == "\"" {
+                return at + 3;
+            } else if !long && c == "\"" {
+                return at + 1;
+            } else if c == "\\" {
+                at += 2;
+            } else {
+                at++;
+            }
+        }
+    }
+
+    // Where the expression of a ${...} ends: the position after its brace.
+    fn endOfInsert(text: Int, start: Int) -> Int {
+        let at = start;
+        let depth = 1;
+
+        while depth > 0 {
+            let c = self.char(at);
+
+            if c == "" {
+                self.fail(text, "unterminated '\${' in a string");
+            }
+
+            if c == "\"" {
+                at = self.endOfText(at);
+                continue;
+            }
+
+            if c == "{" {
+                depth++;
+            } else if c == "}" {
+                depth--;
+            }
+
+            at++;
+        }
+
+        return at;
+    }
+}
+
+// --- What the tokens say, before and after ---
+
+// Stops unless the formatted text is the same program: the same tokens
+// in the same order and the same comments. Commas and semicolons do not
+// count, since a list written one item to a line gets a comma after its
+// last, and a list back on one line loses it.
+fn unchanged(before: [Token], comments: String, after: [Token], report: Report) {
+    let was = before.filter(counts);
+    let now = after.filter(counts);
+
+    for i, token in was {
+        if i >= now.len() || squeezed(now[i].text) != squeezed(token.text) {
+            report.fail(token.line, token.column, mistake);
+        }
+    }
+
+    let last = before[before.len() - 1];
+
+    if now.len() != was.len() || comments != commentsOf(after) {
+        report.fail(last.line, last.column, mistake);
+    }
+}
+
+const mistake = "formatting would change the program here: a mistake of qoqi fmt, which changed nothing";
+
+fn counts(token: Token) -> Bool {
+    return token.text != "," && token.text != ";" && token.kind != Kind.End;
+}
+
+// A text without what a text over several lines has in front of its
+// lines, which moves with it.
+fn squeezed(text: String) -> String {
+    if !text.contains("\n") {
+        return text;
+    }
+
+    return text.lines().map(line -> line.trimStart()).join("\n");
+}
+
+fn commentsOf(tokens: [Token]) -> String {
+    let all: [String] = [];
+
+    for token in tokens {
+        for comment in token.before {
+            all.push(squeezed(comment.text));
+        }
+
+        if token.after != "" {
+            all.push(squeezed(token.after));
+        }
+    }
+
+    return all.join("").replace(" ", "");
+}
+
+// --- Lines under each other ---
+
+// The comments before something that starts a line, taken off its first
+// token to be written above it.
+struct Lead {
+    comments: [Comment];
+    blank: Bool;
+}
+
+fn commentDoc(comment: Comment) -> Doc {
+    if comment.text.contains("\n") {
+        return Doc.Verbatim(comment.text, comment.indent);
+    }
+
+    return Doc.Text(comment.text);
+}
+
+// What a block, a declaration or a file holds: one thing under the
+// other, each with its comments above it.
+struct Rows {
+    docs: [Doc] = [];
+    count: Int = 0;
+
+    // What the last one is, where that decides what may follow it closely
+    kind: String = "";
+}
+
+impl Rows {
+    // Adds one. An empty line comes before it if `apart` says so or the
+    // writer left one; otherwise that is decided when it is written out:
+    // what takes several lines stands apart from its neighbours.
+    fn add(lead: Lead, doc: Doc, apart: Bool) {
+        let open = false;
+        let first = true;
+
+        // A comment with code after it on its line stays on that line
+        let inline = false;
+
+        for comment in lead.comments {
+            if first {
+                open = self.separate(apart || comment.blank);
+            } else if inline {
+                self.docs.push(space());
+            } else {
+                self.line(comment.blank);
+            }
+
+            self.docs.push(commentDoc(comment));
+            first = false;
+            inline = comment.inline;
+        }
+
+        if first {
+            open = self.separate(apart || lead.blank);
+        } else if inline {
+            self.docs.push(space());
+        } else {
+            self.line(lead.blank);
+        }
+
+        self.docs.push(Doc.Item(doc, open));
+    }
+
+    // The comments left before the closing brace.
+    fn close(lead: Lead) {
+        for comment in lead.comments {
+            self.separate(comment.blank);
+            self.docs.push(commentDoc(comment));
+        }
+    }
+
+    // Ends the line of the entry before, if there is one. True if
+    // whether an empty line follows it is left to be decided.
+    fn separate(blank: Bool) -> Bool {
+        self.count++;
+
+        if self.count == 1 {
+            return false;
+        }
+
+        if blank {
+            self.line(true);
+            return false;
+        }
+
+        self.docs.push(Doc.Gap);
+        return true;
+    }
+
+    fn line(blank: Bool) {
+        self.docs.push(Doc.Hard);
+
+        if blank {
+            self.docs.push(Doc.Hard);
+        }
+    }
+
+    // The rows between their braces: each on a line of its own.
+    fn inside(open: Doc, close: Doc) -> Doc {
+        if self.count == 0 {
+            return layout.concat([open, close]);
+        }
+
+        return layout.concat([
+            open,
+            layout.indent(layout.concat([Doc.Hard, layout.concat(self.docs)])),
+            Doc.Hard,
+            close,
+        ]);
+    }
+}
+
+// --- Reading ---
+
+// What an expression is, for the call it is an argument of: a function
+// with a body, a literal in braces or brackets and a match can start on
+// the line of the call and end with it.
+enum Shape { Plain, Function, Literal, Choice }
+
+// A step of a chain: .name with the calls and brackets that follow it.
+struct Link {
+    doc: Doc;
+    calls: Bool;
+}
+
+fn space() -> Doc {
+    return Doc.Text(" ");
+}
+
+fn comma() -> Doc {
+    return Doc.Text(",");
+}
+
+// An argument list longer than this before its last argument is written
+// one argument to a line, whatever the last one is.
+const headRoom = 70;
+
+// What, after an if or a match, makes it part of a value going on.
+const CONTINUING = [
+    "+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||", "??", "|>", "&", "|",
+    "^", "<<", ">>", ".", "?.", "?", "as", "..",
+];
+
+struct Parser {
+    tokens: [Token];
+    report: Report;
+    at: Int = 0;
+
+    // In the header of an if, a while, a for or a match, `name {` opens
+    // the body and is not a struct literal
+    plain: Bool = false;
+
+    // In the pattern of a case, | separates patterns
+    patterns: Bool = false;
+
+    // What the expression just read is, whether it was an assignment, and
+    // whether it is operands with operators between them
+    shape: Shape = Shape.Plain;
+    assigned: Bool = false;
+    chained: Bool = false;
+}
+
+impl Parser {
+    // --- Tokens ---
+
+    fn peek() -> Token {
+        return self.tokens[self.at];
+    }
+
+    fn ahead(count: Int) -> Token {
+        let at = self.at + count;
+
+        if at >= self.tokens.len() {
+            return self.tokens[self.tokens.len() - 1];
+        }
+
+        return self.tokens[at];
+    }
+
+    // The text of the token at a position, "" where there is none.
+    // The text of a token, or "" for a keyword used as a name: what is
+    // compared with keywords and symbols
+    fn textAt(at: Int) -> String {
+        if at < 0 || at >= self.tokens.len() || self.tokens[at].name {
+            return "";
+        }
+
+        return self.tokens[at].text;
+    }
+
+    fn is(text: String) -> Bool {
+        let token = self.tokens[self.at];
+        return token.text == text && !token.name;
+    }
+
+    // The keyword or the symbol at the cursor, "" for a name
+    fn word() -> String {
+        return self.textAt(self.at);
+    }
+
+    fn isName() -> Bool {
+        return reserved(self.peek()) == false && self.peek().kind == Kind.Name;
+    }
+
+    fn fail(message: String) {
+        let token = self.peek();
+        let found = "'${token.text}'";
+
+        if token.kind == Kind.End {
+            found = "the end of the file";
+        }
+
+        self.report.fail(token.line, token.column, "${message}, found ${found}");
+    }
+
+    // The next token, with the comments around it.
+    fn take() -> Doc {
+        let token = self.peek();
+        return self.dressed(token, token.text);
+    }
+
+    // The next token, written another way: a ';' where a ',' was.
+    fn takeAs(text: String) -> Doc {
+        return self.dressed(self.peek(), text);
+    }
+
+    // The next token left out, and only its comments kept.
+    fn drop() -> Doc {
+        return self.dressed(self.peek(), "");
+    }
+
+    fn dressed(token: Token, text: String) -> Doc {
+        if token.kind != Kind.End {
+            self.at++;
+        }
+
+        let body = Doc.Text(text);
+
+        if text.contains("\n") {
+            body = Doc.Verbatim(text, token.indent);
+        }
+
+        if token.before.isEmpty() && token.after == "" {
+            return body;
+        }
+
+        let parts: [Doc] = [];
+
+        // Before what closes or separates, a comment stands off from what
+        // it follows: value /* why */, and not value/* why */ ,
+        let closes = ",;)]}".contains(token.text);
+
+        for comment in token.before {
+            // What started a line starts one still: a comment that ends
+            // the line before it may be waiting, and comes first
+            if comment.fresh {
+                parts.push(Doc.Fresh);
+            } else if closes {
+                parts.push(space());
+            }
+
+            parts.push(commentDoc(comment));
+
+            if !comment.inline {
+                parts.push(Doc.Hard);
+            } else if !closes {
+                parts.push(space());
+            }
+        }
+
+        parts.push(body);
+
+        if token.after != "" {
+            parts.push(Doc.Trailing(token.after));
+        }
+
+        return layout.concat(parts);
+    }
+
+    fn expect(text: String) -> Doc {
+        if !self.is(text) {
+            self.fail("expected '${text}'");
+        }
+
+        return self.take();
+    }
+
+    fn name(what: String) -> Doc {
+        if self.peek().kind != Kind.Name {
+            self.fail("expected ${what}");
+        }
+
+        return self.take();
+    }
+
+    // Takes the comments before the next token off it: they are written
+    // above the line it starts.
+    fn lead() -> Lead {
+        let token = self.peek();
+        let lead = Lead { comments: token.before, blank: token.blank };
+        token.before = [];
+        return lead;
+    }
+
+    // The items of a list up to its closing bracket, commas left out.
+    fn series(close: String, item: fn() -> Doc) -> [Doc] {
+        let items: [Doc] = [];
+
+        while !self.is(close) {
+            let doc = item();
+
+            if !self.is(",") {
+                items.push(doc);
+                break;
+            }
+
+            items.push(layout.concat([doc, self.drop()]));
+        }
+
+        return items;
+    }
+
+    // --- A file ---
+
+    fn file() -> Doc {
+        let rows = Rows {};
+
+        while self.peek().kind != Kind.End {
+            let lead = self.lead();
+
+            if self.is("}") {
+                self.fail("expected a declaration or a statement");
+            }
+
+            // The statements of a script follow each other as in a block
+            if !self.atDeclaration() {
+                rows.add(lead, self.statement(), rows.kind != "statement");
+                rows.kind = "statement";
+                continue;
+            }
+
+            let kind = self.declarationKind();
+            let doc = self.declaration();
+
+            // Imports follow each other, and so do constants and the
+            // functions the runtime provides; everything else stands apart
+            rows.add(lead, doc, kind == "" || kind != rows.kind);
+            rows.kind = kind;
+        }
+
+        rows.close(self.lead());
+        return layout.concat(rows.docs);
+    }
+
+    // Whether a declaration starts here, rather than a statement of a
+    // script: `fn name` declares a function, `fn(` makes one.
+    fn atDeclaration() -> Bool {
+        return match self.word() {
+            case "pub" | "import" | "const" | "extern" | "struct" | "enum" | "trait" | "impl": true;
+            case "fn": self.ahead(1).kind == Kind.Name;
+            case "step": self.ahead(1).text == "fn" && self.ahead(2).kind == Kind.Name;
+            default: false;
+        };
+    }
+
+    fn declarationKind() -> String {
+        let at = self.at;
+
+        if self.textAt(at) == "pub" {
+            at++;
+        }
+
+        let word = self.textAt(at);
+
+        if word == "import"
+            || word == "const"
+            || (word == "extern" && self.textAt(at + 1) != "struct")
+        {
+            return word;
+        }
+
+        return "";
+    }
+
+    fn declaration() -> Doc {
+        let parts: [Doc] = [];
+
+        if self.is("pub") {
+            parts.push(self.take());
+            parts.push(space());
+        }
+
+        match self.word() {
+            case "import": {
+                parts.push(self.importDeclaration());
+            }
+
+            case "const": {
+                parts.push(self.variable());
+            }
+
+            case "extern": {
+                parts.push(self.take());
+                parts.push(space());
+
+                if self.is("struct") {
+                    parts.push(self.structDeclaration());
+                } else {
+                    if self.peek().kind == Kind.Text {
+                        parts.push(self.take());
+                        parts.push(space());
+                    }
+
+                    parts.push(self.function());
+                }
+            }
+
+            case "fn": {
+                parts.push(self.function());
+            }
+
+            case "step": {
+                parts.push(self.take());
+                parts.push(space());
+                parts.push(self.function());
+            }
+
+            case "struct": {
+                parts.push(self.structDeclaration());
+            }
+
+            case "enum": {
+                parts.push(self.enumDeclaration());
+            }
+
+            case "trait": {
+                parts.push(self.members(false));
+            }
+
+            case "impl": {
+                parts.push(self.members(true));
+            }
+
+            default: {
+                self.fail("expected a declaration (fn, struct, enum, trait, impl, const, import)");
+            }
+        }
+
+        return layout.concat(parts);
+    }
+
+    // import std.result.{Result, Failure};
+    fn importDeclaration() -> Doc {
+        let parts = [self.take(), space(), self.name("a module path")];
+
+        while self.is(".") {
+            parts.push(self.take());
+
+            if self.is("{") {
+                let open = self.take();
+                let names = self.series("}", () -> self.name("a name to import"));
+                parts.push(list(open, names, self.expect("}")));
+                break;
+            }
+
+            parts.push(self.name("a module name"));
+        }
+
+        if self.is("as") {
+            parts.push(space());
+            parts.push(self.take());
+            parts.push(space());
+            parts.push(self.name("a name for the module"));
+        }
+
+        parts.push(self.expect(";"));
+        return layout.concat(parts);
+    }
+
+    // fn name<T: Ordered>(first: T, second: T) -> T { ... }, or the same
+    // ended by a semicolon where there is no body to write.
+    fn function() -> Doc {
+        let parts = [self.expect("fn"), space(), self.name("a function name")];
+
+        if self.is("<") {
+            parts.push(self.typeParameters());
+        }
+
+        parts.push(self.parameters());
+
+        if self.is("->") {
+            parts.push(space());
+            parts.push(self.take());
+            parts.push(space());
+            parts.push(self.type());
+        }
+
+        // How long a step may take, then who carries it out:
+        // within 2.hours() by bank undo refund;
+        if self.is("within") {
+            parts.push(space());
+            parts.push(self.take());
+            parts.push(space());
+            // As a condition is: what follows may be a body
+            let plain = self.plain;
+            self.plain = true;
+            parts.push(self.expression());
+            self.plain = plain;
+        }
+
+        if self.is("by") {
+            for word in ["by", "undo"] {
+                if self.is(word) {
+                    parts.push(space());
+                    parts.push(self.take());
+                    parts.push(space());
+                    parts.push(self.name("a name"));
+                }
+            }
+        }
+
+        if self.is(";") {
+            parts.push(self.take());
+        } else {
+            parts.push(space());
+            parts.push(self.block());
+        }
+
+        return layout.concat(parts);
+    }
+
+    // <T, U: Ordered + Show>
+    fn typeParameters() -> Doc {
+        let open = self.expect("<");
+
+        let names = self.series(">", fn() -> Doc {
+            let parts = [self.name("a type parameter")];
+
+            if self.is(":") {
+                parts.push(self.take());
+                parts.push(space());
+                parts.push(self.primaryType());
+
+                while self.is("+") {
+                    parts.push(space());
+                    parts.push(self.take());
+                    parts.push(space());
+                    parts.push(self.primaryType());
+                }
+            }
+
+            return layout.concat(parts);
+        });
+
+        return layout.concat([open, layout.join(names, layout.text(", ")), self.expect(">")]);
+    }
+
+    fn parameters() -> Doc {
+        let open = self.expect("(");
+
+        let parameters = self.series(")", fn() -> Doc {
+            let name = self.name("a parameter name");
+
+            // A function written with -> names its parameters and no more
+            if !self.is(":") {
+                return name;
+            }
+
+            let parts = [name, self.take(), space(), self.type()];
+
+            if self.is("=") {
+                // mode: String = "r": what a call that leaves it out gives
+                parts.push(space());
+                parts.push(self.take());
+                parts.push(space());
+                parts.push(self.nested());
+            }
+
+            return layout.concat(parts);
+        });
+
+        return list(open, parameters, self.expect(")"));
+    }
+
+    fn structDeclaration() -> Doc {
+        let parts = [self.expect("struct"), space(), self.name("a struct name")];
+
+        if self.is("<") {
+            parts.push(self.typeParameters());
+        }
+
+        parts.push(space());
+        let open = self.expect("{");
+        let rows = Rows {};
+
+        while !self.is("}") {
+            let lead = self.lead();
+            let field: [Doc] = [];
+
+            if self.is("priv") && self.ahead(1).kind == Kind.Name {
+                // priv keys: [String]; hidden from other modules
+                field.push(self.take());
+                field.push(space());
+            }
+
+            field.push(self.name("a field name"));
+            field.push(self.expect(":"));
+            field.push(space());
+            field.push(self.type());
+
+            if self.is("=") {
+                field.push(space());
+                field.push(self.take());
+                field.push(space());
+                field.push(self.nested());
+            }
+
+            if self.is(";") || self.is(",") {
+                field.push(self.takeAs(";"));
+            } else {
+                field.push(layout.text(";"));
+            }
+
+            rows.add(lead, layout.concat(field), false);
+        }
+
+        rows.close(self.lead());
+        parts.push(rows.inside(open, self.take()));
+        return layout.concat(parts);
+    }
+
+    fn enumDeclaration() -> Doc {
+        let parts = [self.expect("enum"), space(), self.name("an enum name")];
+
+        if self.is("<") {
+            parts.push(self.typeParameters());
+        }
+
+        parts.push(space());
+
+        // One variant to a line where the writer started so; on one line
+        // otherwise, as long as they fit
+        if !self.ahead(1).newline {
+            let open = self.expect("{");
+            let variants = self.series("}", () -> self.variant());
+
+            if self.is(";") {
+                self.drop();
+            }
+
+            parts.push(spaced(open, variants, self.expect("}"), false));
+            return layout.concat(parts);
+        }
+
+        let open = self.expect("{");
+        let rows = Rows {};
+
+        while !self.is("}") {
+            let lead = self.lead();
+            let variant = self.variant();
+
+            if self.is(",") || self.is(";") {
+                variant = layout.concat([variant, self.takeAs(",")]);
+            } else {
+                variant = layout.concat([variant, comma()]);
+            }
+
+            rows.add(lead, variant, false);
+        }
+
+        rows.close(self.lead());
+        parts.push(rows.inside(open, self.take()));
+        return layout.concat(parts);
+    }
+
+    // Circle(Float), Rect { width: Float, height: Float }, or a name alone
+    fn variant() -> Doc {
+        let name = self.name("a variant name");
+
+        if self.is("{") {
+            let tall = self.ahead(1).newline;
+            let brace = self.take();
+
+            let values = self.series("}", fn() -> Doc {
+                return layout.concat([
+                    self.name("the name of a value"),
+                    self.expect(":"),
+                    space(),
+                    self.type(),
+                ]);
+            });
+
+            return layout.concat([name, space(), spaced(brace, values, self.expect("}"), tall)]);
+        }
+
+        if !self.is("(") {
+            return name;
+        }
+
+        let open = self.take();
+        let holds = self.series(")", () -> self.type());
+        return layout.concat([name, list(open, holds, self.expect(")"))]);
+    }
+
+    // The methods of a trait or of an impl, between its braces.
+    fn members(isImpl: Bool) -> Doc {
+        let parts = [self.take()];
+
+        if isImpl && self.is("<") {
+            parts.push(self.typeParameters());
+        }
+
+        parts.push(space());
+        parts.push(self.primaryType());
+
+        if self.is("?") {
+            // impl<T> T? { ... }
+            parts.push(self.take());
+        }
+
+        if self.is("for") {
+            parts.push(space());
+            parts.push(self.take());
+            parts.push(space());
+            parts.push(self.primaryType());
+        }
+
+        parts.push(space());
+        let open = self.expect("{");
+        let rows = Rows {};
+
+        while !self.is("}") {
+            let lead = self.lead();
+            let method: [Doc] = [];
+
+            if self.is("pub") {
+                method.push(self.take());
+                method.push(space());
+            }
+
+            if (self.is("static") || self.is("migrate")) && self.ahead(1).text == "fn" {
+                // static fn origin(): a function of the type; migrate fn
+                // polling(): a migration of a flow
+                method.push(self.take());
+                method.push(space());
+            }
+
+            method.push(self.function());
+            let doc = layout.concat(method);
+
+            // Methods stand apart; the ones a trait only names follow
+            // each other
+            rows.add(lead, doc, isImpl);
+        }
+
+        rows.close(self.lead());
+        parts.push(rows.inside(open, self.take()));
+        return layout.concat(parts);
+    }
+
+    // --- Types ---
+
+    // Int | String
+    fn type() -> Doc {
+        let first = self.postfixType();
+
+        if !self.is("|") {
+            return first;
+        }
+
+        let parts = [first];
+
+        while self.is("|") {
+            parts.push(space());
+            parts.push(self.take());
+            parts.push(space());
+            parts.push(self.postfixType());
+        }
+
+        return layout.concat(parts);
+    }
+
+    // [Int]?
+    fn postfixType() -> Doc {
+        let parts = [self.primaryType()];
+
+        while self.is("?") {
+            parts.push(self.take());
+        }
+
+        return layout.concat(parts);
+    }
+
+    fn primaryType() -> Doc {
+        let token = self.peek();
+
+        if token.text == "[" {
+            return layout.concat([self.take(), self.type(), self.expect("]")]);
+        }
+
+        if token.text == "(" {
+            let open = self.take();
+            let parts = self.series(")", () -> self.type());
+            return list(open, parts, self.expect(")"));
+        }
+
+        if token.text == "..." {
+            return layout.concat([self.take(), self.type()]);
+        }
+
+        if token.text == "fn" {
+            let parts = [self.take()];
+            let open = self.expect("(");
+            let takes = self.series(")", () -> self.type());
+            parts.push(list(open, takes, self.expect(")")));
+
+            if self.is("->") {
+                parts.push(space());
+                parts.push(self.take());
+                parts.push(space());
+                parts.push(self.type());
+            }
+
+            return layout.concat(parts);
+        }
+
+        if token.kind != Kind.Name || (reserved(token) && !isBuiltinType(token.text)) {
+            self.fail("expected a type");
+        }
+
+        let parts = [self.take()];
+
+        // A type of another module: module.Name
+        if self.is(".") && self.ahead(1).kind == Kind.Name {
+            parts.push(self.take());
+            parts.push(self.take());
+        }
+
+        if self.is("<") {
+            parts.push(self.typeArguments());
+        }
+
+        return layout.concat(parts);
+    }
+
+    // <Int, [String]>
+    fn typeArguments() -> Doc {
+        let open = self.expect("<");
+        let types = self.series(">", () -> self.type());
+        return layout.concat([open, layout.join(types, layout.text(", ")), self.expect(">")]);
+    }
+
+    // Where a type that starts at a position ends: the position of the
+    // token after it, or -1 if what is there is not a type. Nothing is
+    // read: it is how `a < b` is told from `f<T>(x)`, and a type in a
+    // case from a value.
+    fn afterType(at: Int) -> Int {
+        let end = self.afterPostfixType(at);
+
+        while end > 0 && self.textAt(end) == "|" {
+            end = self.afterPostfixType(end + 1);
+        }
+
+        return end;
+    }
+
+    fn afterPostfixType(at: Int) -> Int {
+        let end = self.afterPrimaryType(at);
+
+        while end > 0 && self.textAt(end) == "?" {
+            end++;
+        }
+
+        return end;
+    }
+
+    fn afterPrimaryType(at: Int) -> Int {
+        if at >= self.tokens.len() {
+            return -1;
+        }
+
+        let token = self.tokens[at];
+
+        if token.text == "[" {
+            return self.closed(self.afterType(at + 1), "]");
+        }
+
+        if token.text == "(" {
+            return self.closed(self.afterTypes(at + 1, ")"), ")");
+        }
+
+        if token.text == "..." {
+            return self.afterType(at + 1);
+        }
+
+        if token.text == "fn" {
+            if self.textAt(at + 1) != "(" {
+                return -1;
+            }
+
+            let end = self.closed(self.afterTypes(at + 2, ")"), ")");
+
+            if end > 0 && self.textAt(end) == "->" {
+                return self.afterType(end + 1);
+            }
+
+            return end;
+        }
+
+        if token.kind != Kind.Name || (reserved(token) && !isBuiltinType(token.text)) {
+            return -1;
+        }
+
+        let end = at + 1;
+
+        if !isBuiltinType(token.text)
+            && self.textAt(end) == "."
+            && self.tokens[end + 1].kind == Kind.Name
+        {
+            end += 2;
+        }
+
+        if self.textAt(end) == "<" {
+            return self.closed(self.afterTypes(end + 1, ">"), ">");
+        }
+
+        return end;
+    }
+
+    // Where a list of types ends: the position of its closing bracket.
+    fn afterTypes(at: Int, close: String) -> Int {
+        let end = at;
+
+        while end > 0 && self.textAt(end) != close {
+            end = self.afterType(end);
+
+            if end < 0 || self.textAt(end) != "," {
+                break;
+            }
+
+            end++;
+        }
+
+        return end;
+    }
+
+    // The position after a closing bracket that has to be there.
+    fn closed(at: Int, close: String) -> Int {
+        if at < 0 || self.textAt(at) != close {
+            return -1;
+        }
+
+        return at + 1;
+    }
+
+    // --- Statements ---
+
+    fn block() -> Doc {
+        let open = self.expect("{");
+        let plain = self.plain;
+        let patterns = self.patterns;
+        self.plain = false;
+        self.patterns = false;
+        let rows = Rows {};
+
+        while !self.is("}") {
+            let lead = self.lead();
+            rows.add(lead, self.statement(), false);
+        }
+
+        rows.close(self.lead());
+        self.plain = plain;
+        self.patterns = patterns;
+        return rows.inside(open, self.take());
+    }
+
+    fn statement() -> Doc {
+        match self.word() {
+            case "let" | "const": {
+                return self.variable();
+            }
+
+            case "if": {
+                return self.ifStatement();
+            }
+
+            case "while": {
+                return layout.concat([self.take(), space(), self.header(), self.block()]);
+            }
+
+            case "for": {
+                let parts = [self.take(), space(), self.loopVariable()];
+
+                if self.is(",") {
+                    parts.push(self.take());
+                    parts.push(space());
+                    parts.push(self.loopVariable());
+                }
+
+                parts.push(space());
+                parts.push(self.expect("in"));
+                parts.push(space());
+                parts.push(self.header());
+                parts.push(self.block());
+                return layout.concat(parts);
+            }
+
+            case "match": {
+                return self.matching(false);
+            }
+
+            case "wait": {
+                if self.atWait() && self.ahead(1).text == "match" {
+                    return layout.concat([self.take(), space(), self.matching(false)]);
+                }
+            }
+
+            case "stage": {
+                // stage polling;: anywhere else stage is a name
+                if self.ahead(1).kind == Kind.Name && self.ahead(2).text == ";" {
+                    return layout.concat([self.take(), space(), self.take(), self.take()]);
+                }
+            }
+
+            case "defer": {
+                let word = self.take();
+
+                if self.is("{") {
+                    return layout.concat([word, space(), self.block()]);
+                }
+
+                return layout.concat([word, space(), self.assignment(), self.expect(";")]);
+            }
+
+            case "return": {
+                let word = self.take();
+
+                if self.is(";") {
+                    return layout.concat([word, self.take()]);
+                }
+
+                return layout.concat([word, space(), self.expression(), self.expect(";")]);
+            }
+
+            case "break" | "continue": {
+                return layout.concat([self.take(), self.expect(";")]);
+            }
+
+            case "{": {
+                return self.block();
+            }
+
+            case "}": {
+                self.fail("expected a statement");
+            }
+
+            default: {}
+        }
+
+        if self.peek().kind == Kind.End {
+            self.fail("expected '}'");
+        }
+
+        return layout.concat([self.assignment(), self.expect(";")]);
+    }
+
+    // let total: Int = 0;   const limit = 10;   let (first, second) = pair;
+    fn variable() -> Doc {
+        let parts = [self.take(), space()];
+
+        if self.is("(") {
+            let open = self.take();
+            let names = self.series(")", () -> self.name("a name for a value of the tuple"));
+            parts.push(list(open, names, self.expect(")")));
+        } else {
+            parts.push(self.name("a name"));
+        }
+
+        if self.is(":") {
+            parts.push(self.take());
+            parts.push(space());
+            parts.push(self.type());
+        }
+
+        parts.push(space());
+        parts.push(self.expect("="));
+        parts.push(space());
+        parts.push(self.expression());
+        parts.push(self.expect(";"));
+        return layout.concat(parts);
+    }
+
+    // item, or (key, value) for an item that is a tuple
+    fn loopVariable() -> Doc {
+        if !self.is("(") {
+            return self.name("a loop variable");
+        }
+
+        let open = self.take();
+        let names = self.series(")", () -> self.name("a name for a value of the tuple"));
+        return list(open, names, self.expect(")"));
+    }
+
+    fn ifStatement() -> Doc {
+        let parts = [self.expect("if"), space(), self.header(), self.block()];
+
+        if self.is("else") {
+            parts.push(space());
+            parts.push(self.take());
+            parts.push(space());
+
+            if self.is("if") {
+                parts.push(self.ifStatement());
+            } else {
+                parts.push(self.block());
+            }
+        }
+
+        return layout.concat(parts);
+    }
+
+    // match value { case pattern: ...; default: ...; }, as a statement
+    // or where a value is expected.
+    fn matching(asValue: Bool) -> Doc {
+        // wait match { case ...: ... }: what is waited for, not a value
+        let waits = self.textAt(self.at - 1) == "wait";
+        let parts = [self.expect("match"), space()];
+
+        if !waits {
+            parts.push(self.header());
+        }
+
+        let open = self.expect("{");
+        let plain = self.plain;
+        let patterns = self.patterns;
+        self.plain = false;
+        self.patterns = false;
+        let rows = Rows {};
+
+        while !self.is("}") {
+            let lead = self.lead();
+            let entry: [Doc] = [];
+
+            if self.is("default") && self.ahead(1).text == ":" {
+                entry.push(self.take());
+            } else {
+                entry.push(self.expect("case"));
+                entry.push(space());
+                let first = if waits { self.waitedCase() } else { self.pattern() };
+                let bars: [Doc] = [];
+                let others: [Doc] = [];
+
+                while self.is("|") {
+                    bars.push(self.take());
+                    others.push(self.pattern());
+                }
+
+                entry.push(chained(first, bars, others));
+
+                if self.is("if") {
+                    entry.push(space());
+                    entry.push(self.take());
+                    entry.push(space());
+                    entry.push(self.guard());
+                }
+            }
+
+            entry.push(self.expect(":"));
+            entry.push(space());
+
+            if self.is("{") {
+                // Where a value is expected, as the branch of an if:
+                // statements, then the value
+                entry.push(if asValue { self.valueBlock() } else { self.block() });
+
+                if asValue && self.is(",") {
+                    entry.push(self.drop());
+                }
+            } else {
+                entry.push(self.expression());
+
+                if self.is(";") || (asValue && self.is(",")) {
+                    entry.push(self.takeAs(";"));
+                } else if asValue && self.is("}") {
+                    entry.push(layout.text(";"));
+                } else {
+                    self.fail("expected ';' after the value of a case");
+                }
+            }
+
+            rows.add(lead, layout.concat(entry), false);
+        }
+
+        rows.close(self.lead());
+        self.plain = plain;
+        self.patterns = patterns;
+        parts.push(rows.inside(open, self.take()));
+        return layout.concat(parts);
+    }
+
+    // What a case compares with: a type where only a type can stand, an
+    // expression otherwise, in which | starts the next pattern.
+    fn pattern() -> Doc {
+        let end = self.afterPostfixType(self.at);
+        let follows = self.textAt(end);
+
+        if end > 0 && !self.is("(") && (follows == ":" || follows == "|" || follows == "if") {
+            return self.postfixType();
+        }
+
+        // A brace after a name is a struct pattern here, never a block:
+        // case Point { x: 0, y }:
+        let plain = self.plain;
+        let patterns = self.patterns;
+        self.plain = false;
+        self.patterns = true;
+        let doc = self.expression();
+        self.plain = plain;
+        self.patterns = patterns;
+        return doc;
+    }
+
+    // --- Expressions ---
+
+    // The expression in the header of an if, a while, a for or a match,
+    // where `name {` opens the body, with what separates it from that
+    // brace: a space, or a line end when its operators take several
+    // lines, so that the body does not start where the condition goes on.
+    fn header() -> Doc {
+        let plain = self.plain;
+        self.plain = true;
+        let doc = self.expression();
+        self.plain = plain;
+
+        if self.chained {
+            match doc {
+                case Doc.Group(inner, must): {
+                    return Doc.Group(layout.concat([inner, Doc.Line]), must);
+                }
+
+                default: {}
+            }
+        }
+
+        return layout.concat([doc, space()]);
+    }
+
+    // The same for a case, which a colon follows.
+    fn guard() -> Doc {
+        let plain = self.plain;
+        self.plain = true;
+        let doc = self.expression();
+        self.plain = plain;
+        return doc;
+    }
+
+    // An expression between brackets, where a struct literal is one again.
+    fn nested() -> Doc {
+        let plain = self.plain;
+        let patterns = self.patterns;
+        self.plain = false;
+        self.patterns = false;
+        let doc = self.expression();
+        self.plain = plain;
+        self.patterns = patterns;
+        return doc;
+    }
+
+    // An expression, or an assignment to one: x = 1, x += 1, x++.
+    fn assignment() -> Doc {
+        let target = self.expression();
+        let token = self.peek();
+        let next = self.ahead(1);
+        self.assigned = true;
+
+        match token.text {
+            case "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=": {
+                return layout.concat([target, space(), self.take(), space(), self.expression()]);
+            }
+
+            case "++" | "--": {
+                return layout.concat([target, self.take()]);
+            }
+
+            case "<" | ">": {
+                // a <<= n: the two halves come as two tokens
+                if next.text == token.text + "=" && next.start == token.end {
+                    let operator = self.takeAs(token.text + next.text);
+
+                    return layout.concat([
+                        target,
+                        space(),
+                        operator,
+                        self.drop(),
+                        space(),
+                        self.expression(),
+                    ]);
+                }
+            }
+
+            default: {}
+        }
+
+        self.assigned = false;
+        return target;
+    }
+
+    // What is between the brackets of an index: a value, or a range that
+    // may leave out where it starts or where it ends, items[1..], items[..2].
+    fn index() -> Doc {
+        if self.is("..") || self.is("..=") {
+            let dots = self.take();
+            let high = self.nestedBinary();
+            self.shape = Shape.Plain;
+            self.chained = false;
+            return layout.concat([dots, high]);
+        }
+
+        return self.nested();
+    }
+
+    // An expression without a range or a choice at its top, inside
+    // delimiters.
+    fn nestedBinary() -> Doc {
+        let plain = self.plain;
+        let patterns = self.patterns;
+        self.plain = false;
+        self.patterns = false;
+        let doc = self.binary(1);
+        self.plain = plain;
+        self.patterns = patterns;
+        return doc;
+    }
+
+    fn expression() -> Doc {
+        let low = self.binary(1);
+
+        // low..high: looser than every operator
+        if self.is("..") || self.is("..=") {
+            let dots = self.take();
+
+            if self.is("]") {
+                // items[1..]: to the end
+                self.shape = Shape.Plain;
+                self.chained = false;
+                return layout.concat([low, dots]);
+            }
+
+            let high = self.binary(1);
+            self.shape = Shape.Plain;
+            self.chained = false;
+            return layout.concat([low, dots, high]);
+        }
+
+        // condition ? one : other, read from the right
+        if self.is("?") {
+            let question = self.take();
+            let one = self.expression();
+            let colon = self.expect(":");
+            let other = self.expression();
+            self.shape = Shape.Plain;
+            self.chained = true;
+            return chained(low, [question, colon], [one, other]);
+        }
+
+        return low;
+    }
+
+    // Whether the ? here starts the two values of a choice, rather than
+    // leaving with the failure of what comes before it: a value that can
+    // only start one follows it, or a value and a ':'.
+    fn choiceAhead() -> Bool {
+        let next = self.ahead(1);
+
+        if next.kind == Kind.Number || next.kind == Kind.Text {
+            return true;
+        }
+
+        if next.kind == Kind.Name {
+            return next.text != "is";
+        }
+
+        if next.text == "!" {
+            return true;
+        }
+
+        // value? > 0: what follows is the rest of an operation
+        if next.kind == Kind.Symbol
+            && next.text != "-"
+            && next.text != "("
+            && next.text != "["
+            && next.text != "~"
+        {
+            return false;
+        }
+
+        // value? - 1 or value?[0], or a choice: the ':' says
+        let at = self.at + 1;
+        let depth = 0;
+
+        while at < self.tokens.len() {
+            let text = self.tokens[at].text;
+
+            if self.tokens[at].kind == Kind.End {
+                return false;
+            }
+
+            if text == "(" || text == "[" || text == "{" {
+                depth++;
+            } else if text == ")" || text == "]" || text == "}" {
+                if depth == 0 {
+                    return false;
+                }
+
+                depth--;
+            } else if depth == 0 && (text == ";" || text == ",") {
+                return false;
+            } else if depth == 0 && text == ":" {
+                return true;
+            }
+
+            at++;
+        }
+
+        return false;
+    }
+
+    // The operator at the next token, if it is one: how it is written,
+    // how tightly it binds (0 when it is none) and how many tokens it is.
+    fn operator() -> (String, Int, Int) {
+        let token = self.peek();
+
+        if token.kind != Kind.Symbol {
+            return ("", 0, 0);
+        }
+
+        if token.text == "<" || token.text == ">" {
+            let next = self.ahead(1);
+
+            if next.start == token.end && next.text == token.text {
+                // << and >>, two tokens that touch
+                return (token.text + token.text, 10, 2);
+            }
+
+            if next.start == token.end && next.text == token.text + "=" {
+                return ("", 0, 0);
+            }
+        }
+
+        if token.text == "|" && self.patterns {
+            return ("", 0, 0);
+        }
+
+        let level = match self.word() {
+            case "||": 1;
+            case "&&": 2;
+            case "==" | "!=": 3;
+            case "<" | "<=" | ">" | ">=": 4;
+            case "|>": 5;
+            case "??": 6;
+            case "|": 7;
+            case "^": 8;
+            case "&": 9;
+            case "+" | "-": 11;
+            case "*" | "/" | "%": 12;
+            default: 0;
+        };
+
+        return (token.text, level, 1);
+    }
+
+    // Operands and the operators between them, from those that bind at
+    // least as tightly as `least`. Operators of one level are one chain:
+    // on one line, or each with its operand on a line of its own.
+    fn binary(least: Int) -> Doc {
+        let first = self.unary();
+        let chain = 0;
+        let operators: [Doc] = [];
+        let operands: [Doc] = [];
+
+        while true {
+            let (written, level, tokens) = self.operator();
+
+            if level == 0 || level < least {
+                break;
+            }
+
+            if chain != 0 && level != chain {
+                first = chained(first, operators, operands);
+                operators = [];
+                operands = [];
+            }
+
+            chain = level;
+            let operator = self.takeAs(written);
+
+            if tokens == 2 {
+                operator = layout.concat([operator, self.drop()]);
+            }
+
+            operators.push(operator);
+
+            // What follows |> is the call the value goes into, and no
+            // more: in value |> f(a) + 1 the 1 is added to what f gives
+            if written == "|>" {
+                operands.push(self.unary());
+            } else {
+                operands.push(self.binary(level + 1));
+            }
+
+            self.shape = Shape.Plain;
+        }
+
+        self.chained = !operators.isEmpty();
+        return chained(first, operators, operands);
+    }
+
+    // The case of a wait match: case let name = waitable:, case waitable
+    // is Pattern:, case waitable:.
+    fn waitedCase() -> Doc {
+        if self.is("let") {
+            return layout.concat([
+                self.take(),
+                space(),
+                self.take(),
+                space(),
+                self.expect("="),
+                space(),
+                self.expression(),
+            ]);
+        }
+
+        let waited = self.postfix();
+
+        if self.word() == "is" {
+            return layout.concat([waited, space(), self.take(), space(), self.pattern()]);
+        }
+
+        return waited;
+    }
+
+    // wait as the operator, and not a name: before what starts a value
+    fn atWait() -> Bool {
+        if self.word() != "wait" || self.peek().kind != Kind.Name {
+            return false;
+        }
+
+        let next = self.ahead(1);
+        return next.kind == Kind.Name || next.kind == Kind.Number || next.kind == Kind.Text;
+    }
+
+    fn unary() -> Doc {
+        if self.atWait() {
+            let word = self.take();
+            let waited = if self.is("match") { self.matching(true) } else { self.postfix() };
+            let value = layout.concat([word, space(), waited]);
+
+            while true {
+                if self.is("as") {
+                    value = layout.concat([
+                        value,
+                        space(),
+                        self.take(),
+                        space(),
+                        self.postfixType(),
+                    ]);
+                } else if self.is("is") && self.peek().kind == Kind.Name {
+                    value = layout.concat([value, space(), self.take(), space(), self.tested()]);
+                } else {
+                    self.shape = Shape.Plain;
+                    return value;
+                }
+            }
+        }
+
+        if self.is("-") || self.is("!") || self.is("~") {
+            let operator = self.take();
+
+            // - -x: two minus signs that touch would be another token
+            if self.is("-") || self.is("--") {
+                operator = layout.concat([operator, space()]);
+            }
+
+            let operand = self.unary();
+            self.shape = Shape.Plain;
+            return layout.concat([operator, operand]);
+        }
+
+        let value = self.postfix();
+
+        while true {
+            if self.is("as") {
+                value = layout.concat([value, space(), self.take(), space(), self.postfixType()]);
+            } else if self.is("is") && self.peek().kind == Kind.Name {
+                value = layout.concat([value, space(), self.take(), space(), self.tested()]);
+            } else {
+                return value;
+            }
+
+            self.shape = Shape.Plain;
+        }
+    }
+
+    // What follows `is`: a type, or the pattern of a variant.
+    fn tested() -> Doc {
+        let end = self.afterPostfixType(self.at);
+
+        if end > 0 && self.textAt(end) != "(" && self.textAt(end) != "." {
+            return self.postfixType();
+        }
+
+        let plain = self.plain;
+        self.plain = true;
+        let doc = self.postfix();
+        self.plain = plain;
+        return doc;
+    }
+
+    // A value and what is done to it: calls, brackets, members, ? and ?.
+    fn postfix() -> Doc {
+        let start = self.at;
+        let head = self.primary();
+        let named = self.at == start + 1 && self.tokens[start].kind == Kind.Name;
+        let links: [Link] = [];
+
+        while true {
+            let token = self.peek();
+            let piece = Doc.Nothing;
+
+            if token.text == "(" {
+                piece = self.arguments();
+            } else if token.text == "[" {
+                piece = layout.concat([self.take(), self.index(), self.expect("]")]);
+            } else if token.text == "!" {
+                // value!: nothing else has a ! after a value
+                piece = self.take();
+            } else if token.text == "?" && !self.choiceAhead() {
+                piece = self.take();
+
+                // value? .name is not value?.name, value? ? not value??; a
+                // choice that follows has spaces of its own
+                let apart = self.peek().text.startsWith(".") || self.peek().text.startsWith("?");
+
+                if apart && !(self.is("?") && self.choiceAhead()) {
+                    piece = layout.concat([piece, space()]);
+                }
+            } else if token.text == "." || token.text == "?." {
+                let member = [self.take()];
+
+                if self.peek().kind == Kind.Number {
+                    // pair.0: a value of a tuple, by its position
+                    member.push(self.take());
+                } else {
+                    member.push(self.name("a member name"));
+                    member.push(self.typeArgumentsIfAny());
+                }
+
+                if self.literalFollows() {
+                    // A struct of another module: module.Name { ... }
+                    member.push(space());
+                    member.push(self.fields());
+                    head = layout.concat([head, linked(links), layout.concat(member)]);
+                    links = [];
+                    named = false;
+                    self.shape = Shape.Literal;
+                    continue;
+                }
+
+                links.push(Link { doc: layout.concat(member), calls: false });
+                self.shape = Shape.Plain;
+                continue;
+            } else {
+                break;
+            }
+
+            self.shape = Shape.Plain;
+            let last = links.last();
+
+            if last == null {
+                head = layout.concat([head, piece]);
+                named = false;
+            } else {
+                last.doc = layout.concat([last.doc, piece]);
+                last.calls = last.calls || token.text == "(";
+            }
+        }
+
+        // module.function(...) and value.field stay with what they start
+        // from; the calls that follow are the chain
+        let from = 0;
+
+        while named && from < links.len() {
+            head = layout.concat([head, links[from].doc]);
+            from++;
+
+            if links[from - 1].calls {
+                break;
+            }
+        }
+
+        let rest = links.drop(from);
+
+        if rest.len() < 2 {
+            return layout.concat([head, linked(rest)]);
+        }
+
+        let steps = rest.map(link -> layout.concat([Doc.Soft, link.doc]));
+        return layout.group(layout.concat([head, layout.indent(layout.concat(steps))]));
+    }
+
+    // (first, second): the arguments of a call.
+    fn arguments() -> Doc {
+        let open = self.take();
+        let start = self.at;
+        let items: [Doc] = [];
+        let last = Shape.Plain;
+
+        // Whether the last argument may start on the line of the call
+        let hugs = true;
+        let before = 0;
+
+        while !self.is(")") {
+            if last != Shape.Plain {
+                hugs = false;
+            }
+
+            let from = self.peek().start;
+            let item = self.nested();
+            last = self.shape;
+
+            if !self.is(",") {
+                items.push(item);
+                break;
+            }
+
+            before += self.peek().end - from;
+            hugs = hugs && !layout.forces(item);
+            items.push(layout.concat([item, self.drop()]));
+        }
+
+        // One argument of one word has no better place than where it is
+        let word = self.at == start + 1;
+        let close = self.expect(")");
+        self.shape = Shape.Plain;
+
+        if word || (hugs && last != Shape.Plain && before <= headRoom) {
+            return layout.concat([open, layout.join(items, layout.text(", ")), close]);
+        }
+
+        return list(open, items, close);
+    }
+
+    fn primary() -> Doc {
+        let token = self.peek();
+        self.shape = Shape.Plain;
+
+        if token.kind == Kind.Number || token.kind == Kind.Text {
+            return self.take();
+        }
+
+        match self.word() {
+            case "true" | "false" | "null": {
+                return self.take();
+            }
+
+            case "{": {
+                // {"ada": 36}: a dictionary, never a block where a value
+                // is read
+                if !self.plain {
+                    return self.entries();
+                }
+            }
+
+            case "Int" | "Float" | "String" | "Bool": {
+                // String.upper: a method of the type, as a function
+                if self.ahead(1).text == "." {
+                    return self.take();
+                }
+            }
+
+            case "match": {
+                let doc = self.matching(true);
+                self.shape = Shape.Choice;
+                return doc;
+            }
+
+            case "if": {
+                let doc = layout.group(self.ifValue());
+                self.shape = Shape.Choice;
+                return doc;
+            }
+
+            case "fn": {
+                let parts = [self.take(), self.parameters()];
+
+                if self.is("->") {
+                    parts.push(space());
+                    parts.push(self.take());
+                    parts.push(space());
+                    parts.push(self.type());
+                }
+
+                parts.push(space());
+                parts.push(self.block());
+                self.shape = Shape.Function;
+                return layout.concat(parts);
+            }
+
+            case "[": {
+                return self.array();
+            }
+
+            case "(": {
+                return self.parenthesized();
+            }
+
+            default: {}
+        }
+
+        if !self.isName() {
+            self.fail("expected an expression");
+        }
+
+        let name = self.take();
+
+        if self.is("->") || self.is("=>") {
+            // item -> item.name
+            return self.shortFunction(name);
+        }
+
+        let value = layout.concat([name, self.typeArgumentsIfAny()]);
+
+        if self.literalFollows() {
+            let doc = layout.concat([value, space(), self.fields()]);
+            self.shape = Shape.Literal;
+            return doc;
+        }
+
+        return value;
+    }
+
+    // <Int> after a name, when it is type arguments and not a comparison:
+    // what closes them is followed by ( { or .
+    fn typeArgumentsIfAny() -> Doc {
+        if !self.is("<") || self.textAt(self.at + 1) == ">" {
+            return Doc.Nothing;
+        }
+
+        let end = self.closed(self.afterTypes(self.at + 1, ">"), ">");
+        let follows = self.textAt(end);
+
+        if end < 0 || (follows != "(" && follows != "{" && follows != ".") {
+            return Doc.Nothing;
+        }
+
+        return self.typeArguments();
+    }
+
+    // Whether the brace at the next token opens a struct literal: {} or
+    // { name: ...
+    fn literalFollows() -> Bool {
+        if self.plain || !self.is("{") {
+            return false;
+        }
+
+        let first = self.ahead(1);
+        let second = self.ahead(2).text;
+
+        // Point { x: 1 }, or Point { x, y } for Point { x: x, y: y }
+        return first.text == "}"
+            || (
+                first.kind == Kind.Name
+                    && !reserved(first)
+                    && (second == ":" || second == "," || second == "}")
+            );
+    }
+
+    // { name: value, other: value }: the fields of a struct literal. One
+    // to a line where the writer started so, or where they do not fit.
+    fn fields() -> Doc {
+        let tall = self.ahead(1).newline;
+        let open = self.take();
+
+        let fields = self.series("}", fn() -> Doc {
+            let name = self.name("a field name");
+
+            if !self.is(":") {
+                // Point { x }: the field and the name are one
+                return name;
+            }
+
+            return layout.concat([name, self.expect(":"), space(), self.nested()]);
+        });
+
+        return spaced(open, fields, self.expect("}"), tall);
+    }
+
+    // {key: value, other: value}: the entries of a dictionary, as the
+    // fields of a struct literal are written.
+    fn entries() -> Doc {
+        let tall = self.ahead(1).newline;
+        let open = self.take();
+
+        let entries = self.series("}", fn() -> Doc {
+            let key = self.nested();
+            return layout.concat([key, self.expect(":"), space(), self.nested()]);
+        });
+
+        return spaced(open, entries, self.expect("}"), tall);
+    }
+
+    // [first, second]. An array of plain values fills its lines; any
+    // other is written one item to a line when it does not fit on one.
+    fn array() -> Doc {
+        let start = self.at;
+        let open = self.take();
+        let items: [Doc] = [];
+        let simple = true;
+
+        while !self.is("]") {
+            let from = self.at;
+            let item = self.nested();
+            let tokens = self.at - from;
+            simple = simple && (tokens == 1 || (tokens == 2 && self.tokens[from].text == "-"));
+
+            if !self.is(",") {
+                items.push(item);
+                break;
+            }
+
+            items.push(layout.concat([item, self.drop()]));
+        }
+
+        // An item with a comment has a line of its own
+        for at in start..=self.at {
+            simple = simple && self.tokens[at].before.isEmpty() && self.tokens[at].after == "";
+        }
+
+        let close = self.expect("]");
+        self.shape = Shape.Literal;
+
+        if !simple || items.len() < 2 {
+            return list(open, items, close);
+        }
+
+        return layout.group(
+            layout.concat([
+                open,
+                layout.indent(layout.concat([Doc.Soft, layout.fill(items)])),
+                Doc.IfBroken(comma(), Doc.Nothing),
+                Doc.Soft,
+                close,
+            ]),
+        );
+    }
+
+    // (value), (first, second), or the parameters of a function written
+    // with ->
+    fn parenthesized() -> Doc {
+        let open = self.take();
+        let items = self.series(")", () -> self.nested());
+        let close = self.expect(")");
+        let doc = list(open, items, close);
+
+        if items.len() == 1 {
+            // No comma comes after a value in parentheses
+            doc = layout.group(
+                layout.concat([
+                    open,
+                    layout.indent(layout.concat([Doc.Soft, items[0]])),
+                    Doc.Soft,
+                    close,
+                ]),
+            );
+        }
+
+        if self.is("->") || self.is("=>") {
+            return self.shortFunction(doc);
+        }
+
+        self.shape = Shape.Plain;
+        return doc;
+    }
+
+    // What follows the parameters of a function written without types:
+    // item -> item.name, (a, b) -> a + b, line -> { ... }
+    fn shortFunction(parameters: Doc) -> Doc {
+        let arrow = self.expect("->");
+
+        if self.is("{") {
+            let body = self.block();
+            self.shape = Shape.Function;
+            return layout.concat([parameters, space(), arrow, space(), body]);
+        }
+
+        let plain = self.plain;
+        self.plain = false;
+        let body = self.assignment();
+        self.plain = plain;
+        self.assigned = false;
+        self.shape = Shape.Plain;
+        return layout.concat([parameters, space(), arrow, space(), body]);
+    }
+
+    // if condition { one } else { other }, where a value is expected: on
+    // one line, or each branch on lines of its own.
+    fn ifValue() -> Doc {
+        let parts = [
+            self.expect("if"),
+            space(),
+            self.header(),
+            self.valueBlock(),
+            space(),
+            self.expect("else"),
+            space(),
+        ];
+
+        if self.is("if") {
+            parts.push(self.ifValue());
+        } else {
+            parts.push(self.valueBlock());
+        }
+
+        return layout.concat(parts);
+    }
+
+    // The if or match at the current token as a statement, when it is
+    // one: something other than the end of the braces follows it, and
+    // not an operator that would make it part of a value
+    // (if a { 1 } else { 2 } + 3). Otherwise nothing is read, and it is
+    // read again as the value of the braces.
+    fn statementBeforeValue() -> Doc? {
+        let start = self.at;
+        let plain = self.plain;
+        let patterns = self.patterns;
+
+        // Reading takes the comments off the tokens: they are put back if
+        // what was read is read again
+        let comments = self.tokens.drop(start).map(token -> token.before);
+        let read = result.attempt(() -> self.statement());
+
+        if read is Ok(doc)
+            && !self.is("}")
+            && self.peek().kind != Kind.End
+            && !CONTINUING.contains(self.peek().text)
+        {
+            return doc;
+        }
+
+        for i, before in comments {
+            self.tokens[start + i].before = before;
+        }
+
+        self.at = start;
+        self.plain = plain;
+        self.patterns = patterns;
+        self.report.problem = null;
+        return null;
+    }
+
+    // The branch of an if that gives a value: braces around an
+    // expression, which statements may come before.
+    fn valueBlock() -> Doc {
+        let open = self.expect("{");
+        let plain = self.plain;
+        let patterns = self.patterns;
+        self.plain = false;
+        self.patterns = false;
+        let rows = Rows {};
+        let value = Doc.Nothing;
+        let alone = true;
+
+        while !self.is("}") {
+            let lead = self.lead();
+            let doc = Doc.Nothing;
+            alone = alone && rows.count == 0 && lead.comments.isEmpty();
+
+            match self.word() {
+                case "let"
+                    | "const"
+                    | "return"
+                    | "break"
+                    | "continue"
+                    | "while"
+                    | "for"
+                    | "defer": {
+                    doc = self.statement();
+                    alone = false;
+                }
+
+                default: {
+                    let statement = if self.is("if") || self.is("match") {
+                        self.statementBeforeValue()
+                    } else {
+                        null
+                    };
+
+                    if statement != null {
+                        doc = statement;
+                        alone = false;
+                    } else {
+                        doc = self.assignment();
+
+                        if !self.assigned && self.is("}") {
+                            // The last thing in the braces, with no ';': the value
+                            value = doc;
+                        } else {
+                            doc = layout.concat([doc, self.expect(";")]);
+                            alone = false;
+                        }
+                    }
+                }
+            }
+
+            rows.add(lead, doc, false);
+        }
+
+        alone = alone && rows.count == 1 && self.peek().before.isEmpty();
+        rows.close(self.lead());
+        self.plain = plain;
+        self.patterns = patterns;
+        self.assigned = false;
+        let close = self.take();
+
+        if alone {
+            return layout.concat([
+                open,
+                layout.indent(layout.concat([Doc.Line, value])),
+                Doc.Line,
+                close,
+            ]);
+        }
+
+        return rows.inside(open, close);
+    }
+}
+
+// --- Shapes ---
+
+// (first, second): on one line, or one item to a line with a comma after
+// each.
+fn list(open: Doc, items: [Doc], close: Doc) -> Doc {
+    if items.isEmpty() {
+        return layout.concat([open, close]);
+    }
+
+    return layout.group(
+        layout.concat([
+            open,
+            layout.indent(
+                layout.concat([Doc.Soft, layout.join(items, layout.concat([comma(), Doc.Line]))]),
+            ),
+            Doc.IfBroken(comma(), Doc.Nothing),
+            Doc.Soft,
+            close,
+        ]),
+    );
+}
+
+// { first, second }: the same, with room inside the braces.
+fn spaced(open: Doc, items: [Doc], close: Doc, tall: Bool) -> Doc {
+    if items.isEmpty() {
+        return layout.concat([open, close]);
+    }
+
+    let doc = layout.concat([
+        open,
+        layout.indent(
+            layout.concat([Doc.Line, layout.join(items, layout.concat([comma(), Doc.Line]))]),
+        ),
+        Doc.IfBroken(comma(), Doc.Nothing),
+        Doc.Line,
+        close,
+    ]);
+
+    if tall {
+        return layout.broken(doc);
+    }
+
+    return layout.group(doc);
+}
+
+// An operand and the operators that follow it, each with its operand:
+// on one line, or each operator starting a line. A last operand that
+// takes several lines by itself, a function with its body, stays on the
+// line of its operator.
+fn chained(first: Doc, operators: [Doc], operands: [Doc]) -> Doc {
+    if operands.isEmpty() {
+        return first;
+    }
+
+    let last = operands.len() - 1;
+    let hugs = layout.forces(operands[last]) && !layout.forces(first);
+    let parts: [Doc] = [];
+
+    for i, operand in operands {
+        hugs = hugs && (i == last || !layout.forces(operand));
+    }
+
+    for i, operand in operands {
+        if hugs {
+            parts.push(layout.concat([space(), operators[i], space(), operand]));
+        } else {
+            parts.push(layout.concat([Doc.Line, operators[i], space(), operand]));
+        }
+    }
+
+    if hugs {
+        return layout.concat([first, layout.concat(parts)]);
+    }
+
+    return layout.group(layout.concat([first, layout.indent(layout.concat(parts))]));
+}
+
+fn linked(links: [Link]) -> Doc {
+    return layout.concat(links.map(link -> link.doc));
+}

@@ -1,0 +1,613 @@
+// Doing several things at once, and waiting for them.
+//
+// A task is a function running on its own, while the rest of the program
+// goes on. `start` makes one and gives a handle to it; `wait` gives what
+// the function returned.
+//
+//     let first = task.start(fn() -> Result<Response, Error> { return http.get(urlA); });
+//     let second = task.start(fn() -> Result<Response, Error> { return http.get(urlB); });
+//     println(wait first, wait second);          // both asked at the same moment
+//
+// One task runs at a time. It keeps going until it has to wait: for
+// another task, for a channel, for the clock, for the network, for a line
+// of input, for another program. Then the others get their turn. Nothing
+// interrupts a task between two such moments, so two tasks can change the
+// same list or the same struct without stepping on each other, as long as
+// neither waits half way through a change.
+//
+// Tasks talk through channels: one sends values, another receives them,
+// each waiting for the other when it is ahead.
+//
+//     let lines = task.channel<String>(16);
+//     task.run(fn() {
+//         for name in files { wait lines.send(io.readFile(name).or("")); }
+//         lines.close();
+//     });
+//     lines.each(fn(text: String) { println(text.len()); });
+//
+// What can be waited for is a waitable: a task, a channel's next value,
+// room on a channel, the clock (time.after), every task of a list. A
+// waitable does nothing until `wait` waits for it, and `wait match` waits
+// for the first of several:
+//
+//     wait match {
+//         case let job = jobs.receive(): { handle(job); }
+//         case time.after(5.seconds()): { log.info("idle"); }
+//     }
+//
+// The program ends when main has returned and every task has ended. A task
+// that stops, by a panic or any other failure, does not stop the others:
+// whoever waits for it gets the failure. If nobody ever does, the failure
+// ends the program once the other tasks are done, rather than being lost.
+
+import std.result;
+import std.result.{Result, Failure};
+import std.arrays;
+
+// --- Waiting ---
+
+// What can be waited for. `wait value` gives what it gives, once it has
+// come; until then the task that waits lets the others go on.
+//
+// A type of the program can be waited for too, by implementing it, as
+// long as what it waits for is made of these: whether something has come,
+// how to be told when it may have, and when it comes by the clock alone.
+pub trait Waitable<T> {
+    // Whether it has come: take would give it now, without waiting.
+    fn ready() -> Bool;
+
+    // What take would give, without taking it. Called only once ready.
+    fn peek() -> T;
+
+    // Takes what has come. Called only once ready.
+    fn take() -> T;
+
+    // Asks that the task that asks be woken when it may have come. Being
+    // woken for nothing is fine: whoever waits looks again.
+    fn watch();
+
+    // When it comes by the clock alone, in milliseconds since 1970, as
+    // time.now gives them; -1 when the clock has nothing to do with it.
+    fn until() -> Int {
+        return -1;
+    }
+
+    // How many times it has given something, ever: a wait match looks
+    // first where this moves it, so that what is always ready does not
+    // keep the rest waiting.
+    fn given() -> Int {
+        return 0;
+    }
+}
+
+// Waits until what is waited for has come, and gives it: `wait value`
+// is this function, written as a word.
+pub fn waitFor<T>(waitable: Waitable<T>) -> T {
+    while !waitable.ready() {
+        waitable.watch();
+        sleepUntil(waitable.until());
+    }
+
+    return waitable.take();
+}
+
+// Waits to be woken, and no longer than until the moment given, in
+// milliseconds since 1970, if there is one.
+fn sleepUntil(until: Int) {
+    if until < 0 {
+        suspend();
+        return;
+    }
+
+    let left = until - clock();
+
+    if left > 0 {
+        suspendFor(left);
+    } else {
+        yield();
+    }
+}
+
+// One case of a `wait match`: what it waits for, seen without its type.
+pub struct Arm {
+    priv ready: fn() -> Bool;
+    priv watch: fn() -> Void;
+    priv until: fn() -> Int;
+    priv given: fn() -> Int;
+}
+
+// A case that takes whatever its waitable gives.
+pub fn arm<T>(waitable: Waitable<T>) -> Arm {
+    return Arm {
+        ready: () -> waitable.ready(),
+        watch: () -> waitable.watch(),
+        until: () -> waitable.until(),
+        given: () -> waitable.given(),
+    };
+}
+
+// A case that takes only what `accepts` says: `case jobs.receive() is
+// Stop:` waits for a value of the channel that is a Stop.
+pub fn armIf<T>(waitable: Waitable<T>, accepts: fn(T) -> Bool) -> Arm {
+    return Arm {
+        ready: () -> waitable.ready() && accepts(waitable.peek()),
+        watch: () -> waitable.watch(),
+        until: () -> waitable.until(),
+        given: () -> waitable.given(),
+    };
+}
+
+// The number of the case a `wait match` goes on with: the first that has
+// come. Several that have come at once take turns from one wait to the
+// next, so that one always ready does not keep the others waiting.
+pub fn first(arms: [Arm]) -> Int {
+    let count = arms.len();
+
+    if count == 0 {
+        panic("a wait match with no case would wait forever");
+    }
+
+    let turns = arms.fold(0, (sum, one) -> sum + one.given());
+
+    while true {
+        for i in 0..count {
+            let at = (turns + i) % count;
+
+            if arms[at].ready() {
+                return at;
+            }
+        }
+
+        let until = -1;
+
+        for one in arms {
+            one.watch();
+            let when = one.until();
+
+            if when >= 0 && (until < 0 || when < until) {
+                until = when;
+            }
+        }
+
+        sleepUntil(until);
+        turns = arms.fold(0, (sum, one) -> sum + one.given());
+    }
+}
+
+// What a waitable gives, for the compiler to check the cases of a `wait
+// match` against: it is never called.
+pub fn sample<T>(waitable: Waitable<T>) -> T {
+    return waitable.peek();
+}
+
+// --- Tasks ---
+
+// What a task leaves for whoever waits for it.
+struct Outcome<T> {
+    values: [T];        // what the function returned, once it has
+    failure: Failure?;  // or how it stopped, once somebody asked
+}
+
+// A function that is running, or has run, on its own.
+pub struct Task<T> {
+    priv id: Int;
+    priv outcome: Outcome<T>;
+}
+
+// Runs a function on its own and returns at once. The task starts when
+// the one that made it next has to wait.
+pub fn start<T>(work: fn() -> T) -> Task<T> {
+    let none: [T] = [];
+    let outcome = Outcome<T> { values: none, failure: null };
+
+    let id = spawn(fn() {
+        outcome.values.push(work());
+    });
+
+    return Task<T> { id: id, outcome: outcome };
+}
+
+// The same for a function run for what it does, not for a value. What
+// `wait` gives is then only whether it completed.
+pub fn run(action: fn() -> Void) -> Task<Bool> {
+    return start(fn() -> Bool {
+        action();
+        return true;
+    });
+}
+
+impl<T> Task<T> {
+    // Whether the function has returned or stopped.
+    pub fn isDone() -> Bool {
+        return !alive(self.id);
+    }
+}
+
+// `wait task` gives what its function returned, or the failure that
+// stopped it. A task can be waited for any number of times, by any
+// number of tasks.
+impl<T> Waitable<Result<T, Failure>> for Task<T> {
+    fn ready() -> Bool {
+        return !alive(self.id);
+    }
+
+    fn peek() -> Result<T, Failure> {
+        if self.outcome.values.len() > 0 {
+            return Ok(self.outcome.values[0]);
+        }
+
+        let known = self.outcome.failure;
+
+        if known != null {
+            return Err(known);
+        }
+
+        let failure = result.failureOf(fault(self.id));
+        self.outcome.failure = failure;
+        return Err(failure);
+    }
+
+    fn take() -> Result<T, Failure> {
+        return self.peek();
+    }
+
+    fn watch() {
+        watchTask(self.id);
+    }
+}
+
+// Every task of a list, waited for together. `wait task.all(tasks)` gives
+// what they returned, in the order of the tasks, or the failure of the
+// first of them that failed, once all have ended.
+pub fn all<T>(tasks: [Task<T>]) -> All<T> {
+    return All<T> { tasks: tasks };
+}
+
+pub struct All<T> {
+    priv tasks: [Task<T>];
+}
+
+impl<T> Waitable<Result<[T], Failure>> for All<T> {
+    fn ready() -> Bool {
+        return self.tasks.all(one -> one.isDone());
+    }
+
+    // Every failure is looked at, not only the first: one nobody looks
+    // at would end the program
+    fn peek() -> Result<[T], Failure> {
+        let values: [T] = [];
+        let first: Failure? = null;
+
+        for one in self.tasks {
+            match one.peek() {
+                case Ok(value): {
+                    values.push(value);
+                }
+
+                case Err(failure): {
+                    if first == null {
+                        first = failure;
+                    }
+                }
+            }
+        }
+
+        if first != null {
+            return Err(first);
+        }
+
+        return Ok(values);
+    }
+
+    fn take() -> Result<[T], Failure> {
+        return self.peek();
+    }
+
+    fn watch() {
+        for one in self.tasks {
+            if !one.isDone() {
+                one.watch();
+            }
+        }
+    }
+}
+
+// Every task of a list, waited for together: `wait task.settle(tasks)`
+// gives how each ended, in the order of the tasks, failures among them.
+pub fn settle<T>(tasks: [Task<T>]) -> Settle<T> {
+    return Settle<T> { tasks: tasks };
+}
+
+pub struct Settle<T> {
+    priv tasks: [Task<T>];
+}
+
+impl<T> Waitable<[Result<T, Failure>]> for Settle<T> {
+    fn ready() -> Bool {
+        return self.tasks.all(one -> one.isDone());
+    }
+
+    fn peek() -> [Result<T, Failure>] {
+        return self.tasks.map(one -> one.peek());
+    }
+
+    fn take() -> [Result<T, Failure>] {
+        return self.peek();
+    }
+
+    fn watch() {
+        for one in self.tasks {
+            if !one.isDone() {
+                one.watch();
+            }
+        }
+    }
+}
+
+// What a function makes of each item, all of them worked on at once:
+// one task per item. `wait` gives the results in the order of the items.
+//
+//     let pages = wait task.map(urls, url -> http.get(url));
+pub fn map<T, U>(items: [T], work: fn(T) -> U) -> All<U> {
+    let tasks: [Task<U>] = [];
+
+    for item in items {
+        tasks.push(each(item, work));
+    }
+
+    return all(tasks);
+}
+
+// A task for one item: a function of its own, so that each task keeps
+// its own item.
+fn each<T, U>(item: T, work: fn(T) -> U) -> Task<U> {
+    return start(fn() -> U {
+        return work(item);
+    });
+}
+
+// Lets the other tasks that can go on do so, then carries on. For a long
+// computation that should not keep everything else waiting.
+pub fn pause() {
+    yield();
+}
+
+// The number of the task that asks: 0 for main, then 1, 2, ... in the
+// order the tasks were started.
+pub fn current() -> Int {
+    return running();
+}
+
+// --- Channels ---
+
+// A way from some tasks to others: values go in at one end and come out
+// at the other in the same order.
+pub struct Channel<T> {
+    priv capacity: Int;
+    priv items: [T];        // sent and not received yet, from `head` on
+    priv head: Int;
+    priv sent: Int;         // how many values went in, ever
+    priv received: Int;     // how many came out
+    priv senders: [Int];    // tasks waiting for room, or for their value to be taken
+    priv receivers: [Int];  // tasks waiting for a value
+    priv closed: Bool;
+}
+
+// A channel that holds up to `capacity` values waiting to be received.
+// Sending to a full channel waits for room. With a capacity of 0 nothing
+// is held: a send waits until a task has received the value.
+pub fn channel<T>(capacity: Int) -> Channel<T> {
+    if capacity < 0 {
+        panic("a channel cannot hold ${capacity} values");
+    }
+
+    let none: [T] = [];
+
+    return Channel<T> {
+        capacity: capacity,
+        items: none,
+        head: 0,
+        sent: 0,
+        received: 0,
+        senders: [],
+        receivers: [],
+        closed: false,
+    };
+}
+
+impl<T> Channel<T> {
+    // Puts a value in: `wait channel.send(value)` waits while the channel
+    // is full. Sending to a closed channel stops the program: whoever
+    // closes says nothing more will come.
+    pub fn send(value: T) -> Send<T> {
+        return Send<T> { channel: self, value: value };
+    }
+
+    // Takes the next value out: `wait channel.receive()` waits for one if
+    // there is none. Null once the channel is closed and empty.
+    pub fn receive() -> Receive<T> {
+        return Receive<T> { channel: self };
+    }
+
+    // Puts a value in, waiting while the channel is full.
+    fn put(value: T) {
+        while self.capacity > 0 && self.len() >= self.capacity && !self.closed {
+            waitIn(self.senders);
+        }
+
+        if self.closed {
+            panic("send on a closed channel");
+        }
+
+        self.items.push(value);
+        self.sent++;
+        let mine = self.sent;
+        wake(self.receivers);
+        self.receivers = [];
+
+        if self.capacity == 0 {
+            while self.received < mine && !self.closed {
+                waitIn(self.senders);
+            }
+        }
+    }
+
+    // Calls a function with each value, until the channel is closed and
+    // empty.
+    pub fn each(action: fn(T) -> Void) {
+        while true {
+            let next = self.take();
+
+            if next.len() == 0 {
+                return;
+            }
+
+            action(next[0]);
+        }
+    }
+
+    // Every value until the channel is closed.
+    pub fn drain() -> [T] {
+        let all: [T] = [];
+
+        self.each(fn(value: T) {
+            all.push(value);
+        });
+
+        return all;
+    }
+
+    // Says nothing more will be sent. What was sent can still be
+    // received; after that `receive` gives null, and the tasks waiting to
+    // receive go on. Closing twice is the same as closing once.
+    pub fn close() {
+        self.closed = true;
+        wake(self.receivers);
+        self.receivers = [];
+        wake(self.senders);
+        self.senders = [];
+    }
+
+    pub fn isClosed() -> Bool {
+        return self.closed;
+    }
+
+    // How many values are waiting to be received.
+    pub fn len() -> Int {
+        return self.items.len() - self.head;
+    }
+
+    // The next value in an array of one, or an empty array once the
+    // channel is closed and empty: a value may itself be null.
+    fn take() -> [T] {
+        while self.len() == 0 {
+            if self.closed {
+                let none: [T] = [];
+                return none;
+            }
+
+            waitIn(self.receivers);
+        }
+
+        let value = self.items[self.head];
+        self.head++;
+
+        if self.head >= 32 && self.head * 2 >= self.items.len() {
+            self.items = self.items.drop(self.head);
+            self.head = 0;
+        }
+
+        self.received++;
+        wake(self.senders);
+        self.senders = [];
+        return [value];
+    }
+}
+
+// The next value of a channel, as something to wait for.
+pub struct Receive<T> {
+    priv channel: Channel<T>;
+}
+
+impl<T> Waitable<T?> for Receive<T> {
+    fn ready() -> Bool {
+        return self.channel.len() > 0 || self.channel.closed;
+    }
+
+    fn peek() -> T? {
+        if self.channel.len() > 0 {
+            return self.channel.items[self.channel.head];
+        }
+
+        return null;
+    }
+
+    fn take() -> T? {
+        return self.channel.take().first();
+    }
+
+    fn given() -> Int {
+        return self.channel.received;
+    }
+
+    // Once: a loop that waits again and again on a channel that stays
+    // quiet must not fill its list
+    fn watch() {
+        if !self.channel.receivers.contains(running()) {
+            self.channel.receivers.push(running());
+        }
+    }
+}
+
+// Room for a value on a channel, as something to wait for.
+pub struct Send<T> {
+    priv channel: Channel<T>;
+    priv value: T;
+}
+
+impl<T> Waitable<Void> for Send<T> {
+    // A channel that holds nothing takes the value at once, and the send
+    // then waits for it to be received
+    fn ready() -> Bool {
+        let channel = self.channel;
+        return channel.closed || channel.capacity == 0 || channel.len() < channel.capacity;
+    }
+
+    fn peek() {}
+
+    fn take() {
+        self.channel.put(self.value);
+    }
+
+    fn watch() {
+        if !self.channel.senders.contains(running()) {
+            self.channel.senders.push(running());
+        }
+    }
+}
+
+// Waits until a task wakes the ones listed. Whoever calls it checks, once
+// back, that what it waited for has come.
+fn waitIn(waiting: [Int]) {
+    waiting.push(running());
+    suspend();
+}
+
+// Lets the tasks listed go on, in the order they came to wait.
+fn wake(waiting: [Int]) {
+    for one in waiting {
+        resume(one);
+    }
+}
+
+// Provided by the runtime: tasks by number, and the turn passed around.
+extern fn spawn(action: Any) -> Int;
+extern fn running() -> Int;
+extern fn yield();
+extern fn suspend();
+extern fn suspendFor(milliseconds: Int) -> Bool;
+extern fn resume(task: Int);
+extern fn alive(task: Int) -> Bool;
+extern fn fault(task: Int) -> [String];
+extern fn watchTask(task: Int);
+extern fn clock() -> Int;

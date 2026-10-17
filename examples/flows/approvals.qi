@@ -1,0 +1,113 @@
+// Expenses waiting for a manager's word: the manager is asked, and while
+// nobody answers the expense goes one level up, three times at most.
+//
+// A manager answers through the expense's inbox:
+//
+//     qoqi serve examples/flows
+//     qoqi start Expense expense:1 '{"id": "1", "author": "lin", "amount": 1200, "patience": "1m"}'
+//     qoqi send expense:1 answers '{"approved": true, "why": ""}' --key mail-1
+//
+// patience is how long a manager has before the next one is asked: "1m"
+// to try it, 2.days() in earnest.
+
+import std.flow;
+import std.flow.{Flow, Inbox};
+import std.time;
+import std.time.{Duration};
+
+// What a manager says.
+pub struct Answer {
+    approved: Bool;
+    why: String;
+}
+
+pub struct Expense {
+    id: String;
+    author: String;
+    amount: Int;  // in cents
+    patience: Duration;
+    answers: Inbox<Answer> = flow.inbox<Answer>(1);
+}
+
+pub enum Decision {
+    Approved(String),
+    Refused(String, String),
+    Withdrawn(String),
+    Unanswered,
+}
+
+impl Flow<Decision> for Expense {
+    fn run() -> Decision {
+        let approver = managerOf(self.author);
+
+        for round in 0..3 {
+            // Where an instance may move to a new version of this code:
+            // what is alive here is all it is
+            stage asking;
+
+            ask(approver, self.id, self.amount, round);
+
+            // Withdrawn meanwhile, it ends saying so: it hears its own
+            // cancellation, rather than being stopped where it is
+            let answer = wait match {
+                case let a = self.answers.receive(): a;
+                case time.after(self.patience): null;
+
+                case let reason = flow.cancelled(): {
+                    tell(approver, "expense ${self.id} was withdrawn: ${reason}");
+                    return Decision.Withdrawn(reason);
+                }
+            };
+
+            if answer != null {
+                if answer.approved {
+                    tell(self.author, "your expense ${self.id} is approved by ${approver}");
+                    return Decision.Approved(approver);
+                }
+
+                tell(
+                    self.author,
+                    "your expense ${self.id} is refused by ${approver}: ${answer.why}",
+                );
+
+                return Decision.Refused(approver, answer.why);
+            }
+
+            approver = managerOf(approver);
+        }
+
+        tell(self.author, "nobody answered for your expense ${self.id}");
+        return Decision.Unanswered;
+    }
+}
+
+// Who someone reports to.
+pub step fn managerOf(name: String) -> String {
+    match name {
+        case "lin": {
+            return "grace";
+        }
+
+        case "grace": {
+            return "ada";
+        }
+
+        case "ada": {
+            return "the board";
+        }
+    }
+
+    return "the board";
+}
+
+pub step fn ask(approver: String, id: String, amount: Int, round: Int) {
+    println("[mail] to ${approver}: expense ${id} of ${amount} cents waits for your word (round ${round + 1})");
+}
+
+pub step fn tell(person: String, text: String) {
+    println("[mail] to ${person}: ${text}");
+}
+
+fn main() {
+    println("The flows of this program are served by: qoqi serve examples/flows");
+}

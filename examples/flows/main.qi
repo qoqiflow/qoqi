@@ -1,0 +1,33 @@
+// A tour of the shop: each order run in a trial, on a store in memory
+// and a clock of its own, from start to end in a moment.
+//
+//     qoqi run examples/flows
+//
+// To serve the flows for real, with a daemon and its pages, see README.md.
+
+import std.flow;
+import std.time;
+import shop.{Order, Cart};
+
+fn tour(title: String, cart: Cart) {
+    println("== ${title}");
+
+    let trial = flow.test(Order { cart: cart });
+    trial.go();
+    trial.advance(2.seconds());
+    trial.advance(3.seconds());
+
+    println("-> ${trial.status()}: ${trial.result()}");
+    println("");
+}
+
+fn cart(id: String, amount: Int, city: String) -> Cart {
+    return Cart { id: id, customer: "ada@example.com", amount: amount, city: city };
+}
+
+fn main() {
+    tour("paid and shipped", cart("1", 4200, "Lyon"));
+    tour("the card is refused", cart("2", 900000, "Lyon"));
+    tour("paid, but no van goes there", cart("3", 4200, "Atlantis"));
+    tour("the bank is busy the first time", cart("17", 4200, "Oslo"));
+}

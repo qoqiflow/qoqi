@@ -1,0 +1,58 @@
+// Constants: values with a name, worked out when the program is compiled.
+
+import std.math;
+
+const COLUMNS = 8;
+const ROWS = COLUMNS / 2;
+const CELLS = COLUMNS * ROWS;
+const TITLE = "board " + "of " + "cells";
+const RULE = "-";
+const DIAGONAL: Float = 1.4142135623730951;
+const TAU = math.pi * 2.0;
+const WIDE = COLUMNS > ROWS && CELLS == 32;
+const LAST = CELLS - 1;
+const BELOW_ZERO = -COLUMNS;
+
+fn cell(index: Int) -> String {
+    if index % (COLUMNS + 1) == 0 {
+        return "\\";
+    }
+
+    if index == LAST {
+        return "!";
+    }
+
+    return ".";
+}
+
+fn row(y: Int) -> String {
+    let line = "";
+    let x = 0;
+
+    while x < COLUMNS {
+        line += cell(y * COLUMNS + x);
+        x++;
+    }
+
+    return line;
+}
+
+fn main() -> Int {
+    println(TITLE, COLUMNS, ROWS, CELLS, WIDE, BELOW_ZERO);
+    println(RULE.repeat(COLUMNS));
+    let y = 0;
+
+    while y < ROWS {
+        println(row(y));
+        y++;
+    }
+
+    println(RULE.repeat(COLUMNS));
+    println((DIAGONAL * 1000.0).round(), (TAU * 1000.0).round(), (math.e * 1000.0).round());
+
+    // A local of the same name takes over from where it is declared
+    let before = COLUMNS;
+    let COLUMNS = "none";
+    println(before, COLUMNS, ROWS);
+    return CELLS;
+}

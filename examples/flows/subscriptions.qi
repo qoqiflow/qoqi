@@ -1,0 +1,281 @@
+// A free trial of a service, then a subscription billed each month: the
+// life of a customer over weeks, written as the program it is.
+//
+//     qoqi serve examples/flows
+//     qoqi start Signup signup:ada '{"email": "ada@example.com", "plan": "Team", "day": "3s"}'
+//     qoqi send signup:ada events '"Activated"' --key evt-1
+//     qoqi send signup:ada events '{"AddedCard": "visa-4242"}' --key evt-2
+//
+// day is how long a day lasts: 1.days() in earnest, "1d" from the command
+// line; three seconds, "3s", to watch a month go by in a minute and a half.
+//
+// The bank knows three cards: visa-4242 always pays, visa-0002 never
+// does, and visa-0341 pays the first month only.
+
+import std.flow;
+import std.flow.{Flow, Inbox};
+import std.time;
+import std.time.{Duration};
+
+// How long the trial lasts, in days.
+const TRIAL = 14;
+
+// How many days a month lasts here.
+const MONTH = 30;
+
+// How many times a declined card is tried again, a day apart.
+const RETRIES = 3;
+
+pub enum Plan {
+    Solo,
+    Team,
+}
+
+// What the customer does during the trial, as the application sees it.
+pub enum Event {
+    Activated,
+    UsedFeature(String),
+    AddedCard(String),
+    Left(String),
+}
+
+pub enum Outcome {
+    Subscribed(String),  // the name of the subscription's instance
+    Expired,
+    Left(String),
+}
+
+pub struct Signup {
+    email: String;
+    plan: Plan;
+    day: Duration;
+    events: Inbox<Event> = flow.inbox<Event>(16);
+}
+
+impl Flow<Outcome> for Signup {
+    fn run() -> Outcome {
+        welcome(self.email, self.plan);
+
+        let started = time.now();
+        let activated = false;
+        let card: String? = null;
+        let used: [String] = [];
+
+        // Three days in, a customer who has not begun is nudged; three days
+        // before the end, one who has given no card is reminded
+        for checkpoint in [3, TRIAL - 3, TRIAL] {
+            let until = self.day.times(checkpoint).after(started);
+
+            while time.now() < until {
+                stage trying;
+
+                let event = wait match {
+                    case let e = self.events.receive(): e;
+                    case time.until(until): null;
+                    case let reason = flow.cancelled(): Event.Left(reason);
+                };
+
+                if event != null {
+                    match event {
+                        case Activated: {
+                            activated = true;
+                        }
+
+                        case UsedFeature(name): {
+                            if !used.contains(name) {
+                                used.push(name);
+                            }
+                        }
+
+                        case AddedCard(number): {
+                            card = number;
+                            thank(self.email, number);
+                        }
+
+                        case Left(reason): {
+                            goodbye(self.email, reason);
+                            return Outcome.Left(reason);
+                        }
+                    }
+                }
+            }
+
+            if checkpoint == 3 && !activated {
+                nudge(self.email);
+            }
+
+            if checkpoint == TRIAL - 3 && card == null {
+                remind(self.email, used);
+            }
+        }
+
+        if card == null {
+            expire(self.email);
+            return Outcome.Expired;
+        }
+
+        // The subscription lives on after the trial: no one's child
+        let name = "subscription:${self.email}";
+
+        flow.detach(name, Subscription {
+            email: self.email,
+            plan: self.plan,
+            card: card,
+            day: self.day,
+            changes: flow.inbox<Change>(8),
+        });
+
+        return Outcome.Subscribed(name);
+    }
+}
+
+// What the customer changes once subscribed.
+pub enum Change {
+    SwitchTo(Plan),
+    Cancel(String),
+}
+
+pub enum Ended {
+    Cancelled(String, Int),  // why, and how many months were paid
+    Lapsed(Int),             // the card was declined too often
+}
+
+pub struct Subscription {
+    email: String;
+    plan: Plan;
+    card: String;
+    day: Duration;
+    changes: Inbox<Change> = flow.inbox<Change>(8);
+}
+
+impl Flow<Ended> for Subscription {
+    fn run() -> Ended {
+        let plan = self.plan;
+        let paid = 0;
+
+        while true {
+            stage billing;
+
+            if !collect(self.email, self.card, plan, paid + 1, self.day) {
+                suspend(self.email, paid);
+                return Ended.Lapsed(paid);
+            }
+
+            paid++;
+
+            let renewal = self.day.times(MONTH).fromNow();
+
+            while time.now() < renewal {
+                stage subscribed;
+
+                let change = wait match {
+                    case let c = self.changes.receive(): c;
+                    case time.until(renewal): null;
+                    case let reason = flow.cancelled(): Change.Cancel(reason);
+                };
+
+                if change != null {
+                    match change {
+                        case SwitchTo(next): {
+                            plan = next;
+                            confirm(self.email, next);
+                        }
+
+                        case Cancel(reason): {
+                            goodbye(self.email, reason);
+                            return Ended.Cancelled(reason, paid);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Charges a month, trying a declined card again a day later, and again:
+// whether it was paid in the end.
+fn collect(email: String, card: String, plan: Plan, month: Int, day: Duration) -> Bool {
+    for attempt in 0..RETRIES + 1 {
+        match charge(email, card, priceOf(plan), month) {
+            case Ok(_): {
+                return true;
+            }
+
+            case Err(why): {
+                if attempt < RETRIES {
+                    declined(email, why, attempt + 1);
+                    wait time.after(day);
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+// What a month of a plan costs, in cents.
+fn priceOf(plan: Plan) -> Int {
+    match plan {
+        case Solo: {
+            return 900;
+        }
+
+        case Team: {
+            return 4900;
+        }
+    }
+}
+
+// The bank. The key of the step is the payment's: asked twice, it charges
+// once.
+pub step fn charge(email: String, card: String, amount: Int, month: Int) -> Result<String, String> {
+    if card == "visa-0002" || (card == "visa-0341" && month > 1) {
+        println("[bank] ${card} declines ${amount} cents for ${email}, month ${month}");
+        return Err("insufficient funds");
+    }
+
+    println("[bank] ${card} pays ${amount} cents for ${email}, month ${month}");
+    return Ok("receipt ${month} of ${email}");
+}
+
+pub step fn welcome(email: String, plan: Plan) {
+    println("[mail] to ${email}: welcome to your ${TRIAL} days of ${plan}");
+}
+
+pub step fn nudge(email: String) {
+    println("[mail] to ${email}: three days in, and nothing set up yet: may we help?");
+}
+
+pub step fn remind(email: String, used: [String]) {
+    let tried = if used.isEmpty() { "nothing yet" } else { used.join(", ") };
+    println("[mail] to ${email}: three days left, and no card; you tried ${tried}");
+}
+
+pub step fn thank(email: String, card: String) {
+    println("[mail] to ${email}: ${card} is kept for when the trial ends");
+}
+
+pub step fn expire(email: String) {
+    println("[mail] to ${email}: your trial has ended");
+}
+
+pub step fn declined(email: String, why: String, attempt: Int) {
+    println("[mail] to ${email}: your card was declined (${why}); tried again tomorrow, ${attempt} of ${RETRIES}");
+}
+
+pub step fn suspend(email: String, paid: Int) {
+    let months = if paid == 1 { "a month" } else { "${paid} months" };
+    println("[mail] to ${email}: your subscription is suspended after ${months}");
+}
+
+pub step fn confirm(email: String, plan: Plan) {
+    println("[mail] to ${email}: you are on ${plan} from the next month");
+}
+
+pub step fn goodbye(email: String, reason: String) {
+    println("[mail] to ${email}: sorry to see you go (${reason})");
+}
+
+fn main() {
+    println("The flows of this program are served by: qoqi serve examples/flows");
+}

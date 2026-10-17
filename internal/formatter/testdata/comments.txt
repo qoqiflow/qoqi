@@ -1,0 +1,49 @@
+import std.arrays; // after import
+fn a(/* no params */) { // after brace
+    if x { y(); } // after if
+    // before else
+    else { z(); }
+    let v = [ // first
+        1, // one
+        2, // two
+    ];
+    call(a, // why a
+        b /* inline b */, c);
+    let f = fn(x: Int, // the x
+               y: Int) -> Int { return x + y; };
+    return /* nothing */;
+}
+fn b() -> Int {
+    let r = match x { // the cases
+        // leading case comment
+        case 1: 2, // two
+        default: { return 3; } // three
+    };
+    while true /* forever */ { break; }
+    for i /* idx */, v in xs { }
+    let s = Point { // open
+        x: 1, // the x
+        // about y
+        y: 2,
+    };
+    let t = a.b(fn() { c(); }).d(e -> { f(); }).g();
+    let u = cond && other // why
+        || third;
+    x = y /* mid */ + z;
+    return r; /* tail
+      block */
+}
+struct S { // fields
+    a: Int, // first
+    /* second */ b: Int
+    // dangling
+}
+enum E { A, /* b */ B, // trailing b
+  C }
+impl S { // methods
+    // one
+    pub fn one() {} // after one
+    // dangling in impl
+}
+trait T { fn x(); /* after x */ }
+// end

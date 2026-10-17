@@ -1,0 +1,7 @@
+[ERROR] E2034: '!' is for a Result or a value that may be null, and a value of type Int is always there
+optionals_errors.qi:6:18
+[ERROR] E2017: cannot call 'upper' on String?: the value may be null
+optionals_errors.qi:7:17
+value?.upper(...)
+value!.upper(...)
+[ERROR] E2017: cannot call 'frobnicate' on Int?: the value may be null

@@ -1,0 +1,50 @@
+// Each of these uses a name of `value is Pattern` where it does not exist,
+// or gives one where nothing could use it.
+
+enum Shape { Circle(Float), Rect(Float, Float), Empty }
+
+fn inElse(shape: Shape) -> Float {
+    if shape is Shape.Circle(r) {
+        return r;
+    } else {
+        return r;
+    }
+}
+
+fn afterIf(shape: Shape) -> Float {
+    if shape is Shape.Circle(radius) {}
+    return radius;
+}
+
+fn underNot(shape: Shape) -> Float {
+    if !(shape is Shape.Circle(r)) {
+        println("not round");
+    }
+
+    return 1.0;
+}
+
+fn eitherSide(shape: Shape) -> Bool {
+    if shape is Shape.Empty || shape is Shape.Rect(width, _) {
+        return true;
+    }
+
+    return false;
+}
+
+fn asValue(shape: Shape) -> Bool {
+    let round = shape is Shape.Circle(r);
+    return round && shape is Shape.Rect(w, h);
+}
+
+fn twice(shape: Shape) -> Bool {
+    if shape is Shape.Rect(side, side) {
+        return true;
+    }
+
+    return false;
+}
+
+fn main() -> Int {
+    return 0;
+}

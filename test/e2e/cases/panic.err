@@ -1,0 +1,5 @@
+[ERROR] R0001: the queue is empty after 2 items
+--> test/e2e/cases/panic.qi:14:13 in function 'Queue.take'
+14 |             panic("the queue is empty after", self.taken, "items");
+called from test/e2e/cases/panic.qi:27:19 in function 'drain'
+called from test/e2e/cases/panic.qi:38:13 in function 'main'

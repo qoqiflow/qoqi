@@ -1,0 +1,76 @@
+// A static function of an impl is a function of the type, which has no
+// self: Money.zero(), Money.parse("12.50"), Pair.twice("x").
+
+struct Money {
+    cents: Int;
+}
+
+impl Money {
+    static fn zero() -> Money {
+        return Money { cents: 0 };
+    }
+
+    // "12.50" is 1250 cents; a text that is no amount is none
+    static fn parse(text: String) -> Money? {
+        let parts = text.split(".");
+        let whole = parts[0].parseInt();
+
+        if whole == null {
+            return null;
+        }
+
+        let cents = parts.len() > 1 ? parts[1].padRight(2, "0")[..2].parseInt() ?? 0 : 0;
+        return Money { cents: whole * 100 + cents };
+    }
+
+    fn plus(other: Money) -> Money {
+        return Money { cents: self.cents + other.cents };
+    }
+
+    fn shown() -> String {
+        return "${self.cents / 100}.${toString(self.cents % 100).padLeft(2, "0")}";
+    }
+}
+
+struct Pair<T> {
+    first: T;
+    second: T;
+}
+
+impl<T> Pair<T> {
+    // Both the same
+    static fn twice(value: T) -> Pair<T> {
+        return Pair { first: value, second: value };
+    }
+
+    fn swapped() -> Pair<T> {
+        return Pair { first: self.second, second: self.first };
+    }
+}
+
+enum Level {
+    Low,
+    High,
+}
+
+impl Level {
+    static fn all() -> [Level] {
+        return [Low, High];
+    }
+
+    static fn from(n: Int, threshold: Int = 10) -> Level {
+        return n < threshold ? Low : High;
+    }
+}
+
+fn main() -> Int {
+    let prices = ["12.50", "3", "0.7", "oops"].map(Money.parse);
+    println(prices.map(p -> p?.shown()));
+
+    let total = prices.fold(Money.zero(), (sum, price) -> price == null ? sum : sum.plus(price));
+    println(total.shown());
+
+    println(Pair.twice("x"), Pair.twice(1).swapped(), Pair { first: 1, second: 2 }.swapped());
+    println(Level.all(), [3, 12, 40].map(n -> Level.from(n)), Level.from(12, 50));
+    return 0;
+}

@@ -1,0 +1,13 @@
+// What the compiler says about parameters with values of their own.
+
+const LIMIT = 10;
+
+fn clip(value: Int, low: Int = 0, high: Int = "ten") -> Int {
+    return value < low ? low : value > high ? high : value;
+}
+
+fn main() -> Int {
+    println(clip());
+    println(clip(1, 2, 3, 4));
+    return 0;
+}

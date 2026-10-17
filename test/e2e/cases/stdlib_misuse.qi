@@ -1,0 +1,14 @@
+// The standard library is type checked like the program's own code.
+
+import std.math;
+import std.strings;
+import std.dict;
+
+fn main() -> Int {
+    let root = "16".sqrt();
+    let at: Int = "banana".indexOf("na");
+    let ages = dict.empty<Int>();
+    ages.set("ada", "thirty-six");
+    let next = ages.get("ada") + 1;
+    return 0;
+}

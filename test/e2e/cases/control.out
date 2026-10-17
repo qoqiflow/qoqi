@@ -1,0 +1,20 @@
+#1 on the small van 0
+#2 on the small van 6000
+#3 refused (parcel 3 weighs nothing) 0
+#4 on van 2 120000
+#5 on van 3 384000
+#6 refused (parcel 6 is too heavy) 768000
+#7 on van 3 80000
+takings: 12240 dock busy: false
+  parcel 1: dock released
+  parcel 2: dock released
+  parcel 3: dock released
+  parcel 4: dock released
+  parcel 5: dock released
+  parcel 6: dock released
+  parcel 7: dock released
+failed: there is no van 9 - dock busy: false ["parcel 8: dock released"]
+day 1: van 1 (2), van 2 (1), van 3 (2)
+day 2: van 1 (2), van 2 (1)
+day 3: van 1 (2), van 2 (1), van 3 (2)
+day 4: van 1 (2), van 2 (1)

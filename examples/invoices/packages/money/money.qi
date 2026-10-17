@@ -1,0 +1,90 @@
+// Amounts of money, kept as a whole number of cents, so that adding a
+// thousand of them never loses one to rounding.
+//
+//     let price = money.parse("15.90", "EUR")?;
+//     let line = price.times(12);              // EUR 190.80
+//     let tax = line.share(20, 100);          // EUR 38.16
+//     println(line + tax);                    // EUR 228.96
+
+pub struct Money {
+    cents: Int;
+    currency: String;
+}
+
+// No money, in a currency.
+pub fn zero(currency: String) -> Money {
+    return Money { cents: 0, currency: currency };
+}
+
+// An amount written for people: "12", "12.5", "1234.56". More than two
+// figures after the point is an error, not a rounding.
+pub fn parse(text: String, currency: String) -> Result<Money, String> {
+    let clean = text.trim();
+    let (units, fraction) = clean.cut(".") ?? (clean, "");
+
+    if fraction.len() > 2 {
+        return Err("\"${text}\" has more than two figures after the point");
+    }
+
+    let whole = units.parseInt();
+    let part = (fraction + "00").first(2).parseInt();
+
+    if whole == null
+        || part == null
+        || !units.isDigits()
+        || (fraction != "" && !fraction.isDigits())
+    {
+        return Err("\"${text}\" is not an amount");
+    }
+
+    return Ok(Money { cents: whole * 100 + part, currency: currency });
+}
+
+impl Money {
+    pub fn times(count: Int) -> Money {
+        return Money { cents: self.cents * count, currency: self.currency };
+    }
+
+    // A part of the amount: share(20, 100) is 20%, share(55, 1000) is
+    // 5.5%. Half a cent is rounded up.
+    pub fn share(part: Int, whole: Int) -> Money {
+        return Money {
+            cents: (self.cents * part * 2 + whole) / (whole * 2),
+            currency: self.currency,
+        };
+    }
+
+    pub fn isZero() -> Bool {
+        return self.cents == 0;
+    }
+}
+
+impl Add for Money {
+    fn plus(other: Money) -> Money {
+        if other.currency != self.currency {
+            panic("cannot add ${other.currency} to ${self.currency}");
+        }
+
+        return Money { cents: self.cents + other.cents, currency: self.currency };
+    }
+}
+
+impl Ordered for Money {
+    fn compare(other: Money) -> Int {
+        return self.cents - other.cents;
+    }
+}
+
+impl Equal for Money {
+    fn equals(other: Money) -> Bool {
+        return self.cents == other.cents && self.currency == other.currency;
+    }
+}
+
+impl Show for Money {
+    fn show() -> String {
+        let sign = if self.cents < 0 { "-" } else { "" };
+        let cents = self.cents.abs();
+        return "${self.currency} ${sign}${format.grouped(cents / 100)}.${format.padded(cents % 100, 2)}";
+    }
+}

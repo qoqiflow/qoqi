@@ -1,0 +1,16 @@
+// A static function is the type's: there is no value for self to be.
+
+struct Money {
+    cents: Int;
+}
+
+impl Money {
+    static fn doubled() -> Money {
+        return Money { cents: self.cents * 2 };
+    }
+}
+
+fn main() -> Int {
+    println(Money.doubled());
+    return 0;
+}

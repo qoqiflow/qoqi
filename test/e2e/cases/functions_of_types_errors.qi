@@ -1,0 +1,18 @@
+// What the compiler says about the functions of a type used wrongly.
+
+struct Money {
+    cents: Int;
+}
+
+impl Money {
+    static fn zero() -> Money {
+        return Money { cents: 0 };
+    }
+}
+
+fn main() -> Int {
+    let wallet = Money.zero();
+    println(wallet.zero());
+    println(Money.one());
+    return 0;
+}

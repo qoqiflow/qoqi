@@ -1,0 +1,5 @@
+[ERROR] R0003: cannot cast array to [Int]: element 2: String is not an Int
+cast_error.qi:9:21 in function 'sum'
+for n in values as [Int] {
+Suggestion: Ask what the value is before casting it: 'if value is Type { ... }', or a match on its type
+called from test/e2e/cases/cast_error.qi:24:13 in function 'main'

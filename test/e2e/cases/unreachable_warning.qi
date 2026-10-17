@@ -1,0 +1,16 @@
+// Unreachable code is reported as a warning: the program still runs.
+fn sign(n: Int) -> Int {
+    if n < 0 {
+        return -1;
+    } else {
+        return 1;
+    }
+
+    println("never printed");
+}
+
+fn main() -> Int {
+    println(sign(5), sign(-5));
+    return 0;
+    println("never printed either");
+}

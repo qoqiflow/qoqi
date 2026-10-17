@@ -1,0 +1,63 @@
+// '?' on what the methods of a generic enum give: mapErr, then and map
+// of Result have type parameters of their own, and what they give is
+// unwrapped, never taken for a value that may be null.
+
+enum Fetch<T> {
+    Got(T),
+    Missing,
+}
+
+impl<T> Fetch<T> {
+    fn orFail<E>(reason: E) -> Result<T, E> {
+        return match self {
+            case Fetch.Got(value): Ok(value);
+            case Fetch.Missing: Err(reason);
+        };
+    }
+}
+
+struct Page {
+    body: String;
+}
+
+impl Page {
+    fn words() -> Result<Int, String> {
+        if self.body == "" {
+            return Err("an empty page");
+        }
+
+        return Ok(self.body.split(" ").len());
+    }
+}
+
+fn download(address: String) -> Result<Page, Int> {
+    if address.startsWith("http") {
+        return Ok(Page { body: "three short words" });
+    }
+
+    return Err(404);
+}
+
+fn count(address: String) -> Result<Int, String> {
+    let page = download(address).mapErr(code -> "status ${code}")?;
+    let words = page.words()?;
+    let doubled = page.words().map(n -> n * words)?;
+    return Ok(doubled + 1);
+}
+
+fn cached(found: Fetch<Page>) -> Result<Int, String> {
+    let page = found.orFail("not in the cache")?;
+    return Ok(page.words()? * 10);
+}
+
+fn main() -> Int {
+    println(count("https://example.com"), count("ftp://x"));
+
+    println(
+        cached(Fetch.Got(Page { body: "a b" })),
+        cached(Fetch.Missing),
+        cached(Fetch.Got(Page { body: "" })),
+    );
+
+    return 0;
+}

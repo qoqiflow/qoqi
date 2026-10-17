@@ -1,0 +1,10 @@
+// Type errors are reported with their location; nothing is executed.
+fn double(n: Int) -> Int {
+    return n * 2;
+}
+
+fn main() -> Int {
+    println("never printed");
+    let label: String = double(4);
+    return double("four");
+}

@@ -1,0 +1,12 @@
+["left 2"]
+["failed: cannot add a and 1"]
+["failed: nothing to print"] ["failed: two values are needed"]
+["done"] 6
+7 2 1 true true
+pushes left 
+pushes skipped
+pushes done
+[1, 2] (1, (x, (2, nothing)))
+1 2
+null is no number
+5 5

@@ -1,0 +1,125 @@
+# Qoqi Flow
+
+> Qoqi Flow runs durable workflows written as plain programs. A flow is a
+> struct that implements `Flow<T>`; while it waits (days, if need be) its
+> state is frozen in a store, and it is taken up where it was after a crash,
+> a restart or a new version of its code. It reaches the world only through
+> `step fn`, and a finished step is never run twice. The language is Qoqi,
+> statically typed, with a standard library built into one binary, `qoqi`.
+> This file is a compact reference for writing it correctly; the full
+> documents are in docs/ (docs/getting-started/quickstart.md first).
+
+## Commands
+
+- `qoqi serve program.qi` runs the flows of a program and keeps them in `flows.db` (or `--store postgres://...`, `mysql://...`). `qoqi start Flow name '{"field": value}'` starts an instance; `qoqi ls`, `qoqi show name`, `qoqi result name [--wait 30s]`, `qoqi send name inbox '{...}' --key k`, `qoqi cancel name`, `qoqi resume name --go`, `qoqi answer name key '{...}'`, `qoqi end name`; `qoqi deploy program.qi` sends a new version; `qoqi versions`, `qoqi diff 12`; `qoqi ui` opens the console.
+- `qoqi gen go|php|ts program.qi` writes what an application needs to carry out the steps of its queues.
+- `qoqi run file.qi` runs a program; `qoqi check --json file.qi` compiles without running and prints `{"ok", "files", "diagnostics": [{"severity", "code", "message", "file", "line", "column", "suggestion"}]}`. Use it after writing code: every message has a code and usually a suggestion that says the fix.
+- `qoqi test` runs `fn testSomething()` in files `*_test.qi`; `qoqi fmt` formats in place; `qoqi pkg require vendor/name` adds a package.
+- A project is a `qoqi.json`: `{"entry": "main.qi", "queues": {"payments": {"url": "env:PAYMENTS_URL", "secret": "env:SHOP_SECRET"}}}`.
+
+## Flows
+
+```qoqi
+import std.flow;
+import std.flow.{Flow, Inbox, Settled};
+import std.time;
+
+struct Expense {
+    id: String;
+    author: String;
+    answers: Inbox<Answer> = flow.inbox<Answer>(1);   // a message from outside comes here
+}
+
+impl Flow<Decision> for Expense {
+    fn run() -> Decision {
+        let approver = managerOf(self.author);
+
+        for _ in 0..3 {
+            stage asking;                              // where an instance may move to new code
+
+            ask(approver, self.id);
+
+            let answer = wait match {                  // the first of several
+                case let a = self.answers.receive(): a;
+                case time.after(2.days()): null;
+                case let reason = flow.cancelled(): { return Decision.Withdrawn(reason); }
+            };
+
+            if answer != null {
+                if answer.approved { return Decision.Approved(approver); }
+                return Decision.Refused(answer.why);
+            }
+
+            approver = managerOf(approver);
+        }
+
+        return Decision.Unanswered;
+    }
+}
+
+step fn managerOf(name: String) -> String { ... }       // kept once run, never run again
+step fn ask(approver: String, id: String) { ... }
+
+// A step carried out by an application, on a queue of qoqi.json; it may take 30 s, and refund undoes it
+step fn charge(customer: String, cents: Int) -> Result<String, Decline> within 30.seconds() by payments undo refund;
+step fn refund(charge: String) -> Result<Void, Decline> by payments;
+
+// A step that is never run twice, even half run: the flow gets Unknown and says what it means
+step fn wire(to: String, amount: Int) -> Settled<Result<Wire, Refusal>> within 2.hours() { ... }
+```
+
+- The one rule: inside a flow, and in every function it calls, nothing reaches outside the program (a file, the network, a database, another program) except through a `step fn`. The compiler refuses it: `F0001`, with the path of calls. The clock (`time.now()`) and random numbers need no step.
+- `wait` waits for a task, a channel, `time.after(d)`; `wait match { case ... }` for the first of several. A function with a `wait` in it is called like any other: there is no `async`.
+- `flow.start("name", Instance { ... })` starts a child flow; `flow.undo(step, argument)` registers what to run if the flow fails or is cancelled; `flow.key()` is the step's key, an idempotency key for the world; `flow.store()` is the daemon's transaction, inside a step; `flow.retry(after)` asks for the step to be run again later.
+- `stage name;` marks where a running instance may move to a new version. `flow.lock` next to the program records the shape of each stage; a version that changes one needs `migrate fn name(old fields...) -> Name { ... }` in the flow's `impl`, or the daemon refuses it while an instance is there.
+- Durations: `3.days()`, `2.hours()`, `30.seconds()`, `90.minutes()`.
+- Tests (`*_test.qi`, `import std.test;`): `let trial = flow.test(Expense { ... }); trial.go(); trial.advance(2.days()); trial.send("answers", Answer { ... }); trial.replace(ask, fn(approver: String, id: String) { ... }); test.equal("${trial.result()}", "Approved(\"grace\")"); trial.status()` is `"waiting"`, `"done"`, ...; `flow.test(x).everyCrash(fn(trial: flow.Trial<T>) { ... })` runs the scenario again with the process stopped after each write and requires the same ending.
+- Fields of a flow are what `qoqi start` is given as JSON; an `Inbox` field with a default needs nothing. What a step is given and returns must be data: numbers, texts, structs, enums, arrays, dictionaries, `Result`, no tasks or connections (`F0004`).
+
+## Syntax, the parts that differ from TypeScript and Rust
+
+- A program has `fn main() -> Int { ...; return 0; }`; the Int is the exit status. A program of flows may have an empty `fn main() {}`. Statements end with `;`.
+- `let x = 1;` declares (types are inferred); `let xs: [String] = [];` states one. Reassignment needs no keyword. `i++;` is a statement only.
+- Types: `Int` (48 bits; overflow stops the program), `Float`, `String`, `Bool`, `Void`, `Any`, `[T]`, `T?` (may be null), `(A, B)`, `fn(A) -> B`, `Dict<V>`, `Result<T, E>`.
+- Struct fields end with `;`: `struct Point { x: Int; y: Int; }`. Literal: `Point { x: 1, y: 2 }`. A field with a default may be left out of a literal. Methods: `impl Point { fn moved(dx: Int) -> Point { return Point { x: self.x + dx, y: self.y }; } }`; `self` is implicit. Structs are references.
+- Enums hold values by position: `enum Shape { Circle(Float), Rect(Float, Float), Empty }`; a value is always written with its enum: `Shape.Circle(1.0)`.
+- `match x { case 0: { ... } case 1 | 2: { ... } case 3..10: { ... } default: { ... } }`. Each case is `case pattern: { block }`, or `case pattern: expression;` where the match gives a value. A match on an enum must cover every variant or have `default`. `case Shape.Rect(w, h) if w == h:` adds a condition. There is no `=>`.
+- `if value is Shape.Circle(r) { ... }` tests one variant and names what it holds.
+- A value from a condition: `let label = ok ? "yes" : "no";`, or `if ok { "yes" } else { "no" }`. A block's last expression without `;` is its value.
+- Loops: `for item in items`, `for i, item in items`, `for i in 0..10` (10 left out), `0..=10`, `while cond`. Loop variables are read-only; write `items[i] = ...`.
+- Functions: `fn add(a: Int, b: Int) -> Int { return a + b; }`, generic `fn first<T>(items: [T]) -> T?`, bounded `<T: Ordered>` after `import std.ops.{Ordered};`. `return` is required in a function with a block body.
+- Lambdas: `xs.map(x -> x * 2)`, `(a, b) -> a + b`, `() -> run()`, `x -> { ...; }`; the long form `fn(x: Int) -> Int { return x * 2; }` is needed where nothing says the types.
+- `value |> f(a)` is `f(value, a)`.
+- Text: `"total ${n} items"`, `"""` for several lines. A character is a String of length 1.
+- Null: `x ?? fallback`, `user?.name`, `if x != null { /* x is not null here */ }`. There is no `x!`.
+- Constants: `const LIMIT = 100;` at the top level only. There are no global variables.
+- Modules: a file is a module. `import std.json;` then `json.parse(...)`; `import util.text.{shout};`. Only `pub` names are visible from another file.
+- Comments: `//` and `/* */`.
+
+## Methods of the builtin types (no import)
+
+Every array: `len push pop at first last isEmpty contains indexOf find findIndex any all count map filter fold each flatMap sorted sortedBy maxBy minBy reversed take drop slice concat chunks zip groupBy countBy uniqueBy partition sumOf copy without inserted insertAt removeAt swap clear`. `[Int]` and `[Float]` also: `sum smallest largest sortedNumbers join unique`. `[String]` also: `join unique sortedTexts`. Texts: `len trim trimStart trimEnd lower upper capitalize split lines words chars contains startsWith endsWith indexOf lastIndexOf substring first last replace repeat padLeft padRight reverse cut count isEmpty isBlank isDigits isLetters isAlphanumeric isSpaces isUpper isLower parseInt parseFloat`. `Int`: `abs min max clamp pow sqrt sign gcd isEven isOdd toFloat toString`. `Float`: `abs min max sqrt pow round floor ceil trunc exp log sin cos tan`. `sorted`, `reversed`, `take` and the like return new arrays; `push`, `pop`, `insertAt`, `removeAt`, `clear` change the array. `toString(v)` makes any value a text.
+
+## Failures
+
+- A function that can fail returns `Result<T, E>`: `return Ok(value);`, `return Err("why");`. With nothing to return: `Result<Void, E>` and `return Ok();`.
+- `value?` gives the value, or returns the failure from the enclosing function. In `main` it ends the program with the reason.
+- `match r { case Ok(v): { ... } case Err(e): { ... } }`; also `r.isOk() r.value() r.reason() r.or(x) r.orElse(e -> x) r.map(f) r.expect("message")`.
+- `panic("message")` stops the program; `attempt(fn() -> T { ... })` (`import std.result.{attempt};`) gives a `Result<T, Failure>` instead; `defer stmt;` runs when the block is left.
+- `?.` does not work on a Result: use `?` or a match.
+
+## Standard library modules (import std.NAME)
+
+flow (above), time (now, `wait time.after(d)`, durations, dates), task (run, map, channel; `wait t`, `wait ch.receive()`), sql (`flow.store()` in a step; `sql.open(url)` elsewhere; `query`, `exec`, rows as structs), http (get, post, `to(...).header().send()`, router, serve), json (`json.parse(text)` gives `Result<Json, ParseError>`; `data.find("a.b")`, `data.get(key)`, `data.text()`, `data.int()`, `data.stringify()`), io (readFile, writeFile, readLine, env), fs, path, os (args, exit, run, `os.signals()`), csv, regex, format (duration, bytes, table), dict (`import std.dict.{Dict};`, `dict.empty<Int>()`, `get set has keys`), map, set, list, option, result, strings, arrays, math, random (`uuid()`, `token(16)`), encoding (base64, hex, url, html), url, hash (sha256, hmacSha256), log (`log.info(message, {"key": value})`), semver, test (equal, ...), ops (traits, Range, Template). Full reference: docs/stdlib.md.
+
+## Common mistakes
+
+- Calling `http.get`, `io.readFile` or `sql` from a flow outside a step: `F0001`. Make the function a `step fn`, or move the call into one.
+- Giving a step a task, a channel or a connection: `F0004`. Steps take and return data.
+- Changing the variables alive at a `stage` without a `migrate fn`: the compiler warns (`F0011`) and the daemon refuses the deploy while an instance is at that stage.
+- A step `by` a queue that `qoqi.json` does not declare: `F0012`.
+- A trait, type or function of a module used without its import (`Ordered`, `Dict`, `attempt`, `Inbox`): `qoqi check` names the import to add.
+- Writing `x.length` or `len(x)`: it is `x.len()`. There is no `sort()`: `sorted(...)`, `sortedBy(...)` return a new array.
+- Writing `case X =>` or `case X { }`: it is `case X: { }`.
+- Writing `struct P { x: Int, y: Int }` with commas: fields end with `;`.
+- Writing `Circle(1.0)` instead of `Shape.Circle(1.0)`.

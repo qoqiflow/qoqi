@@ -1,0 +1,8 @@
+[ERROR] E2015: a text has no method 'sqrt'
+stdlib_misuse.qi:8:20
+[ERROR] E2001: cannot assign type Int? to Int
+stdlib_misuse.qi:9:27
+[ERROR] E2010: cannot use type String as argument of type Int
+stdlib_misuse.qi:11:21
+[ERROR] E2017: operator + cannot be applied to Int?: the value may be null
+stdlib_misuse.qi:12:20

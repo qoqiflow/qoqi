@@ -1,0 +1,149 @@
+// Enums and match: expressions as trees, built, simplified and worked out.
+
+enum Expr {
+    Number(Int),
+    Variable(String),
+    Add(Expr, Expr),
+    Multiply(Expr, Expr),
+    Negate(Expr),
+}
+
+fn build(depth: Int, seed: Int) -> Expr {
+    if depth == 0 {
+        if seed % 3 == 0 {
+            return Expr.Variable("x");
+        }
+
+        return Expr.Number(seed % 10);
+    }
+
+    let left = build(depth - 1, seed * 3 + 1);
+    let right = build(depth - 1, seed * 5 + 2);
+
+    if seed % 4 == 0 {
+        return Expr.Negate(left);
+    }
+
+    if seed % 2 == 0 {
+        return Expr.Add(left, right);
+    }
+
+    return Expr.Multiply(left, right);
+}
+
+fn evaluate(expr: Expr, x: Int) -> Int {
+    match expr {
+        case Expr.Number(n): {
+            return n;
+        }
+
+        case Expr.Variable(_): {
+            return x;
+        }
+
+        case Expr.Add(a, b): {
+            return (evaluate(a, x) + evaluate(b, x)) % 10007;
+        }
+
+        case Expr.Multiply(a, b): {
+            return (evaluate(a, x) * evaluate(b, x)) % 10007;
+        }
+
+        case Expr.Negate(a): {
+            return 0 - evaluate(a, x);
+        }
+    }
+}
+
+fn simplify(expr: Expr) -> Expr {
+    match expr {
+        case Expr.Add(a, b): {
+            let left = simplify(a);
+            let right = simplify(b);
+
+            if left == Expr.Number(0) {
+                return right;
+            }
+
+            if right == Expr.Number(0) {
+                return left;
+            }
+
+            return Expr.Add(left, right);
+        }
+
+        case Expr.Multiply(a, b): {
+            let left = simplify(a);
+            let right = simplify(b);
+
+            if left == Expr.Number(0) || right == Expr.Number(0) {
+                return Expr.Number(0);
+            }
+
+            if left == Expr.Number(1) {
+                return right;
+            }
+
+            if right == Expr.Number(1) {
+                return left;
+            }
+
+            return Expr.Multiply(left, right);
+        }
+
+        case Expr.Negate(a): {
+            return Expr.Negate(simplify(a));
+        }
+
+        default: {
+            return expr;
+        }
+    }
+}
+
+fn size(expr: Expr) -> Int {
+    match expr {
+        case Expr.Add(a, b): {
+            return 1 + size(a) + size(b);
+        }
+
+        case Expr.Multiply(a, b): {
+            return 1 + size(a) + size(b);
+        }
+
+        case Expr.Negate(a): {
+            return 1 + size(a);
+        }
+
+        default: {
+            return 1;
+        }
+    }
+}
+
+fn main() -> Int {
+    let before = 0;
+    let after = 0;
+    let values = 0;
+
+    for seed in 1..40 {
+        let tree = build(11, seed);
+        let small = simplify(tree);
+        before += size(tree);
+        after += size(small);
+
+        for x in 0..3 {
+            let a = evaluate(tree, x);
+            let b = evaluate(small, x);
+
+            if a != b {
+                println("differs", seed, x, a, b);
+            }
+
+            values = (values + a + 10007) % 1000003;
+        }
+    }
+
+    println(before, after, values);
+    return 0;
+}

@@ -1,0 +1,25 @@
+// Fields are as visible as their struct; one written priv is its
+// module's. The account in bank/account.qi is changed through its
+// methods, and made by its static function or a literal that leaves its
+// priv fields to their values.
+import bank.account.{Account};
+
+fn main() -> Int {
+    let ada = Account.open("ada", 500);
+    ada.deposit(250);
+    println(ada.owner, ada.balance(), ada.withdraw(100), ada.withdraw(5000));
+
+    // Its priv fields have values of their own: a literal may leave them
+    let bob = Account { owner: "bob" };
+    bob.deposit(40);
+    println(bob.owner, bob.balance(), bob.moves(), ada.moves());
+
+    // Pattern on what is visible
+    let line = match ada {
+        case Account { owner: "ada" }: "ada's account";
+        default: "someone else's";
+    };
+
+    println(line);
+    return 0;
+}

@@ -1,0 +1,160 @@
+// A depot's parcels in a database: SQLite in memory here, Postgres or
+// MySQL when an address is given (test/e2e/sql_test.go runs it on each,
+// and expects the same).
+
+import std.os;
+import std.sql;
+import std.sql.{Db, Error, ErrorKind, Tx, Value};
+
+struct Parcel {
+    id: String;
+    city: String;
+    grams: Int;
+}
+
+fn receive(db: Db, parcel: Parcel) -> Result<Int, Error> {
+    return db.exec("INSERT INTO parcels (id, city, grams, fragile) VALUES (?, ?, ?, ?)", [
+        Value.Text(parcel.id),
+        Value.Text(parcel.city),
+        Value.Int(parcel.grams),
+        Value.Bool(parcel.grams > 1000),
+    ]);
+}
+
+// Moves every parcel of a city to another, and says how many went: in a
+// transaction, given up when a parcel is too heavy for the van.
+fn move(db: Db, from: String, to: String, most: Int) -> Result<Int, Error> {
+    return db.transaction(fn(tx: Tx) -> Result<Int, Error> {
+        let moved = tx.exec("UPDATE parcels SET city = ? WHERE city = ?", [
+            Value.Text(to),
+            Value.Text(from),
+        ])?;
+
+        let heaviest = tx.one("SELECT MAX(grams) AS g FROM parcels WHERE city = ?", [
+            Value.Text(to),
+        ])?;
+
+        if (heaviest?.int("g") ?? 0) > most {
+            return Err(Error { kind: ErrorKind.Other, message: "too heavy for the van" });
+        }
+
+        return Ok(moved);
+    });
+}
+
+fn report(db: Db) -> Result<Void, Error> {
+    for row in db.query("SELECT city, COUNT(*) AS n, SUM(grams) AS grams FROM parcels GROUP BY city ORDER BY city")? {
+        println("  ", row.text("city"), row.int("n"), row.int("grams"));
+    }
+
+    return Ok();
+}
+
+fn main() -> Result<Void, Error> {
+    let args = os.args();
+    let address = if args.len() > 0 { args[0] } else { ":memory:" };
+    let db = sql.open(address)?;
+    defer db.close();
+
+    db.exec("DROP TABLE IF EXISTS parcels")?;
+    db.exec("DROP TABLE IF EXISTS audit")?;
+    db.exec("CREATE TABLE parcels (id VARCHAR(64) PRIMARY KEY, city VARCHAR(64) NOT NULL, grams BIGINT NOT NULL, fragile BOOLEAN, price DOUBLE PRECISION)")?;
+
+    let parcels = [
+        Parcel { id: "p-1", city: "Lyon", grams: 1200 },
+        Parcel { id: "p-2", city: "Lyon", grams: 300 },
+        Parcel { id: "p-3", city: "Douala", grams: 5000 },
+        Parcel { id: "p-4", city: "Douala", grams: 250 },
+    ];
+
+    for parcel in parcels {
+        receive(db, parcel)?;
+    }
+
+    match receive(db, Parcel { id: "p-1", city: "Paris", grams: 1 }) {
+        case Ok(_): {
+            println("p-1 received twice");
+        }
+
+        case Err(error): {
+            println("p-1 again is refused:", error.kind == ErrorKind.Constraint);
+        }
+    }
+
+    match db.exec("SELEC nothing") {
+        case Ok(_): {
+            println("nonsense ran");
+        }
+
+        case Err(error): {
+            println("nonsense is refused:", error.kind == ErrorKind.Query);
+        }
+    }
+
+    let priced = db.exec("UPDATE parcels SET price = ? WHERE city = ?", [
+        Value.Float(12.5),
+        Value.Text("Lyon"),
+    ])?;
+
+    println("priced", priced);
+
+    for row in db.query(
+        "SELECT id, grams, fragile, price FROM parcels WHERE grams > ? ORDER BY id",
+        [Value.Int(260)],
+    )? {
+        println(
+            row.text("id"),
+            row.int("grams"),
+            row.bool("fragile"),
+            row.float("price"),
+            row.isNull("price"),
+            row.get("nothing"),
+        );
+    }
+
+    println("before:");
+    report(db)?;
+
+    match move(db, "Douala", "Lyon", 2000) {
+        case Ok(n): {
+            println("moved", n);
+        }
+
+        case Err(error): {
+            println("not moved:", error.describe());
+        }
+    }
+
+    let moved = move(db, "Lyon", "Paris", 2000)?;
+    println("moved", moved);
+    println("after:");
+    report(db)?;
+
+    println(db.one("SELECT id, city FROM parcels WHERE id = ?", [Value.Text("p-2")])?);
+    println(db.one("SELECT id FROM parcels WHERE id = ?", [Value.Text("p-9")])?);
+    println(db.one("SELECT 140737488355328 AS big, 'é ü 漢' AS text")?);
+
+    // A table made in a transaction given up: what was written in it is
+    // gone on every database, MySQL making the table beside it
+    let audited = db.transaction(fn(tx: Tx) -> Result<Int, Error> {
+        tx.exec("CREATE TABLE IF NOT EXISTS audit (line VARCHAR(64))")?;
+        tx.exec("INSERT INTO audit (line) VALUES (?)", [Value.Text("p-9 received")])?;
+
+        tx.exec("INSERT INTO parcels (id, city, grams) VALUES (?, ?, ?)", [
+            Value.Text("p-9"),
+            Value.Text("Oslo"),
+            Value.Int(1),
+        ])?;
+
+        return Err(Error { kind: ErrorKind.Other, message: "the audit is given up" });
+    });
+
+    db.exec("CREATE TABLE IF NOT EXISTS audit (line VARCHAR(64))")?;
+    println("audit given up:", audited.isErr());
+    println(db.one("SELECT COUNT(*) AS audited FROM audit")?);
+    println(db.one("SELECT COUNT(*) AS parcels FROM parcels WHERE id = ?", [Value.Text("p-9")])?);
+    db.exec("DROP TABLE audit")?;
+
+    db.exec("DROP TABLE parcels")?;
+    return Ok();
+}

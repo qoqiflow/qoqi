@@ -1,0 +1,10 @@
+["apple", "pear", "plum"] ["fig", "kiwi", "lime"] ["date"] ["apple", "pear", "plum", "fig", "kiwi"]
+hello ada! hello ada? hello ada!!!
+name  age
+---------
+ada   36 
+alan  41 
+name | age
+ada  | 36 
+alan | 41 
+hello bob!

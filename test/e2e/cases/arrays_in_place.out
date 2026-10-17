@@ -1,0 +1,28 @@
+(2 + 3) * 4 = 20 left [] deepest 2
+-(7 * 7) = -49 left [] deepest 2
+swap = 3 left [1] deepest 3
+too few failed: step 1: the stack is empty left []
+cleared = 18 left [] deepest 2
+nothing failed: the stack is empty left []
+written: one | two | three | four (4 done, 0 undone)
+true false false
+removed: one | three | four (5 done, 0 undone)
+wiped:  (6 done, 0 undone)
+true true
+undone twice: one | two | three | four (4 done, 2 undone)
+true
+redone: one | three | four (5 done, 1 undone)
+written again: zero | one | three | four (6 done, 0 undone)
+false
+all 6 undone:  (0 done, 6 undone)
+false
+all redone: zero | one | three | four (6 done, 0 undone)
+["boarding pass", "contract", "thesis", "flyer", "menu", "poster"]
+printed boarding pass total 1, 1 pages
+printed contract total 13, 12 pages
+paper left 37 waiting ["thesis", "flyer", "menu", "poster"]
+cancelled ["flyer", "poster"] waiting ["thesis", "menu"]
+printed thesis 120 pages
+printed menu 4 pages
+paper left 113 waiting [] printed 13
+10 true true

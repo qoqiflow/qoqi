@@ -1,0 +1,14 @@
+// A module of the package. It names its neighbours through the package,
+// like everyone else: import textkit.format.other;
+
+pub fn left(text: String, width: Int) -> String {
+    return fill(" ", width - text.len()) + text;
+}
+
+pub fn fill(text: String, times: Int) -> String {
+    if times <= 0 {
+        return "";
+    }
+
+    return text + fill(text, times - 1);
+}

@@ -1,0 +1,6 @@
+[ERROR] E2001: the value of parameter 'high' is String, and the parameter is Int
+defaults_errors.qi:5:47
+[ERROR] E2009: expected 1 to 3 arguments, got 0
+defaults_errors.qi:10:13
+[ERROR] E2009: expected 1 to 3 arguments, got 4
+defaults_errors.qi:11:13

@@ -1,0 +1,2 @@
+Ok(10) Err("status 404")
+Ok(20) Err("not in the cache") Err("an empty page")

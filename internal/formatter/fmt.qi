@@ -1,0 +1,174 @@
+// qoqi fmt: writes the files of a program the one way.
+//
+//     qoqi fmt                  every .qi file under this folder
+//     qoqi fmt main.qi src     these files, and those under these folders
+//     qoqi fmt --check          changes nothing: names the files that would change
+//     qoqi fmt -                reads a program from the input, writes it formatted
+//
+// How a program is written is std.formatter's to say. This is the part
+// that finds the files and reports what became of them.
+
+import std.formatter;
+import std.io;
+import std.os;
+import std.fs;
+import std.path;
+import std.format;
+
+const usage = """
+    Usage: qoqi fmt [--check] [file.qi | folder]...
+           qoqi fmt -
+    """;
+
+// What became of the files looked at.
+struct Tally {
+    changed: Int = 0;
+    kept: Int = 0;
+    failed: Int = 0;
+}
+
+// The files to format for one argument: a file, or the .qi files under
+// a folder. Folders whose name starts with a dot are not gone into: what
+// is in them is not the program's.
+fn filesOf(target: String) -> Result<[String], String> {
+    if !fs.isDir(target) {
+        if !io.exists(target) {
+            return Err("${target}: no such file or folder");
+        }
+
+        return Ok([target]);
+    }
+
+    match fs.find(target, "*.qi") {
+        case Ok(found): {
+            // What comes after the folder that was named: that one may
+            // be hidden, it is what was asked for
+            let folder = path.clean(target);
+            let inside = 0;
+
+            if folder != "." {
+                inside = folder.len() + 1;
+            }
+
+            let hidden = fn(file: String) -> Bool {
+                let below = path.parts(path.clean(file).from(inside));
+                return below.any(part -> part.startsWith("."));
+            };
+
+            return Ok(found.filter(file -> !hidden(file)));
+        }
+
+        case Err(error): {
+            return Err(error.describe());
+        }
+    }
+}
+
+// Formats one file where it is, or with `check` only says whether it
+// would change.
+fn tidy(file: String, check: Bool, tally: Tally) {
+    let source = match io.readFile(file) {
+        case Ok(text): text;
+
+        case Err(error): {
+            io.printError(error.describe() + "\n");
+            tally.failed++;
+            return;
+        }
+    };
+
+    match formatter.format(source) {
+        case Err(problem): {
+            io.printError("${file}:${problem.describe()}\n");
+            tally.failed++;
+        }
+
+        case Ok(tidy): {
+            if tidy == source {
+                tally.kept++;
+                return;
+            }
+
+            tally.changed++;
+            println(file);
+
+            if !check && io.writeFile(file, tidy).isErr() {
+                io.printError("${file}: cannot be written\n");
+                tally.failed++;
+            }
+        }
+    }
+}
+
+// The input, formatted, on the output: for an editor, which has the
+// text and wants the text.
+fn filter() -> Int {
+    let source = io.readLines().join("\n") + "\n";
+
+    match formatter.format(source) {
+        case Ok(tidy): {
+            print(tidy);
+            return 0;
+        }
+
+        case Err(problem): {
+            io.printError("<input>:${problem.describe()}\n");
+            return 1;
+        }
+    }
+}
+
+fn main() -> Int {
+    let check = false;
+    let targets: [String] = [];
+
+    for argument in os.args() {
+        if argument == "-" {
+            return filter();
+        }
+
+        if argument == "--check" {
+            check = true;
+        } else if argument.startsWith("-") {
+            io.printError("qoqi fmt: unknown option ${argument}\n${usage}");
+            return 2;
+        } else {
+            targets.push(argument);
+        }
+    }
+
+    if targets.isEmpty() {
+        targets.push(".");
+    }
+
+    let tally = Tally {};
+
+    for target in targets {
+        match filesOf(target) {
+            case Ok(files): {
+                for file in files {
+                    tidy(file, check, tally);
+                }
+            }
+
+            case Err(reason): {
+                io.printError("qoqi fmt: ${reason}\n");
+                tally.failed++;
+            }
+        }
+    }
+
+    let files = format.plural(tally.changed, "file", "files");
+
+    if check && tally.changed > 0 {
+        io.printError("${files} would change: run qoqi fmt\n");
+    } else if tally.changed > 0 {
+        io.printError("${files} formatted, ${tally.kept} left as they were\n");
+    }
+
+    if tally.failed > 0 || (check && tally.changed > 0) {
+        return 1;
+    }
+
+    return 0;
+}

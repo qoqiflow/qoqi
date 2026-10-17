@@ -1,0 +1,10 @@
+draw a square of 3
+draw a 2x1 box at an edge, 4 along
+draw a dot at the diagonal at 7
+nothing to do at 2,5
+send 2,5 to the corner
+move an edge, 9 along to 2,5
+erase 1,1
+clear
+ended clear
+no commands

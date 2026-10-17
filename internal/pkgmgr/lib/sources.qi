@@ -1,0 +1,325 @@
+// Where packages really come from: git repositories, read through
+// mirrors kept in a cache, and folders on this machine.
+//
+// A package is looked for in the repositories qoqi.json lists, by the
+// name in each one's qoqi.json. A name none of them has is taken from
+// the default place, https://github.com/<vendor>/<name>.git, or the one
+// the variable QOQI_PACKAGE_URL says, where {name} stands for the name.
+
+import catalog.{Catalog, Candidate, Source};
+import manifest;
+import manifest.{Manifest, Repository};
+import std.dict;
+import std.dict.{Dict};
+import std.fs;
+import std.hash;
+import std.io;
+import std.os;
+import std.path;
+import std.semver;
+
+pub struct Sources {
+    // The folder of the project's qoqi.json: path repositories start there.
+    project: String;
+    repositories: [Repository];
+    cache: String;
+    say: fn(String) -> Void;
+
+    // The repository of each package name, once the repositories have
+    // been looked at; the mirrors brought up to date in this run.
+    byName: Dict<Repository>? = null;
+    fresh: Dict<Bool> = dict.empty<Bool>();
+}
+
+// Where mirrors are kept: QOQI_CACHE, or the cache of the user.
+pub fn cacheDir() -> String {
+    let set = io.env("QOQI_CACHE");
+
+    if set != null && set != "" {
+        return set;
+    }
+
+    let local = io.env("LOCALAPPDATA");
+
+    if os.platform() == "windows" && local != null {
+        return path.join([local, "qoqi", "cache"]);
+    }
+
+    let home = io.env("XDG_CACHE_HOME");
+
+    if home != null && home != "" {
+        return path.inside(home, "qoqi");
+    }
+
+    return path.join([io.env("HOME") ?? fs.tempDir(), ".cache", "qoqi"]);
+}
+
+// The address a package not in any repository is fetched from.
+pub fn defaultUrl(name: String) -> String {
+    let template = io.env("QOQI_PACKAGE_URL") ?? "";
+
+    if template == "" {
+        template = "https://github.com/{name}.git";
+    }
+
+    return template.replace("{name}", name);
+}
+
+// Runs git and gives what it wrote, or what went wrong. git does not
+// ask for a password: a repository that needs one fails at once, instead
+// of waiting at a prompt (and GitHub asks one for a repository that is
+// not there). Credential helpers and SSH keys work as they do for git.
+pub fn git(arguments: [String]) -> Result<String, String> {
+    match os.command("git", arguments).env("GIT_TERMINAL_PROMPT", "0").run() {
+        case Ok(output): {
+            if output.succeeded() {
+                return Ok(output.out);
+            }
+
+            let said = output.err.trim();
+
+            if said == "" {
+                said = "status ${output.status}";
+            }
+
+            return Err("git ${arguments.join(" ")}: ${said}");
+        }
+
+        case Err(error): {
+            return Err("git cannot be run, and packages are fetched with it: ${error.message}");
+        }
+    }
+}
+
+impl Sources {
+    // A path of the project file's folder, as the user wrote it.
+    pub fn local(url: String) -> String {
+        if path.isAbsolute(url) {
+            return url;
+        }
+
+        return path.join([self.project, url]);
+    }
+
+    // The mirror of a repository, fetched once in a run: cloned the
+    // first time, brought up to date after that.
+    pub fn mirror(url: String) -> Result<String, String> {
+        let folder = self.mirrorDir(url);
+
+        if self.fresh.has(url) {
+            return Ok(folder);
+        }
+
+        if fs.isDir(folder) {
+            self.say("  - Fetching ${url}");
+            git(["-C", folder, "remote", "update", "--prune"])?;
+        } else {
+            self.say("  - Cloning ${url}");
+            fs.makeDir(path.dir(folder)).mapErr(error -> error.describe())?;
+            git(["clone", "--mirror", "--quiet", url, folder])?;
+        }
+
+        self.fresh.set(url, true);
+        return Ok(folder);
+    }
+
+    // The mirror of a repository, fetched only if it does not have the
+    // commit already: installing from the lock needs no network when the
+    // cache has what it locks.
+    pub fn mirrorWith(url: String, reference: String) -> Result<String, String> {
+        let folder = self.mirrorDir(url);
+
+        if fs.isDir(folder)
+            && git(["-C", folder, "cat-file", "-e", "${reference}^{commit}"]).isOk()
+        {
+            return Ok(folder);
+        }
+
+        return self.mirror(url);
+    }
+
+    fn mirrorDir(url: String) -> String {
+        return path.join([self.cache, "git", hash.sha256(url).first(20)]);
+    }
+
+    // Which repository has which package, from the qoqi.json of each.
+    fn index() -> Result<Dict<Repository>, String> {
+        let known = self.byName;
+
+        if known != null {
+            return Ok(known);
+        }
+
+        let found = dict.empty<Repository>();
+
+        for repository in self.repositories {
+            let named = self.nameIn(repository)?;
+
+            if !found.has(named) {
+                found.set(named, repository);
+            }
+        }
+
+        self.byName = found;
+        return Ok(found);
+    }
+
+    fn nameIn(repository: Repository) -> Result<String, String> {
+        let described = if repository is Repository.Path(url) {
+            self.folderManifest(url)?
+        } else {
+            self.headManifest(repository.url())?
+        };
+
+        if !manifest.isPackageName(described.name) {
+            return Err("the repository ${repository.url()} does not give its package a \"name\" in ${manifest.FILE}, as in \"acme/textkit\"");
+        }
+
+        return Ok(described.name);
+    }
+
+    // What the default branch of a repository says.
+    fn headManifest(url: String) -> Result<Manifest, String> {
+        let folder = self.mirror(url)?;
+
+        let text = git(["-C", folder, "show", "HEAD:${manifest.FILE}"]).mapErr(
+            _ -> "${url} has no ${manifest.FILE} on its default branch, which would say what package it is",
+        )?;
+
+        return manifest.parse(text).mapErr(reason -> "${url}: ${manifest.FILE}: ${reason}");
+    }
+
+    fn folderManifest(url: String) -> Result<Manifest, String> {
+        let file = manifest.inside(self.local(url));
+
+        if !io.exists(file) {
+            return Err("the path repository ${url} has no ${manifest.FILE}");
+        }
+
+        return manifest.load(file);
+    }
+
+    // The tags of a mirror that are versions, and its branches.
+    fn gitCandidates(name: String, url: String) -> Result<[Candidate], String> {
+        let folder = self.mirror(url)?;
+
+        let refs = git([
+            "-C", folder, "for-each-ref", "--format=%(objectname)%09%(*objectname)%09%(refname)",
+            "refs/tags", "refs/heads",
+        ])?;
+
+        let found: [Candidate] = [];
+
+        for line in refs.lines() {
+            let fields = line.split("\t");
+
+            if fields.len() != 3 {
+                continue;
+            }
+
+            // An annotated tag is an object of its own: the commit is the
+            // one it points at
+            let commit = if fields[1] != "" { fields[1] } else { fields[0] };
+            let source = Source { kind: "git", url: url, reference: commit };
+            let ref = fields[2];
+
+            if ref.startsWith("refs/heads/") {
+                let branch = ref.from("refs/heads/".len());
+
+                found.push(Candidate {
+                    name: name,
+                    label: "dev-${branch}",
+                    version: null,
+                    source: source,
+                });
+            } else if semver.parse(ref.from("refs/tags/".len())) is Ok(version) {
+                found.push(Candidate {
+                    name: name,
+                    label: toString(version),
+                    version: version,
+                    source: source,
+                });
+            }
+        }
+
+        return Ok(found);
+    }
+
+    fn pathCandidate(name: String, url: String) -> Result<Candidate, String> {
+        let described = self.folderManifest(url)?;
+        let source = Source { kind: "path", url: url };
+
+        if described.version == "" {
+            return Ok(Candidate {
+                name: name,
+                label: "dev-path",
+                version: null,
+                source: source,
+                anyVersion: true,
+            });
+        }
+
+        let version = semver.parse(described.version).mapErr(
+            error -> "${url}: ${manifest.FILE}: \"version\" ${error.describe()}",
+        )?;
+
+        return Ok(Candidate {
+            name: name,
+            label: toString(version),
+            version: version,
+            source: source,
+        });
+    }
+}
+
+impl Catalog for Sources {
+    fn candidates(name: String) -> Result<[Candidate], String> {
+        let repository = (self.index()?).get(name);
+
+        if repository is Repository.Git(url) {
+            return self.gitCandidates(name, url);
+        }
+
+        if repository is Repository.Path(url) {
+            return self.pathCandidate(name, url).map(candidate -> [candidate]);
+        }
+
+        let url = defaultUrl(name);
+
+        return self.gitCandidates(name, url).mapErr(
+            reason -> "${name} is in none of the repositories of ${manifest.FILE}, and could not be fetched from ${url}:\n  ${reason}",
+        );
+    }
+
+    fn manifest(candidate: Candidate) -> Result<Manifest, String> {
+        let source = candidate.source;
+
+        let described = if source.kind == "path" {
+            self.folderManifest(source.url)?
+        } else {
+            let folder = self.mirror(source.url)?;
+
+            match git(["-C", folder, "show", "${source.reference}:${manifest.FILE}"]) {
+                case Ok(text): manifest.parse(text).mapErr(
+                    reason -> "${candidate.describe()}: ${manifest.FILE}: ${reason}",
+                )?;
+
+                // A repository without a qoqi.json is a package that
+                // requires nothing, with its modules at its top
+                case Err(_): Manifest { name: candidate.name };
+            }
+        };
+
+        if described.name != "" && described.name != candidate.name {
+            return Err("${candidate.describe()} calls itself ${described.name} in its ${manifest.FILE}");
+        }
+
+        described.name = candidate.name;
+
+        if described.importName == "" {
+            described.importName = manifest.defaultImport(candidate.name);
+        }
+
+        return Ok(described);
+    }
+}

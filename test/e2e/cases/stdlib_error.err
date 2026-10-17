@@ -1,0 +1,4 @@
+[ERROR] R0007: std.strings.substring: range 0..5 is outside a text of 3 characters
+--> test/e2e/cases/stdlib_error.qi:8:16 in function 'shorten'
+return name.substring(0, 5) + "...";
+called from test/e2e/cases/stdlib_error.qi:13:13 in function 'main'

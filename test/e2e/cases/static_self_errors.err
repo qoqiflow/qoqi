@@ -1,0 +1,2 @@
+[ERROR] E8012: static function 'doubled' has no self: it is called on the type, Money.doubled()
+static_self_errors.qi:8:12

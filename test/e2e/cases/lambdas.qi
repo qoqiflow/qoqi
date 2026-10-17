@@ -1,0 +1,148 @@
+// A reading list worked over with functions written without types:
+// their parameters and results come from what they are handed to.
+
+import std.list;
+import std.dict;
+import std.option;
+import std.format;
+
+struct Book {
+    title: String;
+    author: String;
+    year: Int;
+    pages: Int;
+    tags: [String] = [];
+    rating: Float? = null;
+}
+
+fn shelf() -> [Book] {
+    return [
+        Book {
+            title: "Dune",
+            author: "Herbert",
+            year: 1965,
+            pages: 612,
+            tags: ["sf", "classic"],
+            rating: 4.5,
+        },
+        Book { title: "Emma", author: "Austen", year: 1815, pages: 474, tags: ["classic"] },
+        Book {
+            title: "Neuromancer",
+            author: "Gibson",
+            year: 1984,
+            pages: 271,
+            tags: ["sf"],
+            rating: 4.0,
+        },
+        Book {
+            title: "Persuasion",
+            author: "Austen",
+            year: 1817,
+            pages: 249,
+            tags: ["classic"],
+            rating: 4.8,
+        },
+        Book {
+            title: "Foundation",
+            author: "Asimov",
+            year: 1951,
+            pages: 255,
+            tags: ["sf", "classic"],
+            rating: 3.9,
+        },
+    ];
+}
+
+// A step of a pipeline: what it is called, and what it keeps
+struct Filter {
+    label: String;
+    keeps: fn(Book) -> Bool;
+}
+
+fn page(text: String) -> Result<Int, String> {
+    let n = text.parseInt();
+
+    if n == null {
+        return Err("'${text}' is not a number of pages");
+    }
+
+    return Ok(n);
+}
+
+// Several functions made from one: each keeps what it was made with
+fn longerThan(pages: Int) -> fn(Book) -> Bool {
+    return book -> book.pages > pages;
+}
+
+fn both(first: fn(Book) -> Bool, second: fn(Book) -> Bool) -> fn(Book) -> Bool {
+    return book -> first(book) && second(book);
+}
+
+fn main() -> Int {
+    let books = shelf();
+
+    println(books.map(b -> b.title));
+    println(books.sortedBy(b -> b.year).map(b -> "${b.year} ${b.title}"));
+
+    println(
+        books.fold(0, (sum, b) -> sum + b.pages),
+        "pages,",
+        books.count(b -> b.rating == null),
+        "unrated",
+    );
+
+    let classics = books.filter(b -> b.tags.contains("classic"));
+    let rated = classics.filter(b -> b.rating != null);
+    let best = rated.maxBy(b -> ((b.rating ?? 0.0) * 10.0).round());
+    println(classics.len(), "classics, the best rated:", best?.title ?? "none");
+
+    // Grouped, then each group summed up
+    let byAuthor = books.groupBy(b -> b.author);
+
+    let rows = byAuthor.sortedKeys().map(author -> {
+        let theirs = byAuthor[author] ?? [];
+        return [author, toString(theirs.len()), toString(theirs.sumOf(b -> b.pages))];
+    });
+
+    print(format.table(["author", "books", "pages"], rows));
+
+    // Filters as values, tried one after the other
+    let filters = [
+        Filter { label: "long", keeps: longerThan(400) },
+        Filter { label: "science fiction", keeps: b -> b.tags.contains("sf") },
+        Filter {
+            label: "long science fiction",
+            keeps: both(longerThan(260), b -> b.tags.contains("sf")),
+        },
+        Filter { label: "before 1900", keeps: b -> b.year < 1900 },
+    ];
+
+    for filter in filters {
+        let kept = books.filter(filter.keeps);
+        println("${filter.label.padRight(22)} ${kept.map(b -> b.title).join(", ")}");
+    }
+
+    // With the methods of the library's own types
+    let titles = list.of(books.map(b -> b.title));
+
+    println(titles.filter(t -> t.len() > 4).map(t -> t.first(3).upper()).toArray());
+
+    println(
+        option.map(books.find(b -> b.year > 1980), b -> b.author),
+        option.map(books.find(b -> b.year > 2000), b -> b.author),
+    );
+
+    println(
+        page("300").map(n -> n * 2),
+        page("many").map(n -> n * 2),
+        page("12").then(n -> page("${n}0")).or(0),
+    );
+
+    // Counting done by functions that give nothing back
+    let words = dict.empty<Int>();
+    books.each(b -> b.tags.each(tag -> words[tag] = (words[tag] ?? 0) + 1));
+    let seen = 0;
+    books.each(b -> seen++);
+    println(words.entries(), seen);
+    return 0;
+}

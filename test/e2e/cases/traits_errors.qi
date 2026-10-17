@@ -1,0 +1,86 @@
+// Every way to get traits wrong, and what is said about it.
+
+import std.ops;
+import std.ops.{Equal, Ordered, Add, Iterable, Indexed, Show};
+
+struct Point {
+    x: Int;
+}
+
+struct Box<T: Show> {
+    item: T;
+}
+
+impl<T: Ordered> Box<T> {
+    fn bigger(other: T) -> Bool {
+        return self.item > other;
+    }
+
+    fn get() -> T {
+        return self.item;
+    }
+}
+
+trait Source<T> {
+    fn next() -> T?;
+}
+
+struct Counter {
+    n: Int;
+}
+
+impl Source for Counter {
+    fn next() -> Int? {
+        return 1;
+    }
+}
+
+struct Words {}
+
+impl Source<String> for Words {
+    fn next() -> Int? {
+        return 1;
+    }
+}
+
+struct Conf {
+    port: Int = "eighty";
+    name: String;
+}
+
+fn largest<T: Ordered>(items: [T]) -> T? {
+    return null;
+}
+
+fn plain<T>(a: T, b: T) -> Bool {
+    return a.compare(b) < 0 || a < b;
+}
+
+fn shown<T: Show>(a: T) -> Int {
+    return a.compare(a);
+}
+
+struct Shown {}
+
+impl Show for Shown {
+    fn show() -> String {
+        return "s";
+    }
+}
+
+fn main() -> Int {
+    let p = Point { x: 1 };
+    let a = largest([p]);
+    let b = Box<Counter> { item: Counter { n: 1 } };
+    let c = Box<Shown> { item: Shown {} };
+    let d = c.bigger(Shown {});
+    let e = p < p;
+    let f = p + p;
+    for x in p {}
+    let g = p[0];
+    let h = Conf {};
+    let i = Box<Shown> { item: Shown {} }.get;
+    let words: Source<Int> = Words {};
+    let m = 5.nope();
+    return 0;
+}

@@ -1,0 +1,97 @@
+// Structs and methods: bodies that move, bounce off walls and are counted.
+
+struct Vec {
+    x: Int;
+    y: Int;
+}
+
+impl Vec {
+    fn plus(other: Vec) -> Vec {
+        return Vec { x: self.x + other.x, y: self.y + other.y };
+    }
+
+    fn scaled(by: Int) -> Vec {
+        return Vec { x: self.x * by, y: self.y * by };
+    }
+
+    fn manhattan() -> Int {
+        let total = 0;
+
+        if self.x < 0 {
+            total -= self.x;
+        } else {
+            total += self.x;
+        }
+
+        if self.y < 0 {
+            total -= self.y;
+        } else {
+            total += self.y;
+        }
+
+        return total;
+    }
+}
+
+struct Body {
+    position: Vec;
+    speed: Vec;
+    bounces: Int;
+}
+
+impl Body {
+    fn step(size: Int) {
+        let next = self.position.plus(self.speed);
+
+        if next.x < 0 || next.x >= size {
+            self.speed = Vec { x: 0 - self.speed.x, y: self.speed.y };
+            self.bounces += 1;
+        }
+
+        if next.y < 0 || next.y >= size {
+            self.speed = Vec { x: self.speed.x, y: 0 - self.speed.y };
+            self.bounces += 1;
+        }
+
+        self.position = self.position.plus(self.speed);
+    }
+}
+
+fn main() -> Int {
+    let size = 1000;
+    let bodies: [Body] = [];
+
+    for i in 0..400 {
+        bodies.push(Body {
+            position: Vec { x: (i * 37) % size, y: (i * 91) % size },
+            speed: Vec { x: i % 7 - 3, y: i % 5 - 2 },
+            bounces: 0,
+        });
+    }
+
+    for tick in 0..400 {
+        for body in bodies {
+            body.step(size);
+        }
+    }
+
+    let bounces = 0;
+    let spread = 0;
+    let centre = Vec { x: 0, y: 0 };
+
+    for body in bodies {
+        bounces += body.bounces;
+        spread += body.position.manhattan();
+        centre = centre.plus(body.position);
+    }
+
+    println(
+        bounces,
+        spread,
+        centre.x / bodies.len(),
+        centre.y / bodies.len(),
+        centre.scaled(2).manhattan(),
+    );
+
+    return 0;
+}

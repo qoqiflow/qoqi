@@ -1,0 +1,92 @@
+// A program made of several modules.
+//
+// The modules live in game/, next to this file. A module is one file; its
+// name is its path from this folder, with dots: game/physics/body.qi is
+// the module game.physics.body.
+
+import game.world;                      // used as world.name
+import game.physics.body as bodies;     // under another name
+import game.physics.{Shape, overlaps};  // names used directly, passed on by game/physics.qi
+import game.util.list.{List, newList};
+
+// The program can implement a module's trait...
+struct Wall {
+    at: Int;
+}
+
+impl Shape for Wall {
+    fn left() -> Int {
+        return self.at;
+    }
+
+    fn right() -> Int {
+        return self.at + 1;
+    }
+}
+
+// ...and has a struct called Body of its own, which is not the module's
+struct Body {
+    label: String;
+}
+
+fn describe(value: Any) -> String {
+    match value {
+        case bodies.Body: {
+            return "body " + toString(value.left()) + ".." + toString(value.right());
+        }
+
+        case Body: {
+            return "label " + value.label;
+        }
+
+        case Shape: {
+            return "some other shape";
+        }
+
+        default: {
+            return "not a shape";
+        }
+    }
+}
+
+fn main() -> Int {
+    let w = world.create(20);
+    let ball = w.spawn("ball", 2, 3, 4);
+    let crate = w.spawn("crate", 12, 4, -1);
+    println(w.names(), ball.body.right(), crate.body.left());
+
+    // Step until two things touch
+    let steps = 0;
+
+    while !overlaps(ball.body, crate.body) && steps < 10 {
+        w.step();
+        steps++;
+    }
+
+    println("touching after", steps, "steps:", describe(ball.body), "and", describe(crate.body));
+
+    // Walls of the program and bodies of the module, as one kind of thing
+    let shapes: List<Shape> = newList<Shape>();
+    shapes.add(ball.body);
+    shapes.add(Wall { at: 19 });
+    shapes.add(bodies.new(18, 5));
+
+    let rights = shapes.map<Int>(fn(s: Shape) -> Int {
+        return s.right();
+    });
+
+    println(
+        rights.items,
+        shapes.count(fn(s: Shape) -> Bool {
+            return overlaps(s, Wall { at: 19 });
+        }),
+    );
+
+    let things: [Any] = [ball.body, Body { label: "mine" }, Wall { at: 1 }, 42];
+
+    for thing in things {
+        println(describe(thing), thing is bodies.Body, thing is Body);
+    }
+
+    return w.count();
+}

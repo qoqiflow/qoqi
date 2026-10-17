@@ -1,0 +1,196 @@
+// The tests of the trials and the subscriptions. Run them with:
+//
+//     qoqi test examples/flows
+//
+// Weeks pass in a moment: the trial's clock moves when the test says so,
+// and what the customer does is a message the test sends.
+
+import std.flow;
+import std.test;
+import std.time;
+import subscriptions;
+import subscriptions.{Signup, Subscription, Event, Change, Plan, Outcome, Ended};
+
+fn signup(email: String) -> Signup {
+    return Signup {
+        email: email,
+        plan: Plan.Team,
+        day: 1.days(),
+        events: flow.inbox<Event>(16),
+    };
+}
+
+fn subscription(card: String) -> Subscription {
+    return Subscription {
+        email: "ada@example.com",
+        plan: Plan.Solo,
+        card: card,
+        day: 1.days(),
+        changes: flow.inbox<Change>(8),
+    };
+}
+
+// Activated, a card given: subscribed when the trial ends, and not
+// nudged or reminded on the way.
+fn testATrialThatConverts() {
+    let trial = flow.test(signup("ada@example.com"));
+
+    trial.go();
+    trial.send("events", Event.Activated);
+    trial.advance(2.days());
+    trial.send("events", Event.UsedFeature("reports"));
+    trial.send("events", Event.AddedCard("visa-4242"));
+    test.equal(trial.status(), "waiting");
+
+    trial.advance(12.days());
+    test.equal("${trial.result()}", "Subscribed(\"subscription:ada@example.com\")");
+    test.equal(trial.calls(subscriptions.nudge), 0);
+    test.equal(trial.calls(subscriptions.remind), 0);
+    test.equal(trial.calls(subscriptions.thank), 1);
+}
+
+// Nothing done: nudged on the third day, reminded on the eleventh, and
+// expired on the fourteenth, each once.
+fn testATrialLeftAlone() {
+    let reminded: [[String]] = [];
+    let trial = flow.test(signup("bob@example.com"));
+
+    trial.replace(subscriptions.remind, fn(email: String, used: [String]) {
+        reminded.push(used);
+    });
+
+    trial.go();
+    trial.advance(3.days());
+    test.equal(trial.calls(subscriptions.nudge), 1);
+    test.equal(trial.calls(subscriptions.remind), 0);
+
+    trial.advance(8.days());
+    test.equal(reminded.len(), 1);
+
+    trial.advance(3.days());
+    test.equal("${trial.result()}", "Expired");
+    test.equal(trial.calls(subscriptions.nudge), 1);
+    test.equal(trial.calls(subscriptions.expire), 1);
+}
+
+// The reminder says what was tried, each feature once.
+fn testTheReminderSaysWhatWasTried() {
+    let reminded: [[String]] = [];
+    let trial = flow.test(signup("cy@example.com"));
+
+    trial.replace(subscriptions.remind, fn(email: String, used: [String]) {
+        reminded.push(used);
+    });
+
+    trial.go();
+    trial.send("events", Event.Activated);
+    trial.send("events", Event.UsedFeature("reports"));
+    trial.send("events", Event.UsedFeature("export"));
+    trial.send("events", Event.UsedFeature("reports"));
+    trial.advance(11.days());
+    test.equal(reminded, [["reports", "export"]]);
+}
+
+// Leaving, by the application's word or by a cancellation: said goodbye
+// to, and ended the flow's own way.
+fn testLeavingDuringTheTrial() {
+    let told = flow.test(signup("dee@example.com"));
+
+    told.go();
+    told.advance(5.days());
+    told.send("events", Event.Left("too expensive"));
+    test.equal("${told.result()}", "Left(\"too expensive\")");
+
+    let cancelled = flow.test(signup("eve@example.com"));
+
+    cancelled.go();
+    cancelled.advance(1.days());
+    cancelled.cancel("account deleted");
+    test.equal("${cancelled.result()}", "Left(\"account deleted\")");
+    test.equal(cancelled.calls(subscriptions.goodbye), 1);
+}
+
+// Paid each month until cancelled; a change of plan bills the next month
+// at its price.
+fn testMonthsArePaidUntilCancelled() {
+    let charged: [Int] = [];
+    let trial = flow.test(subscription("visa-4242"));
+
+    trial.replace(subscriptions.charge, fn(
+        email: String,
+        card: String,
+        amount: Int,
+        month: Int,
+    ) -> Result<String, String> {
+        charged.push(amount);
+        return Ok("receipt ${month}");
+    });
+
+    trial.go();
+    test.equal(charged, [900]);
+
+    trial.advance(10.days());
+    trial.send("changes", Change.SwitchTo(Plan.Team));
+    trial.advance(20.days());
+    test.equal(charged, [900, 4900]);
+
+    trial.advance(30.days());
+    test.equal(charged, [900, 4900, 4900]);
+
+    trial.send("changes", Change.Cancel("moving on"));
+    test.equal("${trial.result()}", "Cancelled(\"moving on\", 3)");
+}
+
+// A card that never pays: tried four times a day apart, then the
+// subscription lapses before a month is paid.
+fn testACardThatNeverPays() {
+    let trial = flow.test(subscription("visa-0002"));
+
+    trial.go();
+    test.equal(trial.calls(subscriptions.charge), 1);
+
+    trial.advance(1.days());
+    trial.advance(1.days());
+    trial.advance(1.days());
+    test.equal(trial.calls(subscriptions.charge), 4);
+    test.equal(trial.calls(subscriptions.declined), 3);
+    test.equal("${trial.result()}", "Lapsed(0)");
+}
+
+// A card that pays once: the second month is tried again, then lapses.
+fn testACardThatStopsPaying() {
+    let trial = flow.test(subscription("visa-0341"));
+
+    trial.go();
+    trial.advance(30.days());
+
+    // The clock jumps, then what is due runs: a day at a time, as the
+    // retries are a day apart
+    for _ in 0..3 {
+        trial.advance(1.days());
+    }
+
+    test.equal("${trial.result()}", "Lapsed(1)");
+    test.equal(trial.calls(subscriptions.charge), 5);
+    test.equal(trial.calls(subscriptions.suspend), 1);
+}
+
+// Stopped after any write, a trial or a subscription ends the same.
+fn testEveryCrash() {
+    flow.test(signup("fay@example.com")).everyCrash(fn(t: flow.Trial<Outcome>) {
+        t.go();
+        t.send("events", Event.Activated);
+        t.advance(4.days());
+        t.send("events", Event.AddedCard("visa-4242"));
+        t.advance(10.days());
+    });
+
+    flow.test(subscription("visa-0341")).everyCrash(fn(t: flow.Trial<Ended>) {
+        t.go();
+        t.advance(30.days());
+
+        for _ in 0..3 {
+            t.advance(1.days());
+        }
+    });
+}

@@ -1,0 +1,367 @@
+// Chooses one version of every package a project needs, so that every
+// requirement on it, the project's and those of the packages chosen, is
+// met: as Composer does, one version per package for the whole program.
+//
+// The search tries the newest version first and goes back on a choice
+// when a requirement further on cannot be met with it. A version the
+// lock file had is tried before any other, so that `qoqi pkg update one/pkg`
+// leaves the rest where it was when it can.
+
+import catalog;
+import catalog.{Catalog, Candidate};
+import manifest.{Manifest};
+import std.dict;
+import std.dict.{Dict};
+
+// What someone requires: qoqi.json, or a version of a package.
+pub struct Requirement {
+    name: String;
+    wanted: String;
+    by: String;
+
+    // The package that requires it; "" for the project.
+    from: String = "";
+}
+
+impl Requirement {
+    pub fn describe() -> String {
+        return "${self.by} requires ${self.name} ${self.wanted}";
+    }
+}
+
+// A version chosen, with what it says of itself.
+pub struct Choice {
+    candidate: Candidate;
+    manifest: Manifest;
+}
+
+// Why a search failed: the packages whose chosen version could not stay,
+// and the requirements that could not all be met.
+struct Blame {
+    versions: [String] = [];
+    requirements: [Requirement] = [];
+}
+
+impl Blame {
+    // Whether a package's choice is part of it: its version, or what it
+    // requires.
+    fn involves(name: String) -> Bool {
+        return self.versions.contains(name) || self.requirements.any(want -> want.from == name);
+    }
+
+    // The same, with the package's own part left out.
+    fn without(name: String) -> Blame {
+        return Blame {
+            versions: self.versions.filter(other -> other != name),
+            requirements: self.requirements.filter(want -> want.from != name),
+        };
+    }
+
+    fn add(other: Blame) {
+        self.versions = self.versions.concat(other.versions);
+        self.requirements = self.requirements.concat(other.requirements);
+    }
+
+    // Whether another version of a package would fail in the same way:
+    // its version was not in the way, and it requires, word for word,
+    // what the one before it did that failed.
+    fn sameFor(name: String, manifest: Manifest) -> Bool {
+        if self.versions.contains(name) {
+            return false;
+        }
+
+        return self.requirements.all(
+            want -> want.from != name || manifest.require.get(want.name) == want.wanted,
+        );
+    }
+}
+
+struct Solver {
+    catalog: Catalog;
+    prefer: Dict<String>;
+    chosen: Dict<Choice> = dict.empty<Choice>();
+    order: [String] = [];
+    wants: Dict<[Requirement]> = dict.empty<[Requirement]>();
+    known: Dict<[Candidate]> = dict.empty<[Candidate]>();
+
+    // Why the search failed where it got furthest, and a mistake that
+    // ends it at once (a package that cannot be found, a constraint that
+    // cannot be read).
+    failure: String = "";
+    depth: Int = -1;
+    fatal: String = "";
+}
+
+// The versions to install for the requirements, in the order they were
+// chosen: the project's first, then what they require.
+//
+// `prefer` gives, for a package, the version to try first.
+pub fn resolve(
+    source: Catalog,
+    roots: [Requirement],
+    prefer: Dict<String>,
+) -> Result<[Choice], String> {
+    for root in roots {
+        catalog.check(root.name, root.wanted)?;
+    }
+
+    let solver = Solver { catalog: source, prefer: prefer };
+
+    if solver.solve(roots, 0) == null {
+        let choices: [Choice] = [];
+
+        for name in solver.order {
+            let choice = solver.chosen.get(name);
+
+            if choice != null {
+                choices.push(choice);
+            }
+        }
+
+        return Ok(choices);
+    }
+
+    if solver.fatal != "" {
+        return Err(solver.fatal);
+    }
+
+    return Err(solver.failure);
+}
+
+impl Solver {
+    // Meets the requirements from `at` on, given the choices made.
+    //
+    // Gives null when it did. Otherwise the choices are as they were, and
+    // what it gives is why it failed: the packages whose chosen version
+    // was in the way, and the requirements that could not all be met. A
+    // choice that is not part of that had nothing to do with the failure:
+    // its other versions would fail the same way, and the search goes
+    // back past it at once. So does a version that has, word for word,
+    // the requirements that failed the one before it. Without those two
+    // shortcuts ten packages of ten versions, where only the last says
+    // no, could take 10^9 tries.
+    fn solve(pending: [Requirement], at: Int) -> Blame? {
+        if at == pending.len() {
+            return null;
+        }
+
+        let wanted = pending[at];
+        let on = self.wants.get(wanted.name) ?? [];
+        on.push(wanted);
+        self.wants.set(wanted.name, on);
+        defer on.pop();
+
+        let chosen = self.chosen.get(wanted.name);
+
+        if chosen != null {
+            match catalog.accepts(chosen.candidate, wanted.wanted) {
+                case Ok(fits): {
+                    if fits {
+                        return self.solve(pending, at + 1);
+                    }
+
+                    self.conflict(wanted.name, at, self.known.get(wanted.name) ?? []);
+                    return Blame { versions: [wanted.name], requirements: [wanted] };
+                }
+
+                case Err(reason): {
+                    self.fatal = reason;
+                    return Blame {};
+                }
+            }
+        }
+
+        let options = self.options(wanted.name);
+
+        if options == null {
+            return Blame {};
+        }
+
+        // What every version of this package fails for, besides itself:
+        // the requirements on it, which ruled the others out
+        let blame = Blame { requirements: on.copy() };
+
+        if options.isEmpty() {
+            self.conflict(wanted.name, at, self.known.get(wanted.name) ?? []);
+            return blame;
+        }
+
+        let failed: Blame? = null;
+
+        for candidate in options {
+            if self.fatal != "" {
+                return Blame {};
+            }
+
+            let manifest = match self.catalog.manifest(candidate) {
+                case Ok(found): found;
+
+                case Err(reason): {
+                    self.fatal = reason;
+                    return Blame {};
+                }
+            };
+
+            if failed != null && failed.sameFor(wanted.name, manifest) {
+                continue;
+            }
+
+            let clash = self.importClash(candidate, manifest);
+
+            if clash != null {
+                self.note(at, clash.1);
+                blame.versions.push(clash.0);
+                continue;
+            }
+
+            let next: [Requirement] = [];
+
+            for (name, version) in manifest.require.entries() {
+                if catalog.check(name, version) is Err(reason) {
+                    self.fatal = "${candidate.describe()}: ${reason}";
+                    return Blame {};
+                }
+
+                next.push(Requirement {
+                    name: name,
+                    wanted: version,
+                    by: candidate.describe(),
+                    from: wanted.name,
+                });
+            }
+
+            self.chosen.set(wanted.name, Choice { candidate: candidate, manifest: manifest });
+            self.order.push(wanted.name);
+            let why = self.solve(pending.concat(next), at + 1);
+
+            if why == null {
+                return null;
+            }
+
+            self.chosen.remove(wanted.name);
+            self.order.pop();
+
+            if !why.involves(wanted.name) {
+                return why;
+            }
+
+            failed = why;
+            blame.add(why.without(wanted.name));
+        }
+
+        return blame;
+    }
+
+    // The versions of a package every requirement on it accepts, the
+    // preferred one first, then the newest. null when the search is over.
+    fn options(name: String) -> [Candidate]? {
+        let all = self.versionsOf(name)?;
+
+        let wants = self.wants.get(name) ?? [];
+        let fitting: [Candidate] = [];
+
+        for candidate in all {
+            let fits = true;
+
+            for want in wants {
+                match catalog.accepts(candidate, want.wanted) {
+                    case Ok(yes): {
+                        fits = fits && yes;
+                    }
+
+                    case Err(reason): {
+                        self.fatal = reason;
+                        return null;
+                    }
+                }
+            }
+
+            if fits {
+                fitting.push(candidate);
+            }
+        }
+
+        let preferred = self.prefer.get(name);
+
+        if preferred == null {
+            return fitting;
+        }
+
+        let first = fitting.filter(candidate -> candidate.label == preferred);
+        return first.concat(fitting.filter(candidate -> candidate.label != preferred));
+    }
+
+    // Every version of a package, newest first, asked of the catalog once.
+    fn versionsOf(name: String) -> [Candidate]? {
+        let known = self.known.get(name);
+
+        if known != null {
+            return known;
+        }
+
+        match self.catalog.candidates(name) {
+            case Ok(found): {
+                let all = found.sorted(catalog.newestFirst);
+                self.known.set(name, all);
+                return all;
+            }
+
+            case Err(reason): {
+                self.fatal = reason;
+                return null;
+            }
+        }
+    }
+
+    // Two packages may not be imported by the same name: the other one,
+    // and what to say.
+    fn importClash(candidate: Candidate, manifest: Manifest) -> (String, String)? {
+        for name in self.order {
+            let other = self.chosen.get(name);
+
+            if other != null
+                && other.manifest.importName == manifest.importName
+                && manifest.importName != ""
+            {
+                return (
+                    name,
+                    "${candidate.describe()} and ${other.candidate.describe()} are both imported as ${manifest.importName}: one of them has to say another \"import\" in its qoqi.json",
+                );
+            }
+        }
+
+        return null;
+    }
+
+    // Says why no version of a package fits, if no failure further on
+    // was found before.
+    fn conflict(name: String, at: Int, versions: [Candidate]) {
+        let lines = ["No version of ${name} meets every requirement on it:"];
+
+        for want in self.wants.get(name) ?? [] {
+            lines.push("  - ${want.describe()}");
+        }
+
+        if versions.isEmpty() {
+            lines.push("  ${name} has no versions at all");
+        } else {
+            let labels = versions.map(candidate -> candidate.label);
+            let shown = labels.take(12).join(", ");
+
+            if labels.len() > 12 {
+                shown += ", ...";
+            }
+
+            lines.push("  the versions there are: ${shown}");
+        }
+
+        self.note(at, lines.join("\n"));
+    }
+
+    fn note(at: Int, reason: String) {
+        if at > self.depth {
+            self.depth = at;
+            self.failure = reason;
+        }
+    }
+}

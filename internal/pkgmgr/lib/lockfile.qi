@@ -1,0 +1,185 @@
+// qoqi.lock: the exact version of every package a project was resolved
+// to, so that `qoqi pkg install` gives every machine the same files.
+//
+//     {
+//         "_readme": [...],
+//         "content-hash": "<sha256 of what qoqi.json requires>",
+//         "packages": [
+//             {
+//                 "name": "acme/textkit",
+//                 "version": "1.4.0",
+//                 "source": { "type": "git", "url": "...", "reference": "<commit>" },
+//                 "import": "textkit",
+//                 "root": "src",
+//                 "require": { "acme/strings": "^2.0" }
+//             }
+//         ],
+//         "packages-dev": [...]
+//     }
+
+import manifest;
+import manifest.{Manifest};
+import catalog.{Source};
+import std.json;
+import std.json.{Json};
+import std.dict;
+import std.dict.{Dict};
+import std.hash;
+import std.io;
+
+pub const FILE = "qoqi.lock";
+
+// One package as it is locked.
+pub struct Locked {
+    name: String;
+    version: String;
+    source: Source;
+    importName: String;
+    root: String = "";
+    description: String = "";
+    require: Dict<String> = dict.empty<String>();
+
+    // Required only by require-dev, directly or through other packages.
+    dev: Bool = false;
+}
+
+pub struct Lock {
+    hash: String;
+    packages: [Locked];
+}
+
+impl Lock {
+    pub fn find(name: String) -> Locked? {
+        return self.packages.find(locked -> locked.name == name);
+    }
+
+    // The version of each package, to prefer when resolving again.
+    pub fn versions() -> Dict<String> {
+        let all = dict.empty<String>();
+
+        for locked in self.packages {
+            all.set(locked.name, locked.version);
+        }
+
+        return all;
+    }
+}
+
+// What the lock depends on in qoqi.json: when this changes, the lock is
+// out of date.
+pub fn contentHash(project: Manifest) -> String {
+    let fields = project.document.fields() ?? dict.empty<Json>();
+    let relevant = json.object();
+
+    for key in ["require", "require-dev", "repositories"] {
+        let value = fields.get(key);
+
+        if value != null {
+            relevant.set(key, value);
+        }
+    }
+
+    return hash.sha256(relevant.done().stringify());
+}
+
+// The lock file of a project, or null when there is none yet.
+pub fn read(file: String) -> Result<Lock?, String> {
+    if !io.exists(file) {
+        return Ok(null);
+    }
+
+    let text = io.readFile(file).mapErr(error -> error.describe())?;
+    let document = json.parse(text).mapErr(error -> "${file}: ${error.describe()}")?;
+    let packages: [Locked] = [];
+
+    for (key, dev) in [("packages", false), ("packages-dev", true)] {
+        for item in document.get(key)?.items() ?? [] {
+            packages.push(lockedOf(item, dev).mapErr(reason -> "${file}: ${reason}")?);
+        }
+    }
+
+    return Ok(Lock { hash: document.get("content-hash")?.text() ?? "", packages: packages });
+}
+
+fn lockedOf(item: Json, dev: Bool) -> Result<Locked, String> {
+    let name = item.get("name")?.text() ?? "";
+    let version = item.get("version")?.text() ?? "";
+    let source = item.get("source");
+
+    if name == "" || version == "" || source == null {
+        return Err("a package without a name, a version or a source: run qoqi pkg update to write the file again");
+    }
+
+    let require = dict.empty<String>();
+
+    for (required, wanted) in (item.get("require")?.fields() ?? dict.empty<Json>()).entries() {
+        require.set(required, wanted.text() ?? "*");
+    }
+
+    return Ok(Locked {
+        name: name,
+        version: version,
+        source: Source {
+            kind: source.get("type")?.text() ?? "git",
+            url: source.get("url")?.text() ?? "",
+            reference: source.get("reference")?.text() ?? "",
+        },
+        importName: item.get("import")?.text() ?? manifest.defaultImport(name),
+        root: item.get("root")?.text() ?? "",
+        description: item.get("description")?.text() ?? "",
+        require: require,
+        dev: dev,
+    });
+}
+
+// The text of a lock file.
+pub fn text(lock: Lock) -> String {
+    let readme = json.texts([
+        "This file locks the packages of the project to the versions installed.",
+        "Read docs/packages.md of Qoqi to know more about it.",
+        "It is written by qoqi pkg update: do not change it by hand.",
+    ]);
+
+    let document = json.object()
+        .set("_readme", readme)
+        .text("content-hash", lock.hash)
+        .set("packages", json.array(lock.packages.filter(locked -> !locked.dev), documentOf))
+        .set("packages-dev", json.array(lock.packages.filter(locked -> locked.dev), documentOf))
+        .done();
+
+    return document.prettyWith("    ") + "\n";
+}
+
+fn documentOf(locked: Locked) -> Json {
+    let source = json.object().text("type", locked.source.kind).text("url", locked.source.url);
+
+    if locked.source.reference != "" {
+        source.text("reference", locked.source.reference);
+    }
+
+    let entry = json.object()
+        .text("name", locked.name)
+        .text("version", locked.version)
+        .set("source", source.done())
+        .text("import", locked.importName);
+
+    if locked.root != "" {
+        entry.text("root", locked.root);
+    }
+
+    if locked.description != "" {
+        entry.text("description", locked.description);
+    }
+
+    if !locked.require.isEmpty() {
+        let require = json.object();
+
+        for (name, wanted) in locked.require.entries() {
+            require.text(name, wanted);
+        }
+
+        entry.set("require", require.done());
+    }
+
+    return entry.done();
+}

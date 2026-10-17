@@ -1,0 +1,3 @@
+[ERROR] R0002: index out of bounds: 2 (length 2)
+program_matrix.qi:42:26 in function 'Matrix.at'
+called from test/e2e/cases/program_matrix.qi:189:13 in function 'main'

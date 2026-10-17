@@ -1,0 +1,353 @@
+// Numbers.
+//
+// An Int is taken for a Float where one is expected. A Float is never taken
+// for an Int: floor, ceil, round and trunc say how the fraction is lost.
+
+// --- Between Int and Float ---
+
+extern fn toFloat(n: Int) -> Float;
+
+// The largest whole number not above x: floor(2.7) is 2, floor(-2.7) is -3.
+extern fn floor(x: Float) -> Int;
+
+// The smallest whole number not below x: ceil(2.1) is 3.
+extern fn ceil(x: Float) -> Int;
+
+// The nearest whole number; halves go away from zero: round(2.5) is 3.
+extern fn round(x: Float) -> Int;
+
+// x without its fraction: trunc(-2.7) is -2.
+extern fn trunc(x: Float) -> Int;
+
+// --- Whole numbers ---
+
+fn abs(n: Int) -> Int {
+    if n < 0 {
+        return -n;
+    }
+
+    return n;
+}
+
+fn min(a: Int, b: Int) -> Int {
+    if a < b {
+        return a;
+    }
+
+    return b;
+}
+
+fn max(a: Int, b: Int) -> Int {
+    if a > b {
+        return a;
+    }
+
+    return b;
+}
+
+// n, or the nearest of the two limits if it is outside them.
+fn clamp(n: Int, low: Int, high: Int) -> Int {
+    if n < low {
+        return low;
+    }
+
+    if n > high {
+        return high;
+    }
+
+    return n;
+}
+
+// -1, 0 or 1.
+fn sign(n: Int) -> Int {
+    if n < 0 {
+        return -1;
+    }
+
+    if n > 0 {
+        return 1;
+    }
+
+    return 0;
+}
+
+// base multiplied by itself exponent times. A negative exponent gives 0,
+// except for a base of 1 or -1. Fails past what an Int holds, as * does.
+extern fn pow(base: Int, exponent: Int) -> Int;
+
+// The greatest common divisor, never negative: gcd(12, 18) is 6.
+fn gcd(a: Int, b: Int) -> Int {
+    let x = abs(a);
+    let y = abs(b);
+
+    while y != 0 {
+        let rest = x % y;
+        x = y;
+        y = rest;
+    }
+
+    return x;
+}
+
+// The least common multiple: lcm(4, 6) is 12.
+fn lcm(a: Int, b: Int) -> Int {
+    if a == 0 || b == 0 {
+        return 0;
+    }
+
+    return abs(a / gcd(a, b) * b);
+}
+
+fn isEven(n: Int) -> Bool {
+    return n % 2 == 0;
+}
+
+fn isOdd(n: Int) -> Bool {
+    return n % 2 != 0;
+}
+
+// --- Numbers with a fraction ---
+
+pub const pi = 3.141592653589793;
+
+pub const e = 2.718281828459045;
+
+fn fabs(x: Float) -> Float {
+    if x < 0.0 {
+        return -x;
+    }
+
+    return x;
+}
+
+fn fmin(a: Float, b: Float) -> Float {
+    if a < b {
+        return a;
+    }
+
+    return b;
+}
+
+fn fmax(a: Float, b: Float) -> Float {
+    if a > b {
+        return a;
+    }
+
+    return b;
+}
+
+// x, or the nearest of the two limits if it is outside them.
+fn fclamp(x: Float, low: Float, high: Float) -> Float {
+    if x < low {
+        return low;
+    }
+
+    if x > high {
+        return high;
+    }
+
+    return x;
+}
+
+// -1, 0 or 1: 0 for zero, and for a Float that is not a number.
+fn fsign(x: Float) -> Int {
+    if x < 0.0 {
+        return -1;
+    }
+
+    if x > 0.0 {
+        return 1;
+    }
+
+    return 0;
+}
+
+// Fails for a negative number.
+extern fn sqrt(x: Float) -> Float;
+
+// base raised to exponent, which need not be whole: powf(2.0, 0.5).
+extern fn powf(base: Float, exponent: Float) -> Float;
+
+// e raised to x.
+extern fn exp(x: Float) -> Float;
+
+// The natural logarithm. Fails for zero and negative numbers.
+extern fn log(x: Float) -> Float;
+
+// Angles are in radians: a full turn is 2.0 * pi.
+extern fn sin(x: Float) -> Float;
+extern fn cos(x: Float) -> Float;
+extern fn tan(x: Float) -> Float;
+
+// The angle of the point (x, y), from -pi to pi.
+extern fn atan2(y: Float, x: Float) -> Float;
+
+fn radians(degrees: Float) -> Float {
+    return degrees * pi / 180.0;
+}
+
+fn degrees(radians: Float) -> Float {
+    return radians * 180.0 / pi;
+}
+
+// --- The same, as methods ---
+//
+// What works on a number is also a method of numbers: n.abs() is
+// n.abs(), x.sqrt() is x.sqrt().
+
+impl Int {
+    // The square root, as a Float. Fails for a negative number.
+    pub fn sqrt() -> Float {
+        return sqrt(self);
+    }
+
+    // The number as a text.
+    pub fn toString() -> String {
+        return toString(self);
+    }
+
+    pub fn toFloat() -> Float {
+        return toFloat(self);
+    }
+
+    pub fn abs() -> Int {
+        return abs(self);
+    }
+
+    pub fn min(b: Int) -> Int {
+        return min(self, b);
+    }
+
+    pub fn max(b: Int) -> Int {
+        return max(self, b);
+    }
+
+    // n, or the nearest of the two limits if it is outside them.
+    pub fn clamp(low: Int, high: Int) -> Int {
+        return clamp(self, low, high);
+    }
+
+    // -1, 0 or 1.
+    pub fn sign() -> Int {
+        return sign(self);
+    }
+
+    // base multiplied by itself exponent times. A negative exponent gives 0,
+    // except for a base of 1 or -1.
+    pub fn pow(exponent: Int) -> Int {
+        return pow(self, exponent);
+    }
+
+    // The greatest common divisor, never negative: gcd(12, 18) is 6.
+    pub fn gcd(b: Int) -> Int {
+        return gcd(self, b);
+    }
+
+    // The least common multiple: lcm(4, 6) is 12.
+    pub fn lcm(b: Int) -> Int {
+        return lcm(self, b);
+    }
+
+    pub fn isEven() -> Bool {
+        return isEven(self);
+    }
+
+    pub fn isOdd() -> Bool {
+        return isOdd(self);
+    }
+}
+
+impl Float {
+    // The number as a text.
+    pub fn toString() -> String {
+        return toString(self);
+    }
+
+    // The largest whole number not above x: floor(2.7) is 2, floor(-2.7) is -3.
+    pub fn floor() -> Int {
+        return floor(self);
+    }
+
+    // The smallest whole number not below x: ceil(2.1) is 3.
+    pub fn ceil() -> Int {
+        return ceil(self);
+    }
+
+    // The nearest whole number; halves go away from zero: round(2.5) is 3.
+    pub fn round() -> Int {
+        return round(self);
+    }
+
+    // x without its fraction: trunc(-2.7) is -2.
+    pub fn trunc() -> Int {
+        return trunc(self);
+    }
+
+    pub fn abs() -> Float {
+        return fabs(self);
+    }
+
+    pub fn min(b: Float) -> Float {
+        return fmin(self, b);
+    }
+
+    pub fn max(b: Float) -> Float {
+        return fmax(self, b);
+    }
+
+    // x, or the nearest of the two limits if it is outside them.
+    pub fn clamp(low: Float, high: Float) -> Float {
+        return fclamp(self, low, high);
+    }
+
+    // -1, 0 or 1: 0 for zero, and for a Float that is not a number.
+    pub fn sign() -> Int {
+        return fsign(self);
+    }
+
+    // Fails for a negative number.
+    pub fn sqrt() -> Float {
+        return sqrt(self);
+    }
+
+    // base raised to exponent, which need not be whole: powf(2.0, 0.5).
+    pub fn pow(exponent: Float) -> Float {
+        return powf(self, exponent);
+    }
+
+    // e raised to x.
+    pub fn exp() -> Float {
+        return exp(self);
+    }
+
+    // The natural logarithm. Fails for zero and negative numbers.
+    pub fn log() -> Float {
+        return log(self);
+    }
+
+    // Angles are in radians: a full turn is 2.0 * pi.
+    pub fn sin() -> Float {
+        return sin(self);
+    }
+
+    pub fn cos() -> Float {
+        return cos(self);
+    }
+
+    pub fn tan() -> Float {
+        return tan(self);
+    }
+
+    // The angle of the point (x, y), from -pi to pi.
+    pub fn atan2(x: Float) -> Float {
+        return atan2(self, x);
+    }
+
+    pub fn radians() -> Float {
+        return radians(self);
+    }
+
+    pub fn degrees() -> Float {
+        return degrees(self);
+    }
+}

@@ -1,0 +1,158 @@
+// A set: values without repeats, where asking whether one is in takes
+// about the same time however many there are.
+//
+//     let seen = set.texts();
+//     seen.add("ada");
+//     seen.has("ada")         // true
+//
+// A set is the keys of a Map, and tells its items apart as a Map tells its
+// keys: two items are the same when they are written the same, as
+// toString writes them, and are equal, ==. A set made with
+// set.by(fn(p: Point) -> String { return "${p.x},${p.y}"; }) tells them
+// apart by that text alone.
+
+import std.dict.{shownInside};
+import std.map;
+import std.map.{Map};
+import std.ops.{Iterable, Equal, Show};
+
+pub struct Set<T> {
+    priv members: Map<T, Bool>;
+}
+
+// An empty set of values told apart by `key`: two items are the same when
+// it gives the same text for them.
+pub fn by<T>(key: fn(T) -> String) -> Set<T> {
+    return Set<T> { members: map.keyedBy<T, Bool>(key) };
+}
+
+// An empty set of items told apart as the keys of a Map are:
+// set.empty<Point>().
+pub fn empty<T>() -> Set<T> {
+    return Set<T> { members: map.empty<T, Bool>() };
+}
+
+// An empty set of texts.
+pub fn texts() -> Set<String> {
+    return empty<String>();
+}
+
+// An empty set of whole numbers.
+pub fn numbers() -> Set<Int> {
+    return empty<Int>();
+}
+
+// The set of the items of an array, of any type: set.of(["a", "b"]),
+// set.of([3, 1, 3]), set.of([Point { x: 1, y: 2 }]).
+pub fn of<T>(items: [T]) -> Set<T> {
+    let out = empty<T>();
+    out.addAll(items);
+    return out;
+}
+
+// `for item in seen` goes through the items, and two sets are == when
+// they hold the same items, in whatever order.
+impl<T> Iterable<T> for Set<T> {
+    fn iterate() -> [T] {
+        return self.items();
+    }
+}
+
+// A set is written as its items in braces: {"a", "b"}.
+impl<T> Show for Set<T> {
+    fn show() -> String {
+        return "{" + self.items().map(item -> shownInside(item)).join(", ") + "}";
+    }
+}
+
+impl<T> Equal for Set<T> {
+    fn equals(other: Set<T>) -> Bool {
+        return self.len() == other.len() && self.isSubsetOf(other);
+    }
+}
+
+impl<T> Set<T> {
+    pub fn len() -> Int {
+        return self.members.len();
+    }
+
+    pub fn isEmpty() -> Bool {
+        return self.members.isEmpty();
+    }
+
+    // Adds an item. Returns whether it was new.
+    pub fn add(item: T) -> Bool {
+        if self.members.has(item) {
+            return false;
+        }
+
+        self.members.set(item, true);
+        return true;
+    }
+
+    pub fn addAll(items: [T]) {
+        for item in items {
+            self.add(item);
+        }
+    }
+
+    pub fn has(item: T) -> Bool {
+        return self.members.has(item);
+    }
+
+    // Removes an item. Returns whether it was there.
+    pub fn remove(item: T) -> Bool {
+        return self.members.remove(item);
+    }
+
+    // The items, in the order they were first added.
+    pub fn items() -> [T] {
+        return self.members.keys();
+    }
+
+    // A set with the same items, to change without changing this one.
+    pub fn copy() -> Set<T> {
+        return Set<T> { members: self.members.copy() };
+    }
+
+    // What is in this set, in the other, or in both.
+    pub fn union(other: Set<T>) -> Set<T> {
+        let out = self.copy();
+        out.addAll(other.items());
+        return out;
+    }
+
+    // What is in both.
+    pub fn intersection(other: Set<T>) -> Set<T> {
+        return self.filter(item -> other.has(item));
+    }
+
+    // What is in this set and not in the other.
+    pub fn difference(other: Set<T>) -> Set<T> {
+        return self.filter(item -> !other.has(item));
+    }
+
+    // The items a function accepts.
+    pub fn filter(wanted: fn(T) -> Bool) -> Set<T> {
+        let out = self.copy();
+
+        for item in self.items() {
+            if !wanted(item) {
+                out.remove(item);
+            }
+        }
+
+        return out;
+    }
+
+    // Whether every item of this set is in the other.
+    pub fn isSubsetOf(other: Set<T>) -> Bool {
+        for item in self.items() {
+            if !other.has(item) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}

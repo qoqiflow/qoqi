@@ -1,0 +1,43 @@
+
+Access log, Tuesday 13 October 2026
+===================================
+16 requests from 4 clients, 09:12 to 11:59
+138.3 KB sent, 8.6 KB on average
+
+By outcome
+==========
+2xx ok                      10  ##################
+3xx not modified, moved      1  #
+4xx refused, not found       3  #####
+5xx the server failed        2  ###
+
+By hour
+=======
+09:00   8  ##############################
+10:00   4  ###############
+11:00   4  ###############
+
+Busiest routes
+==============
+route            hits  slowest  failed
+---------------  ----  -------  ------
+/api/orders/:id     4  2.4s          1
+/api/orders         3  101ms         0
+/                   2  12ms          0
+/assets/app.css     2  4ms           0
+/api/login          1  180ms         0
+
+Signed in
+=========
+ada: 5 requests, 2 of them changing something
+
+Worth a look
+============
+192.0.2.99 was refused 3 times in a row: /wp-admin/setup.php, /.env, /admin
+PUT /api/orders/881 took 2.4s at 10:02:40 (status 500)
+GET /api/reports/slow took 30.0s at 11:59:59 (status 504)
+
+Lines left out
+==============
+line 9: not a log line: this line was cut short by a full disk [...
+line 16: no such date: 31/Feb/2026:11:06:02 +0000

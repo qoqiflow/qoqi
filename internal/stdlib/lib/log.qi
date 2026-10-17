@@ -1,0 +1,213 @@
+// Messages about what a program is doing, for whoever runs it: each with
+// the moment, how much it matters, and the values that go with it.
+//
+//     log.info("list saved", {"items": 12, "file": path});
+//     log.warn("slow answer", {"ms": 950});
+//     log.error("cannot reach the database", {"reason": error.describe()});
+//
+//     2026-10-16T09:41:07.120Z INFO list saved items=12 file=todo.json
+//
+// They go to the error output, so that what the program prints stays its
+// result. log.useJson() writes each as one line of JSON instead, for a
+// service whose messages are collected and searched; log.setLevel decides
+// what is written at all. log.with gives a logger that adds the same
+// values to every message, the request a server is answering for one.
+
+import std.dict;
+import std.dict.{Dict};
+import std.json;
+import std.json.{Json};
+import std.time;
+import std.io;
+
+// How much a message matters, from least to most.
+pub enum Level {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl Level {
+    // As it is written in a message: "INFO".
+    pub fn name() -> String {
+        return match self {
+            case Level.Debug: "DEBUG";
+            case Level.Info: "INFO";
+            case Level.Warn: "WARN";
+            case Level.Error: "ERROR";
+        };
+    }
+
+    fn rank() -> Int {
+        return match self {
+            case Level.Debug: 0;
+            case Level.Info: 1;
+            case Level.Warn: 2;
+            case Level.Error: 3;
+        };
+    }
+}
+
+// Where the messages go and how they look, shared by the loggers made
+// from one another.
+struct Settings {
+    level: Level;
+    json: Bool;
+    write: fn(String) -> Void;
+}
+
+// Writes messages, each with the values it was made with.
+pub struct Logger {
+    priv fields: Dict<Any>;
+    priv settings: Settings;
+}
+
+let settings = Settings {
+    level: Level.Info,
+    json: false,
+    write: line -> io.printError(line + "\n"),
+};
+
+let root = Logger { fields: dict.empty<Any>(), settings: settings };
+
+// Messages below this level are not written. Info at first.
+pub fn setLevel(level: Level) {
+    settings.level = level;
+}
+
+// One line of JSON per message: {"time": ..., "level": "info",
+// "message": ..., and the values}.
+pub fn useJson() {
+    settings.json = true;
+}
+
+// One line of text per message, as at first.
+pub fn useText() {
+    settings.json = false;
+}
+
+// Sends the lines somewhere else than the error output: a file, a list a
+// test looks at. Each line comes without its line end.
+pub fn writeTo(write: fn(String) -> Void) {
+    settings.write = write;
+}
+
+// A logger that adds these values to every message it writes.
+pub fn with(fields: Dict<Any>) -> Logger {
+    return root.with(fields);
+}
+
+pub fn debug(message: String, fields: Dict<Any> = {}) {
+    root.write(Level.Debug, message, fields);
+}
+
+pub fn info(message: String, fields: Dict<Any> = {}) {
+    root.write(Level.Info, message, fields);
+}
+
+pub fn warn(message: String, fields: Dict<Any> = {}) {
+    root.write(Level.Warn, message, fields);
+}
+
+pub fn error(message: String, fields: Dict<Any> = {}) {
+    root.write(Level.Error, message, fields);
+}
+
+impl Logger {
+    // A logger with these values as well as its own.
+    pub fn with(fields: Dict<Any>) -> Logger {
+        let all = dict.empty<Any>();
+
+        for (name, value) in self.fields.entries() {
+            all.set(name, value);
+        }
+
+        for (name, value) in fields.entries() {
+            all.set(name, value);
+        }
+
+        return Logger { fields: all, settings: self.settings };
+    }
+
+    pub fn debug(message: String, fields: Dict<Any> = {}) {
+        self.write(Level.Debug, message, fields);
+    }
+
+    pub fn info(message: String, fields: Dict<Any> = {}) {
+        self.write(Level.Info, message, fields);
+    }
+
+    pub fn warn(message: String, fields: Dict<Any> = {}) {
+        self.write(Level.Warn, message, fields);
+    }
+
+    pub fn error(message: String, fields: Dict<Any> = {}) {
+        self.write(Level.Error, message, fields);
+    }
+
+    // Writes a message at a level, if the level is high enough.
+    pub fn write(level: Level, message: String, fields: Dict<Any> = {}) {
+        if level.rank() < self.settings.level.rank() {
+            return;
+        }
+
+        let moment = time.utc(time.now()).format("YYYY-MM-DD[T]HH:mm:ss.SSSZ");
+
+        let values: [(String, Any)] = [];
+
+        for (name, value) in self.fields.entries() {
+            if !fields.has(name) {
+                values.push((name, value));
+            }
+        }
+
+        for (name, value) in fields.entries() {
+            values.push((name, value));
+        }
+
+        if self.settings.json {
+            let document = json.object()
+                .text("time", moment)
+                .text("level", level.name().lower())
+                .text("message", message);
+
+            for (name, value) in values {
+                document.set(name, asJson(value));
+            }
+
+            self.settings.write(document.done().stringify());
+            return;
+        }
+
+        let parts = [moment, level.name(), message];
+
+        for (name, value) in values {
+            parts.push("${name}=${written(value)}");
+        }
+
+        self.settings.write(parts.join(" "));
+    }
+}
+
+// A value as text after name=: in quotes when it has a space, a quote or
+// an = in it, or is empty, so that the line can be read back.
+fn written(value: Any) -> String {
+    let text = if value is String { value } else { toString(value) };
+
+    if text == "" || text.contains(" ") || text.contains("\"") || text.contains("=") {
+        return json.text(text).stringify();
+    }
+
+    return text;
+}
+
+fn asJson(value: Any) -> Json {
+    return match value {
+        case String: json.text(value);
+        case Int: json.int(value);
+        case Float: json.number(value);
+        case Bool: json.bool(value);
+        default: if value == null { Json.Null } else { json.text(toString(value)) };
+    };
+}

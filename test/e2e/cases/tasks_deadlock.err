@@ -1,0 +1,4 @@
+[ERROR] R0009: deadlock: 2 tasks wait for each other, and none can go on
+--> test/e2e/cases/tasks_deadlock.qi:9:21 in function 'lambda_0'
+9 |         let heard = wait hears.receive() ?? "nothing";
+= Suggestion: A task that receives from a channel waits until a value is sent or the channel is closed: close it once nothing more will come

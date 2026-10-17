@@ -1,0 +1,9 @@
+// Importing what is not there.
+
+import game.physics.gravity;
+import game.physics.body.new;
+import game;
+
+fn main() -> Int {
+    return 0;
+}

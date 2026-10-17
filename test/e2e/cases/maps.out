@@ -1,0 +1,10 @@
+{"apple": 30, "pear": 45, "plum": 60} 45 false 3
+alan null [(1, 1), (1, 2), (2, 1)]
+  row 1, seat 1: ada
+  row 1, seat 2: alan
+  row 2, seat 1: grace
+{Apple: 3, Pear: 1, Plum: 1} 3
+2 15
+true false 2 3
+true false
+1 {3, 1, 2} true
