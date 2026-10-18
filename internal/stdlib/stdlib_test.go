@@ -670,7 +670,9 @@ func TestTime(t *testing.T) {
 		let watch = time.stopwatch();
 		let before = time.ticks();
 		wait time.after(50.milliseconds());
-		println(time.ticks() - before >= 50000, watch.microseconds() >= 50000, watch.milliseconds() >= 50);
+		// A moment to wait for is in whole milliseconds: when the wait began
+		// late in one, a little under 50 have gone by
+		println(time.ticks() - before >= 49000, watch.microseconds() >= 49000, watch.milliseconds() >= 49);
 
 		// Restarted, it counts from nothing again: well under what it had
 		watch.restart();
