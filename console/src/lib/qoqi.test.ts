@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { doing } from './describe';
 import { givenFields, keyParts, qoqi, outcomeOf, toPlain } from './qoqi';
-import { initial } from '@/components/fields';
+import { initial } from '@/features/instances/fields';
 import type { Data, Program, View } from './types';
 
 // Values as the daemon gives them, written back as Qoqi and as what a

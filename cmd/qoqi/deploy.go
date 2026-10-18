@@ -126,75 +126,22 @@ func said(report *flowd.Report, dry bool) {
 	}
 }
 
-// flowDeploy is qoqi deploy: the programs a path names, compiled
-// here, sent to the daemon of the store, and their locks written next to
-// them.
-func flowDeploy(store, path string, dry bool) {
-	programs, err := packagesOf(path)
-	if err != nil {
-		fatal(err)
-	}
-	var pkgs []*flowd.Package
-	for _, p := range programs {
-		pkgs = append(pkgs, p.pkg)
-	}
-	body, err := json.Marshal(map[string]any{"programs": pkgs, "dry": dry})
-	if err != nil {
-		fatal(err)
-	}
-	status, data := flowRequest(store, "POST", "/api/deploy", body)
-	if status >= 400 {
-		flowRefused(status, data)
-	}
-	var answer struct {
-		Reports []*flowd.Report `json:"reports"`
-	}
-	if err := json.Unmarshal(data, &answer); err != nil {
-		fatal(err)
-	}
-	for i, report := range answer.Reports {
-		said(report, dry)
-		if !dry && i < len(programs) && report.Lock != nil {
-			if err := flowrt.WriteLock(lockPath(programs[i].file), report.Lock); err != nil {
-				fatal(err)
-			}
+// flowDeploy is qoqi deploy: the programs a path names, compiled here,
+// sent to the daemon, and their locks written next to them. With watch,
+// they are deployed again each time one of their files changes: what
+// does not compile, or is refused, is said, and the version before goes
+// on.
+func flowDeploy(path string, dry, watching bool) {
+	if !watching {
+		if err := deployOnce(path, dry); err != nil {
+			fatal(err)
 		}
+		return
 	}
-}
-
-// deployHere deploys the programs a path names to a daemon in this
-// process, their locks written next to them. A refusal is returned.
-func deployHere(daemon *flowd.Daemon, path string) error {
-	programs, err := packagesOf(path)
-	if err != nil {
-		return err
+	if err := deployOnce(path, dry); err != nil {
+		fmt.Fprintf(os.Stderr, "qoqi: %v\n", err)
 	}
-	var pkgs []*flowd.Package
-	for _, p := range programs {
-		pkgs = append(pkgs, p.pkg)
-	}
-	reports, err := daemon.DeployAll(pkgs, false)
-	if err != nil {
-		return err
-	}
-	for i, report := range reports {
-		for _, change := range report.Changes {
-			fmt.Fprintf(os.Stderr, "qoqi: %s: %s\n", report.Program, change)
-		}
-		for _, line := range report.Said {
-			fmt.Fprintf(os.Stderr, "qoqi: %s: %s\n", report.Program, line)
-		}
-		if err := flowrt.WriteLock(lockPath(programs[i].file), report.Lock); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// watch deploys a path again each time one of the files of its programs
-// changes, until stop is closed: what does not compile, or is refused, is
-// said, and the version before goes on.
-func watch(daemon *flowd.Daemon, path string, stop <-chan struct{}) {
+	fmt.Fprintf(os.Stderr, "qoqi: watching %s: a change saved is deployed\n", path)
 	stamps := func() map[string]time.Time {
 		out := map[string]time.Time{}
 		var files []string
@@ -211,14 +158,7 @@ func watch(daemon *flowd.Daemon, path string, stop <-chan struct{}) {
 		return out
 	}
 	last := stamps()
-	tick := time.NewTicker(300 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		select {
-		case <-stop:
-			return
-		case <-tick.C:
-		}
+	for range time.Tick(300 * time.Millisecond) {
 		now := stamps()
 		changed := len(now) != len(last)
 		for f, t := range now {
@@ -230,20 +170,61 @@ func watch(daemon *flowd.Daemon, path string, stop <-chan struct{}) {
 			continue
 		}
 		last = now
-		if err := deployHere(daemon, path); err != nil {
+		if err := deployOnce(path, dry); err != nil {
 			fmt.Fprintf(os.Stderr, "qoqi: the version before goes on: %v\n", err)
 		}
 	}
 }
 
+// deployOnce deploys the programs a path names, or says what it would do.
+func deployOnce(path string, dry bool) error {
+	programs, err := packagesOf(path)
+	if err != nil {
+		return err
+	}
+	var pkgs []*flowd.Package
+	for _, p := range programs {
+		pkgs = append(pkgs, p.pkg)
+	}
+	body, err := json.Marshal(map[string]any{"programs": pkgs, "dry": dry})
+	if err != nil {
+		return err
+	}
+	status, data := flowRequest("POST", "/api/deploy", body)
+	if status >= 400 {
+		var refusal struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(data, &refusal) == nil && refusal.Message != "" {
+			return fmt.Errorf("%s", refusal.Message)
+		}
+		return fmt.Errorf("the daemon answered %d", status)
+	}
+	var answer struct {
+		Reports []*flowd.Report `json:"reports"`
+	}
+	if err := json.Unmarshal(data, &answer); err != nil {
+		return err
+	}
+	for i, report := range answer.Reports {
+		said(report, dry)
+		if !dry && i < len(programs) && report.Lock != nil {
+			if err := flowrt.WriteLock(lockPath(programs[i].file), report.Lock); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // flowVersions is qoqi versions: the deploys kept in the store, the
 // last first, with what still runs on each.
-func flowVersions(store, program string) {
+func flowVersions(program string) {
 	path := "/api/deployments"
 	if program != "" {
 		path += "?program=" + program
 	}
-	status, data := flowRequest(store, "GET", path, nil)
+	status, data := flowRequest("GET", path, nil)
 	if status >= 400 {
 		flowRefused(status, data)
 	}
@@ -285,11 +266,11 @@ func flowVersions(store, program string) {
 // flowDiff is qoqi diff: what changed of the source from one deploy
 // to another, as diff -u says it. A deploy is #seq, or a program, whose
 // last deploy it is; from the deploy before it, unless --from says.
-func flowDiff(store, which, from string) {
+func flowDiff(which, from string) {
 	seq := strings.TrimPrefix(which, "#")
 	if _, err := fmt.Sscanf(seq, "%d", new(int)); err != nil {
 		// A program: its last deploy
-		status, data := flowRequest(store, "GET", "/api/deployments?program="+which, nil)
+		status, data := flowRequest("GET", "/api/deployments?program="+which, nil)
 		if status >= 400 {
 			flowRefused(status, data)
 		}
@@ -304,7 +285,7 @@ func flowDiff(store, which, from string) {
 	if from != "" {
 		path += "?from=" + strings.TrimPrefix(from, "#")
 	}
-	status, data := flowRequest(store, "GET", path, nil)
+	status, data := flowRequest("GET", path, nil)
 	if status >= 400 {
 		flowRefused(status, data)
 	}

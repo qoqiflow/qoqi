@@ -1,18 +1,17 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Ban, ChevronRight, CircleAlert, CircleStop, Clock, Copy, CornerDownRight, GitFork, Play, RotateCcw, Undo2 } from 'lucide-react';
+import { Ban, ChevronRight, CircleAlert, CircleStop, Clock, Copy, CornerDownRight, GitFork, MessageSquareReply, Play, RotateCcw, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CancelDialog } from '@/components/cancel';
+import { CancelDialog } from '@/features/instances/cancel';
 import { CodeView, type Note } from '@/components/code';
-import { Inboxes } from '@/components/inbox';
-import { useLaunch } from '@/components/launch';
+import { Inboxes } from '@/features/instances/inbox';
+import { useLaunch } from '@/features/instances/launch';
 import { StatusBadge, StatusDot } from '@/components/status';
-import { EndDialog, ResumeDialog } from '@/components/stopped';
+import { AnswerDialog, EndDialog, ResumeDialog } from '@/features/instances/stopped';
 import { Fields, Value } from '@/components/value';
-import { currentToken } from '@/lib/api';
 import { awaited, doing, isLibrary, shortFile, waitsFor } from '@/lib/describe';
 import { givenFields, keyParts, qoqi, outcomeOf, toPlain } from '@/lib/qoqi';
 import { useInstance, useInstances, useProgram, useSource } from '@/lib/queries';
@@ -59,11 +58,12 @@ function InstanceView({ detail, flow, program }: { detail: Detail; flow?: FlowIn
   const [cancelling, setCancelling] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [answering, setAnswering] = useState(false);
   const given = givenFields(detail.fields);
   const ended = detail.status === 'done' || detail.status === 'failed';
   const d = doing(detail, now);
 
-  const curl = `curl -H "Authorization: Bearer ${currentToken()}" ${location.origin}/api/instances/${encodeURIComponent(detail.id)}`;
+  const curl = `curl -H "Authorization: Bearer $(cat ~/.qoqi/token)" ${location.origin}/api/instances/${encodeURIComponent(detail.id)}`;
 
   return (
     <div className="grid gap-6">
@@ -179,6 +179,9 @@ function InstanceView({ detail, flow, program }: { detail: Detail; flow?: FlowIn
               <Button variant="outline" onClick={() => setEnding(true)}>
                 <CircleStop /> End as it is…
               </Button>
+              <Button variant="ghost" onClick={() => setAnswering(true)}>
+                <MessageSquareReply /> Answer a step…
+              </Button>
             </div>
           </div>
         </div>
@@ -223,6 +226,7 @@ function InstanceView({ detail, flow, program }: { detail: Detail; flow?: FlowIn
         <>
           <ResumeDialog instance={detail} open={resuming} onOpenChange={setResuming} />
           <EndDialog instance={detail} open={ending} onOpenChange={setEnding} />
+          <AnswerDialog instance={detail} open={answering} onOpenChange={setAnswering} />
         </>
       )}
     </div>

@@ -8,30 +8,55 @@ $ qoqi <command> [arguments]
 
 ## Flows
 
-Every command but `serve` and `gen` talks to the daemon that serves the store, found from the store's address file (`flows.db.daemon`). `--store` names the store, `flows.db` by default.
+`qoqi serve` is the daemon: it starts, and is given its programs by `qoqi deploy`. Every other command but `gen` talks to it over its [HTTP API](http-api.md), from its machine or from elsewhere:
+
+*   on its machine, by the files it keeps in its home, `QOQI_PATH`;
+*   from anywhere, with `--url` and `--token`, or `QOQI_URL` and `QOQI_TOKEN`.
+
+```console
+$ export QOQI_URL=https://flows.example.com QOQI_TOKEN=$(ssh flows cat .qoqi/token)
+$ qoqi deploy shop.qi
+$ qoqi ls --status stopped
+```
+
+### The home: `QOQI_PATH`
+
+The folder where the daemon keeps all of its files, `~/.qoqi` when `QOQI_PATH` is not set:
+
+| File | |
+|------|--|
+| `flows.db` | The store, SQLite: the instances, the versions deployed, the users of the console. `--store` or `QOQI_STORE` names another, a server |
+| `daemon.json` | Where the daemon listens, its token and its process, while it runs, readable by its user alone: the commands read it |
+| `token` | The daemon's token, readable by its user alone; the same each time it starts |
+| `logs/daemon.log` | What the daemon says, each line with its time |
+| `logs/flows.log` | What the flows print |
+
+One daemon runs from a home at a time: a second is refused while the first lives.
 
 ### `qoqi serve`
 
 ```console
-$ qoqi serve [program or folder] [--store flows.db] [--listen 127.0.0.1:7070] [--workers N] [--watch]
+$ qoqi serve [--listen 127.0.0.1:7070] [--hosts name,...] [--store address] [--workers N]
 ```
 
-Runs the daemon: the flows deployed to the store, and those of the program, folder or project given. In a project folder with no argument, the project's flows.
+Runs the daemon, with the flows deployed to its store, until it is stopped (`Ctrl-C`, `SIGTERM`). It takes no program: `qoqi deploy` gives it them, and it serves them again each time it starts.
 
 | Option | |
 |--------|--|
-| `--store` | A SQLite file, or a server: `postgres://user:pass@host/db`, `mysql://user:pass@host/db` |
 | `--listen` | Where the HTTP API and the console are served |
+| `--hosts` | The names it is reached by from elsewhere, besides its own address and `localhost`: `--hosts flows.example.com` |
+| `--store` | A SQLite file, or a server: `postgres://user:pass@host/db`, `mysql://user:pass@host/db`. Also `QOQI_STORE`; `$QOQI_PATH/flows.db` by default |
 | `--workers` | How many instances run side by side; the number of processors by default |
-| `--watch` | Deploys again what changes, as it is saved |
+
+The first time, the console has one user: `admin`, password `admin`, which is changed at the first sign in.
 
 ### `qoqi deploy`
 
 ```console
-$ qoqi deploy <program or folder> [--dry] [--store flows.db]
+$ qoqi deploy <program or folder> [--dry] [--watch]
 ```
 
-A new version to the daemon, served at once: what runs ends its turn, and each instance moves at its next [stage](../concepts/versioning.md). `--dry` says what it would do. Writes `flow.lock` next to the program.
+A new version to the daemon, served at once: what runs ends its turn, and each instance moves at its next [stage](../concepts/versioning.md). The program is compiled here, and sent. `--dry` says what it would do; `--watch` deploys again each time a file is saved, and says what does not compile or is refused while the version before goes on. Writes `flow.lock` next to the program.
 
 ### `qoqi undeploy`
 
@@ -89,7 +114,19 @@ Cancels an instance, its undos run; takes a stopped instance up, showing what it
 
 ### `qoqi ui`
 
-Opens the console of the daemon in a browser, with its token.
+Opens the console of the daemon in a browser. People sign in to it with a name and a password; see `qoqi users`.
+
+### `qoqi users`
+
+```console
+$ qoqi users add ada                  # the password is asked for, twice
+$ echo "$PASSWORD" | qoqi users add ci --password-stdin
+$ qoqi users ls
+$ qoqi users passwd ada               # their sessions end; they choose another at their next sign in
+$ qoqi users rm ada
+```
+
+The people who sign in to the console, through the daemon. The console starts with `admin`, password `admin`; a password given to someone, here or in the console, is theirs to change at their next sign in, before anything else.
 
 ### `qoqi gen`
 

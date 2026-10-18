@@ -1,6 +1,6 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { currentToken } from './api';
+import { headers } from './api';
 import type { Event, View } from './types';
 
 // The console stays current by reading GET /api/events, a stream of what
@@ -91,7 +91,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         controller = new AbortController();
         try {
           const response = await fetch('/api/events', {
-            headers: { Authorization: 'Bearer ' + currentToken() },
+            headers: headers(),
+            credentials: 'same-origin',
             signal: controller.signal,
           });
           if (response.status === 401) {

@@ -424,7 +424,7 @@ func TestMissingFile(t *testing.T) {
 }
 
 func TestUsageErrors(t *testing.T) {
-	for _, args := range [][]string{{"run"}, {"dump"}, {"dump", "--ir"}, {"serve", "a", "b"}, {"start"}, {"no-such-command"}} {
+	for _, args := range [][]string{{"run"}, {"dump"}, {"dump", "--ir"}, {"start"}, {"no-such-command"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			res := runQoqi(t, args...)
 			if res.exit != 1 {
@@ -435,6 +435,14 @@ func TestUsageErrors(t *testing.T) {
 			}
 		})
 	}
+
+	// qoqi serve is given no program: it says how a program is given
+	t.Run("serve a b", func(t *testing.T) {
+		res := runQoqi(t, "serve", "a", "b")
+		if res.exit != 1 || !strings.Contains(res.stderr, "qoqi serve runs no program of its own: start it, then qoqi deploy a") {
+			t.Errorf("expected exit code 1 and qoqi deploy named, got %d:\n%s%s", res.exit, res.stdout, res.stderr)
+		}
+	})
 }
 
 // TestLargeProgram runs a program well past what the bytecode format once

@@ -3,13 +3,13 @@
 The daemon's API is everything it does: the command line and the console are clients of it, and so can any program be.
 
 ```console
-$ curl -H "Authorization: Bearer $(cat flows.db.token)" http://127.0.0.1:7070/api/instances
+$ curl -H "Authorization: Bearer $(cat ~/.qoqi/token)" http://127.0.0.1:7070/api/instances
 ```
 
 ## Conventions
 
-*   **Address.** `qoqi serve --listen`, `127.0.0.1:7070` by default. The daemon answers only to its own host, `localhost`, `127.0.0.1` and `::1`; another `Host` is `403`.
-*   **Authentication.** Every request but `POST /api/attempts` carries `Authorization: Bearer <token>`. The token is in `<store>.token` (`flows.db.token`), made when the daemon first starts, readable by its owner only. Wrong or missing: `401`.
+*   **Address.** `qoqi serve --listen`, `127.0.0.1:7070` by default. The daemon answers only to its own host, `localhost`, `127.0.0.1`, `::1` and the names of `--hosts`; another `Host` is `403`.
+*   **Authentication.** Every request but `POST /api/attempts` and `/api/auth/*` carries `Authorization: Bearer <token>`, or the session cookie of a person signed in to the console. The token is in `$QOQI_PATH/token` (`~/.qoqi/token`), made when the daemon first starts, readable by its owner only. Wrong or missing: `401`. A request of a session that changes something carries `X-Qoqi-Console: 1` too, which a page of another site cannot send.
 *   **Bodies** are JSON, both ways.
 *   **Errors** are `{"error": "<code>", "message": "<sentence>"}`, with the status of the table.
 
@@ -106,7 +106,7 @@ Takes a stopped instance up from its last stage. `{"dry": true}` answers `200` w
 
 ### `POST /api/instances/{id}/answer`
 
-Says what a step of a stopped instance did, for a step its application could not tell of: `{"key": "<step key>", "value": {"Ok": "ch-1"}}`, or `{"key": "…", "nothing": true}` when it did nothing, so that it is sent again. `200 {"answered": true}`. Then resume.
+Says what a step of a stopped instance did, for a step its application could not tell of (`GET /api/instances/{id}` lists the steps that left unanswered, `unanswered`): `{"key": "<step key>", "value": {"Ok": "ch-1"}}`, or `{"key": "…", "nothing": true}` when it did nothing, so that it is sent again. `200 {"answered": true}`. Then resume.
 
 ### `POST /api/instances/{id}/end`
 
@@ -126,6 +126,10 @@ What `qoqi deploy` sends: `{"programs": [...], "dry": false}`, each program comp
 
 `{"program": "approvals"}`. `200 {"removed": "approvals"}`; `409 refused` while one of its instances is alive.
 
+### `POST /api/deployments/{seq}/redeploy`
+
+The version of a deploy, deployed again as a new one, checked as any is: a rollback. `?dry=1` says what it would do.
+
 ### `GET /api/deployments`, `GET /api/deployments/{seq}`, `GET /api/deployments/{seq}/diff`
 
 The deploys, the last first (`?program=`); one, with its sources; what it changed of the source, from the one before or `?from=seq`, as hunks.
@@ -143,6 +147,32 @@ Server-sent events: one `data: {...}` line per event, of kind `instance` (with t
 ### `GET /api/output`
 
 What the instances printed, the last 500 lines: `[{"at", "id", "text"}]`. `?instance=` for one.
+
+## The console
+
+These are what the console is made of; a program has little use for them.
+
+### `GET /api/auth`, `POST /api/auth/login`, `POST /api/auth/logout`
+
+Who is there: `{"accounts", "me", "prefs"}`. `login` takes `{"name", "password"}` and sets the session cookie, `HttpOnly`, `SameSite=Strict`, for 14 days. Five wrong passwords for a name in a quarter of an hour, and it is refused (`429`) until it passes. The console starts with `admin`, password `admin`.
+
+A person whose password was given them (`admin`'s first, or one set by another) is `"renew": true`: until they choose their own with `POST /api/users/{name}/password`, every other request is `403` `renew`.
+
+### `GET /api/users`, `POST /api/users`, `DELETE /api/users/{name}`, `POST /api/users/{name}/password`, `PUT /api/me/prefs`
+
+The people who sign in. A password has 10 characters at least; a user's own needs `"current"` besides, and is another than it. A new password ends the user's sessions; one given by another is to be changed at the next sign in. The last user, and oneself, are not taken away.
+
+### `GET /api/workspace`, `GET|DELETE /api/workspace/{program}`, `PUT|DELETE /api/workspace/{program}/files/{file}`
+
+The editor's programs: those deployed, and the drafts written in the console, kept in the store until deployed. A program opens as its draft, or as the files of its last version. Its entry is `{program}.qi`; its other files are modules, and `qoqi.json` the queues of its steps.
+
+### `POST /api/workspace/{program}/check`, `POST /api/workspace/{program}/deploy`, `POST /api/format`
+
+`check` compiles a draft, with `{"files": {...}}` over what is kept: `{"ok", "flows", "problems": [{"severity", "message", "file", "line", "column", ...}]}`. `deploy` does the same, then deploys it, or says what it would do with `?dry=1`: `422` when it does not compile, `409` when the daemon refuses it, with `why`. Deployed, the draft is done with. `format` writes `{"text"}` as `qoqi fmt` does.
+
+### `GET /api/stats?days=365&tz=60&flow=`
+
+What happened, day by day, cut at midnight `tz` minutes from UTC: instances started, done, failed and stopped and steps run each day; each flow, with how long its instances took (median, 95th); the steps that run the most; the starts by day of the week and hour. Kept from the time the daemon has the console's tables.
 
 ## Steps carried out by applications
 

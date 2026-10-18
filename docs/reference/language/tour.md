@@ -30,7 +30,7 @@ Every program needs a `main` function without parameters. If it returns an `Int`
 
 | Command | What it does |
 |---------|--------------|
-| `qoqi serve program.qi` | Run the flows of a program, and keep them: the daemon ([flow.md](../../concepts/flows.md)). `qoqi deploy`, `start`, `ls`, `show`, `send`, `result` and the rest talk to it; `qoqi serve --help` lists them |
+| `qoqi serve` | The daemon, which runs flows and keeps them ([flow.md](../../concepts/flows.md)). `qoqi deploy program.qi` gives it a program; `start`, `ls`, `show`, `send`, `result` and the rest talk to it; `qoqi serve --help` lists them |
 | `qoqi run file.qi` | Compile and run a program |
 | `qoqi file.qi` | The same; also what a file that starts with `#!/usr/bin/env qoqi` is run with (see below) |
 | `qoqi dump file.qi` | Print what the compiler made of a program: its bytecode, as a listing; `--ir` prints the intermediate representation instead |
@@ -879,7 +879,7 @@ A `qoqi.json` at the top of a program's folder says where it starts, so it can b
 ```bash
 qoqi run            # in the folder, or anywhere below it
 qoqi run path/to/project
-qoqi serve          # the flows of the project
+qoqi deploy .       # the flows of the project, to the daemon
 ```
 
 `root` is where import paths start (default: the folder of `qoqi.json`). `packages` gives a name to a folder of modules kept elsewhere: `import textkit.format.pad;` reads `../libs/textkit/format/pad.qi`. Packages with versions, downloaded from git, are listed under `require` and installed with `qoqi pkg install` ([packages.md](packages.md)). `heap_mb` and `max_depth` set the limits described under [Commands](#commands). All keys are optional. See [project.md](../configuration.md).

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FieldRow, initial } from '@/components/fields';
+import { FieldRow, initial } from '@/features/instances/fields';
 import { StatusBadge } from '@/components/status';
 import { api, ApiError } from '@/lib/api';
 import { useProgram } from '@/lib/queries';
@@ -213,7 +213,7 @@ function LaunchForm({
   };
 
   const command = `qoqi start ${flow.name} ${name || '<name>'} ${shellQuote(JSON.stringify(fields))}`;
-  const curl = `curl -X POST ${location.origin}/api/instances \\\n  -H "Authorization: Bearer $(jq -r .token flows.db.daemon)" \\\n  -d ${shellQuote(body)}`;
+  const curl = `curl -X POST ${location.origin}/api/instances \\\n  -H "Authorization: Bearer $(cat ~/.qoqi/token)" \\\n  -d ${shellQuote(body)}`;
 
   return (
     <form

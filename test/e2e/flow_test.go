@@ -42,11 +42,20 @@ step fn charge(id: String, amount: Int) -> Int {
 fn main() {}
 `
 
-// flowCommand runs qoqi in a folder.
+// flowEnv is the environment of a qoqi command whose home, QOQI_PATH,
+// is dir: the daemon keeps its files there, and the commands find it by
+// them. What follows is added to it.
+func flowEnv(dir string, more ...string) []string {
+	env := append(os.Environ(), "QOQI_PATH="+dir, "QOQI_URL=", "QOQI_TOKEN=", "QOQI_STORE=")
+	return append(env, more...)
+}
+
+// flowCommand runs qoqi in a folder, the folder its home.
 func flowCommand(t *testing.T, dir string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(qoqi, args...)
 	cmd.Dir = dir
+	cmd.Env = flowEnv(dir)
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if exit, ok := err.(*exec.ExitError); ok {
@@ -57,20 +66,27 @@ func flowCommand(t *testing.T, dir string, args ...string) (string, int) {
 	return string(out), code
 }
 
-// startDaemon starts qoqi serve in a folder, and waits until it says
-// where it is.
-func startDaemon(t *testing.T, dir string, out *lockedWriter) *exec.Cmd {
-	t.Helper()
-	cmd := exec.Command(qoqi, "serve", "shop.qi", "--listen", "127.0.0.1:0")
+// serveCommand is qoqi serve in a folder, the folder its home, with
+// what the environment adds.
+func serveCommand(dir string, env ...string) *exec.Cmd {
+	cmd := exec.Command(qoqi, "serve", "--listen", "127.0.0.1:0")
 	cmd.Dir = dir
-	cmd.Stdout = out
-	cmd.Stderr = cmd.Stdout
+	cmd.Env = flowEnv(dir, env...)
+	return cmd
+}
+
+// serveIn starts a daemon with no program in a folder, the folder its
+// home, and waits until it says where it is in daemon.json.
+func serveIn(t *testing.T, dir string, out *lockedWriter, env ...string) *exec.Cmd {
+	t.Helper()
+	cmd := serveCommand(dir, env...)
+	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(filepath.Join(dir, "flows.db.daemon")); err == nil && strings.Contains(string(data), `"pid": `+itoa(cmd.Process.Pid)) {
+		if data, err := os.ReadFile(filepath.Join(dir, "daemon.json")); err == nil && strings.Contains(string(data), `"pid": `+itoa(cmd.Process.Pid)) {
 			return cmd
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -78,6 +94,31 @@ func startDaemon(t *testing.T, dir string, out *lockedWriter) *exec.Cmd {
 	cmd.Process.Kill()
 	t.Fatalf("the daemon did not start:\n%s", out.String())
 	return nil
+}
+
+// deployIn deploys a program, or a folder of them, to the daemon of a
+// folder, and gives what qoqi deploy said.
+func deployIn(t *testing.T, dir, program string, daemon *lockedWriter) string {
+	t.Helper()
+	got, code := flowCommand(t, dir, "deploy", program)
+	if code != 0 {
+		t.Fatalf("deploy %s: %d %s\ndaemon:\n%s", program, code, got, daemon.String())
+	}
+	return got
+}
+
+// startDaemon starts qoqi serve in a folder, waits until it says where
+// it is, and deploys shop.qi to it.
+func startDaemon(t *testing.T, dir string, out *lockedWriter, env ...string) *exec.Cmd {
+	t.Helper()
+	cmd := serveIn(t, dir, out, env...)
+	got, code := flowCommand(t, dir, "deploy", "shop.qi")
+	if code != 0 {
+		cmd.Process.Kill()
+		cmd.Wait()
+		t.Fatalf("deploy shop.qi: %d %s\ndaemon:\n%s", code, got, out.String())
+	}
+	return cmd
 }
 
 // A daemon killed while an instance sleeps; another started on the same
@@ -121,11 +162,9 @@ func TestAFlowOutlivesItsDaemon(t *testing.T) {
 		t.Errorf("each step once, the second in the second daemon:\nfirst:\n%s\nsecond:\n%s", first.String(), second.String())
 	}
 
-	// A second daemon on the same file is refused while the first lives
-	refused := exec.Command(qoqi, "serve", "shop.qi", "--listen", "127.0.0.1:0")
-	refused.Dir = dir
-	output, err := refused.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), "is serving flows.db already") {
+	// A second daemon from the same home is refused while the first lives
+	output, err := serveCommand(dir).CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "a daemon (process "+itoa(again.Process.Pid)+") runs from "+dir+" already, at http://127.0.0.1:") {
 		t.Errorf("expected a second daemon to be refused, got %v:\n%s", err, output)
 	}
 
@@ -389,11 +428,14 @@ func TestANewVersionThatChangesAStage(t *testing.T) {
 	counting := strings.Replace(subProgram("v2"), "let paid = 0;", "let paid = 0;\n        let count = 7;", 1)
 	counting = strings.Replace(counting, "paid += bill(month);", "paid += bill(month) + count;", 1)
 	write(counting)
-	refused := exec.Command(qoqi, "serve", "shop.qi", "--listen", "127.0.0.1:0")
-	refused.Dir = dir
-	output, err := refused.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), "count: Int is new, and no migrate fn month says how an instance there goes on (1 instances of Sub alive)") {
-		t.Fatalf("expected the version refused, got %v:\n%s", err, output)
+	second := &lockedWriter{}
+	again := serveIn(t, dir, second)
+	defer func() {
+		again.Process.Signal(syscall.SIGTERM)
+		again.Wait()
+	}()
+	if output, code := flowCommand(t, dir, "deploy", "shop.qi"); code == 0 || !strings.Contains(output, "count: Int is new, and no migrate fn month says how an instance there goes on (1 instances of Sub alive)") {
+		t.Fatalf("expected the version refused, got %d:\n%s", code, output)
 	}
 
 	write(counting + `
@@ -405,12 +447,7 @@ impl Sub {
     }
 }
 `)
-	second := &lockedWriter{}
-	again := startDaemon(t, dir, second)
-	defer func() {
-		again.Process.Signal(syscall.SIGTERM)
-		again.Wait()
-	}()
+	deployIn(t, dir, "shop.qi", second)
 	got, code := flowCommand(t, dir, "result", "sub:1", "--wait", "20s")
 	if code != 0 || strings.TrimSpace(got) != "302" {
 		t.Fatalf("result: %d %s\nfirst:\n%s\nsecond:\n%s", code, got, first.String(), second.String())
@@ -505,22 +542,15 @@ func TestServingAFolder(t *testing.T) {
 	write("billing_test.qi", "fn testNothing() {}\n")
 
 	out := &lockedWriter{}
-	cmd := exec.Command(qoqi, "serve", "flows", "--listen", "127.0.0.1:0")
-	cmd.Dir = dir
-	cmd.Stdout, cmd.Stderr = out, out
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
+	cmd := serveIn(t, dir, out)
 	defer func() {
 		cmd.Process.Signal(syscall.SIGTERM)
 		cmd.Wait()
 	}()
-	deadline := time.Now().Add(20 * time.Second)
-	for !strings.Contains(out.String(), "qoqi ui opens its pages") && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !strings.Contains(out.String(), "Sub, Order") {
-		t.Fatalf("expected both programs' flows served:\n%s", out.String())
+	waitOut(t, out, "no program yet: qoqi deploy <program> gives it one")
+	deployed := deployIn(t, dir, "flows", out)
+	if !strings.Contains(deployed, "billing deployed, version") || !strings.Contains(deployed, "shop deployed, version") {
+		t.Fatalf("expected both programs deployed:\n%s", deployed)
 	}
 
 	if got, code := flowCommand(t, dir, "start", "Order", "x", `{"id": "A1", "amount": 3}`); code != 0 {
@@ -546,11 +576,8 @@ func TestServingAFolder(t *testing.T) {
 	os.Mkdir(clash, 0o755)
 	os.WriteFile(filepath.Join(clash, "a.qi"), []byte(shopProgram), 0o644)
 	os.WriteFile(filepath.Join(clash, "b.qi"), []byte(shopProgram), 0o644)
-	refused := exec.Command(qoqi, "serve", "clash", "--store", "clash.db", "--listen", "127.0.0.1:0")
-	refused.Dir = dir
-	output, err := refused.CombinedOutput()
-	if err == nil || !strings.Contains(string(output), "a and b both have a flow Order") || strings.Contains(string(output), "a deployed") {
-		t.Errorf("expected two programs with one flow refused, got %v:\n%s", err, output)
+	if output, code := flowCommand(t, dir, "deploy", "clash"); code == 0 || !strings.Contains(output, "a and b both have a flow Order") || strings.Contains(output, "a deployed") {
+		t.Errorf("expected two programs with one flow refused, got %d:\n%s", code, output)
 	}
 }
 
@@ -836,7 +863,7 @@ func TestTheConsoleOfADaemon(t *testing.T) {
 	daemon := startDaemon(t, dir, first)
 
 	address := func() (string, string) {
-		data, err := os.ReadFile(filepath.Join(dir, "flows.db.daemon"))
+		data, err := os.ReadFile(filepath.Join(dir, "daemon.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -870,9 +897,9 @@ func TestTheConsoleOfADaemon(t *testing.T) {
 	if status, body := get(url+"/api/program", token); status != http.StatusOK || !strings.Contains(body, `"text": "Address"`) || !strings.Contains(body, `"name": "Express"`) {
 		t.Errorf("the program described: %d %s", status, body)
 	}
-	kept, err := os.ReadFile(filepath.Join(dir, "flows.db.token"))
+	kept, err := os.ReadFile(filepath.Join(dir, "token"))
 	if err != nil || strings.TrimSpace(string(kept)) != token {
-		t.Errorf("the token is kept next to the store: %q %v", kept, err)
+		t.Errorf("the token is kept in the home of the daemon: %q %v", kept, err)
 	}
 
 	// Plain JSON: no "$type", a variant by its name

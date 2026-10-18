@@ -1,7 +1,8 @@
 // A free trial of a service, then a subscription billed each month: the
 // life of a customer over weeks, written as the program it is.
 //
-//     qoqi serve examples/flows
+//     qoqi serve &
+//     qoqi deploy examples/flows
 //     qoqi start Signup signup:ada '{"email": "ada@example.com", "plan": "Team", "day": "3s"}'
 //     qoqi send signup:ada events '"Activated"' --key evt-1
 //     qoqi send signup:ada events '{"AddedCard": "visa-4242"}' --key evt-2
@@ -277,5 +278,5 @@ pub step fn goodbye(email: String, reason: String) {
 }
 
 fn main() {
-    println("The flows of this program are served by: qoqi serve examples/flows");
+    println("The flows of this program are given to the daemon by: qoqi deploy examples/flows");
 }

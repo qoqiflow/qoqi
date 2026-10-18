@@ -1,86 +1,15 @@
-import { useState } from 'react';
-import { Play, ShieldCheck, Workflow } from 'lucide-react';
+import { Play, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { CodeView } from '@/components/code';
-import { useLaunch } from '@/components/launch';
+import { useLaunch } from '@/features/instances/launch';
 import { shortFile } from '@/lib/describe';
-import { useProgram } from '@/lib/queries';
 import type { Decl, Field, FlowInfo, StepInfo } from '@/lib/types';
-import { cn } from '@/lib/utils';
 
-// The program the daemon runs, as a reference: its flows and what they
-// are started with, its steps, the only way its flows reach the world, and
-// the types they hold.
+// The program the daemon runs, as a reference: a flow and what it is
+// started with, the steps, the only way its flows reach the world, and the
+// types they hold.
 
-export function ProgramPage() {
-  const program = useProgram();
-  const [shown, setShown] = useState<string | null>(null);
-
-  if (program.isLoading) return <Skeleton className="h-96 rounded-xl" />;
-  if (!program.data) return <p className="text-muted-foreground">The daemon does not describe its program.</p>;
-  const p = program.data;
-  const flow = p.flows.find((f) => f.name === shown) ?? p.flows[0];
-  const own = Object.values(p.types).filter((d) => !d.name.startsWith('std.'));
-
-  return (
-    <div className="grid gap-8">
-      <div className="grid gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Program</h1>
-        <p className="text-sm text-muted-foreground">
-          <span className="font-mono">{p.entry}</span> · {p.flows.length} flows · {p.steps.length} steps
-        </p>
-      </div>
-
-      <section className="grid gap-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Flows</h2>
-        <div className="flex flex-wrap gap-2">
-          {p.flows.map((f) => (
-            <button
-              key={f.name}
-              type="button"
-              onClick={() => setShown(f.name)}
-              className={cn(
-                'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors',
-                f.name === flow?.name ? 'border-primary bg-primary/8 font-medium' : 'bg-card hover:bg-accent',
-              )}
-            >
-              <Workflow className="size-4 text-primary" /> {f.name}
-            </button>
-          ))}
-        </div>
-        {flow && <FlowDetail flow={flow} />}
-      </section>
-
-      <section className="grid gap-4">
-        <div className="grid gap-1">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Steps</h2>
-          <p className="text-sm text-muted-foreground">
-            The only way a flow reaches the world: what each returns is kept under its key, and it is not done again.
-          </p>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          {p.steps.map((s) => (
-            <StepCard key={s.name} step={s} />
-          ))}
-        </div>
-      </section>
-
-      {own.length > 0 && (
-        <section className="grid gap-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Types</h2>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {own.map((d) => (
-              <DeclCard key={d.name} decl={d} />
-            ))}
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function FieldList({ fields }: { fields: Field[] | null | undefined }) {
+export function FieldList({ fields }: { fields: Field[] | null | undefined }) {
   if (!fields || fields.length === 0) return <span className="text-sm text-muted-foreground">none</span>;
   return (
     <dl className="grid gap-1.5">
@@ -95,7 +24,7 @@ function FieldList({ fields }: { fields: Field[] | null | undefined }) {
   );
 }
 
-function FlowDetail({ flow }: { flow: FlowInfo }) {
+export function FlowDetail({ flow }: { flow: FlowInfo }) {
   const launch = useLaunch();
   return (
     <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
@@ -123,7 +52,7 @@ function FlowDetail({ flow }: { flow: FlowInfo }) {
   );
 }
 
-function StepCard({ step }: { step: StepInfo }) {
+export function StepCard({ step }: { step: StepInfo }) {
   return (
     <article className="grid gap-2 rounded-xl border bg-card p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 font-mono text-[0.8125rem]">
@@ -149,7 +78,7 @@ function StepCard({ step }: { step: StepInfo }) {
   );
 }
 
-function DeclCard({ decl }: { decl: Decl }) {
+export function DeclCard({ decl }: { decl: Decl }) {
   return (
     <article className="grid content-start gap-2 rounded-xl border bg-card p-4">
       <div className="font-mono text-[0.8125rem]">

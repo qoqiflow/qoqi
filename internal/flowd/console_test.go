@@ -480,11 +480,11 @@ func TestADaemonWithoutItsProgram(t *testing.T) {
 	}
 }
 
-// The token of a store's daemons is kept next to it, for its user alone,
-// and is the same each time a daemon starts on it.
-func TestTheTokenOfAStore(t *testing.T) {
-	store := filepath.Join(t.TempDir(), "flows.db")
-	first, err := flowd.StoreToken(store)
+// The token of the daemon is kept in its home, for its user alone, and
+// is the same each time it starts.
+func TestTheTokenOfAHome(t *testing.T) {
+	store := t.TempDir()
+	first, err := flowd.HomeToken(store)
 	if err != nil || len(first) < 32 {
 		t.Fatalf("expected a token drawn, got %q %v", first, err)
 	}
@@ -492,7 +492,7 @@ func TestTheTokenOfAStore(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Errorf("expected the file readable by its user alone, got %v %v", info, err)
 	}
-	again, err := flowd.StoreToken(store)
+	again, err := flowd.HomeToken(store)
 	if err != nil || again != first {
 		t.Errorf("a daemon started again has the same token: %q %q %v", first, again, err)
 	}
@@ -500,8 +500,36 @@ func TestTheTokenOfAStore(t *testing.T) {
 	if err := os.WriteFile(flowd.TokenFile(store), []byte("short\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if fresh, _ := flowd.StoreToken(store); fresh == "short" || len(fresh) < 32 {
+	if fresh, _ := flowd.HomeToken(store); fresh == "short" || len(fresh) < 32 {
 		t.Errorf("expected a new token, got %q", fresh)
+	}
+}
+
+// The home is QOQI_PATH, or ~/.qoqi; its store is flows.db in it, unless
+// QOQI_STORE names another.
+func TestTheHomeOfQoqi(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("QOQI_PATH", dir)
+	t.Setenv("QOQI_STORE", "")
+	if flowd.Home() != dir {
+		t.Errorf("home: %s", flowd.Home())
+	}
+	if err := flowd.MakeHome(dir); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Join(dir, "logs")); err != nil || !info.IsDir() {
+		t.Errorf("the logs are made in the home: %v", err)
+	}
+	if got := flowd.HomeStore(dir); got != filepath.Join(dir, "flows.db") {
+		t.Errorf("store: %s", got)
+	}
+	t.Setenv("QOQI_STORE", "postgres://u:p@db/flows")
+	if got := flowd.HomeStore(dir); got != "postgres://u:p@db/flows" {
+		t.Errorf("store of QOQI_STORE: %s", got)
+	}
+	t.Setenv("QOQI_PATH", "")
+	if home, _ := os.UserHomeDir(); flowd.Home() != filepath.Join(home, ".qoqi") {
+		t.Errorf("default home: %s", flowd.Home())
 	}
 }
 

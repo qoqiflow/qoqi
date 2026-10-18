@@ -104,13 +104,21 @@ approvals.qi: no problems
 
 ## 2. Serve it
 
+Start the daemon, and leave it running:
+
 ```console
 $ qoqi serve
-qoqi: approvals deployed, version 43381189: Expense
-qoqi: Expense, on flows.db, at http://127.0.0.1:7070; qoqi ui opens the console
+qoqi: serving from /home/lin/.qoqi, store /home/lin/.qoqi/flows.db, at http://127.0.0.1:7070
+qoqi: no program yet: qoqi deploy <program> gives it one
+qoqi: the console is at http://127.0.0.1:7070: sign in as admin, password admin, and choose another
 ```
 
-The daemon keeps its instances in `flows.db`, next to where it runs. Leave it running, and open another terminal in the same folder.
+It keeps everything in its home, `~/.qoqi` (or `QOQI_PATH`): its store, its logs, and what the commands need to find it. In another terminal, in the project's folder, give it the program:
+
+```console
+$ qoqi deploy .
+approvals deployed, version 43381189
+```
 
 ## 3. Start an instance
 
@@ -135,7 +143,7 @@ Expense   expense:1   version 43381189
   step      ask#1 → null
 ```
 
-`qoqi ui` opens the same in the console, in a browser.
+`qoqi ui` opens the same in the console, in a browser: sign in as `admin`, password `admin`, and choose your own.
 
 ## 4. Survive a restart
 

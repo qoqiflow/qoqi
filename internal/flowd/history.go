@@ -175,3 +175,29 @@ func sourcesOf(dep flowrt.Deployed) map[string]string {
 func fingerprintOf(p Program) string {
 	return vm.Fingerprint(p.Runtime.Newest())
 }
+
+// redeploy is POST /api/deployments/{seq}/redeploy: the version of a
+// deploy, deployed again, as a new deploy; ?dry=1 says what it would do.
+// It is checked as any version is: one whose stages instances alive
+// cannot move to is refused.
+func (d *Daemon) redeploy(w http.ResponseWriter, r *http.Request) {
+	dep, ok := d.deployOf(w, r.PathValue("seq"))
+	if !ok {
+		return
+	}
+	if dep.Version == "" {
+		fail(w, http.StatusConflict, "redeploy", "this deploy took its program away: there is no version to deploy again")
+		return
+	}
+	var pkg Package
+	if err := json.Unmarshal(dep.Package, &pkg); err != nil {
+		fail(w, http.StatusInternalServerError, "redeploy", "what was deployed cannot be read: "+err.Error())
+		return
+	}
+	report, err := d.Deploy(&pkg, r.URL.Query().Get("dry") != "")
+	if err != nil {
+		refused(w, err)
+		return
+	}
+	answer(w, http.StatusOK, report)
+}

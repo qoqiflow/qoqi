@@ -6,7 +6,8 @@
 //     go run ./examples/shop/app-go &
 //     cd examples/shop
 //     export SHOP_SECRET=dev WAREHOUSE_URL=http://127.0.0.1:8090/warehouse PAYMENTS_URL=http://127.0.0.1:8090/payments
-//     qoqi serve orders.qi
+//     qoqi serve &
+//     qoqi deploy orders.qi
 //     qoqi start Order order:1 '{"id": "1", "customer": "ada", "items": [{"sku": "mug", "quantity": 2, "cents": 1200}], "speed": "Standard"}'
 //
 // The Go of the steps is written from this file:
@@ -106,5 +107,5 @@ pub step fn charge(
 pub step fn refund(charge: String) -> Result<Void, Decline> by payments;
 
 fn main() {
-    println("The flows of this program are served by: qoqi serve examples/shop/orders.qi");
+    println("The flows of this program are given to the daemon by: qoqi deploy examples/shop/orders.qi");
 }

@@ -1,27 +1,36 @@
 # Running in production
 
 ```console
-$ qoqi serve --store postgres://flows:secret@db/flows --listen 127.0.0.1:7070 --workers 8
+$ export QOQI_PATH=/var/lib/qoqi
+$ qoqi serve --store postgres://flows:secret@db/flows --listen 127.0.0.1:7070 --hosts flows.example.com --workers 8
+```
+
+and from a laptop, or a CI job:
+
+```console
+$ export QOQI_URL=https://flows.example.com QOQI_TOKEN=...   # the daemon's $QOQI_PATH/token
 $ qoqi deploy shop/
 ```
 
+## Its home
+
+The daemon keeps its files in `QOQI_PATH`, `~/.qoqi` by default: the store when it is SQLite (`flows.db`), `daemon.json` and `token` for the commands, readable by its user alone, and `logs/` (`daemon.log`, what it says; `flows.log`, what the flows print). See [the home](../reference/cli.md#the-home-qoqi_path).
+
 ## The store
 
-| `--store` | |
+| `--store`, `QOQI_STORE` | |
 |-----------|--|
-| `flows.db`, `sqlite:path` | A SQLite file: one machine, no server to run. The default |
+| `$QOQI_PATH/flows.db`, `sqlite:path` | A SQLite file: one machine, no server to run. The default |
 | `postgres://user:pass@host/db` | PostgreSQL |
 | `mysql://user:pass@host/db` | MySQL |
 
 Each program has its own tables, named after it. The bytecode of every version deployed is kept in the store, for as long as an instance runs it.
 
-Next to a SQLite store, the daemon writes `flows.db.token` (its token, readable by its owner only) and `flows.db.daemon` (its address and process, while it runs). For a store on a server, the same files are kept under your user's configuration folder (`qoqi/stores/`).
-
 ## Several daemons
 
 On PostgreSQL or MySQL, daemons on several machines share one store. An instance is held by one daemon at a time, under a **lease** of 30 seconds, renewed while it runs; when a daemon dies, its instances are taken up by another once their leases run out. Each daemon follows what the others deploy.
 
-On one machine, one daemon serves a store: a second one is refused.
+On one machine, one daemon runs from a home: a second one is refused. Each daemon of a shared store has a home of its own.
 
 ## Workers
 
@@ -36,7 +45,7 @@ $ qoqi versions
 $ qoqi diff shop
 ```
 
-A deploy is served at once, with no restart: what runs ends its turn, and instances move at their next stage ([versions](../concepts/versioning.md)). Commit the `flow.lock` it writes. `qoqi serve shop/ --watch` deploys again on every save, for development.
+A deploy is served at once, with no restart: what runs ends its turn, and instances move at their next stage ([versions](../concepts/versioning.md)). Commit the `flow.lock` it writes. `qoqi deploy shop/ --watch` deploys again on every save, for development.
 
 ## Instances that need a person
 
@@ -51,12 +60,15 @@ See [stopped instances](../concepts/failures.md#stopped-instances).
 
 ## The console
 
-`qoqi ui` opens the console in a browser, with the token in the address. It shows each instance as code, at the line it is at, with its variables and what its steps returned; starts instances from a form made from the flow's types; sends messages, cancels, resumes. It is served by the daemon at its own address, built into `qoqi`.
+The console is at the daemon's address; `qoqi ui` opens it in a browser. It shows each instance as code, at the line it is at, with its variables and what its steps returned; starts instances from a form made from the flow's types; sends messages, cancels, resumes. Its editor writes programs, checks them as they are typed and deploys them; its activity pages show a year of what the flows did, day by day. It is served by the daemon at its own address, built into `qoqi`.
+
+It starts with one user, `admin`, password `admin`, changed at the first sign in before anything else can be done: sign in at once on a daemon reachable by others. People sign in with a name and a password; each can do everything. See [`qoqi users`](../reference/cli.md#qoqi-users).
 
 ## Security
 
-*   The daemon listens on `127.0.0.1` by default, and answers only to its own host names: put it behind your own proxy to reach it from elsewhere.
-*   Every request of the API carries the token; the console keeps it in the browser, after `#`, never sent in a URL.
+*   The daemon listens on `127.0.0.1` by default, and answers only to its own host names and those of `--hosts`: put it behind your own proxy, with TLS, to reach it from elsewhere.
+*   Every request of the API carries the token, or a person's session: a cookie `HttpOnly` and `SameSite=Strict`, `Secure` behind TLS (the daemon reads `X-Forwarded-Proto` of a proxy). Passwords are kept as PBKDF2-SHA512; guessing is slowed down.
+*   The token is for the commands and the programs: the console never asks for it, nor is it given one.
 *   Requests to applications are signed with each queue's secret, and checked by the SDKs; keep the secrets in the environment (`"secret": "env:SHOP_SECRET"`).
 *   What a flow is given and what its steps return is written in the store as JSON. Do not give a flow what must not be stored.
 

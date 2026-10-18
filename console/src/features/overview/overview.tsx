@@ -1,15 +1,17 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, CircleAlert, Play, Terminal, Workflow, Zap } from 'lucide-react';
+import { ArrowRight, CircleAlert, Code2, Play, Terminal, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useLaunch } from '@/components/launch';
-import { StatusDot, statusStyle } from '@/components/status';
+import { useLaunch } from '@/features/instances/launch';
+import { StatusDot } from '@/components/status';
+import { ContributionGrid, Legend } from '@/features/activity/charts';
 import { doing } from '@/lib/describe';
 import { useFeed } from '@/lib/live';
-import { emptyCounts, useCounts, useInstances, useProgram, type Counts } from '@/lib/queries';
+import { emptyCounts, useCounts, useInstances, useProgram, useStats, type Counts } from '@/lib/queries';
 import { clock, useNow } from '@/lib/time';
 import { statuses, type Event, type FlowInfo } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { FlowCard } from '@/features/flows/card';
 
 export function OverviewPage() {
   const program = useProgram();
@@ -21,13 +23,15 @@ export function OverviewPage() {
     <div className="grid gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="grid gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Flows</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
           <p className="text-sm text-muted-foreground">
             {program.data ? (
               <>
                 <span className="font-mono">{program.data.entry.split('/').pop()}</span> · {program.data.flows.length} flow
                 {program.data.flows.length === 1 ? '' : 's'} · {total} instance{total === 1 ? '' : 's'} in the store
               </>
+            ) : program.isError ? (
+              'No program deployed yet'
             ) : (
               'Reading the program…'
             )}
@@ -57,7 +61,10 @@ export function OverviewPage() {
         ))}
       </section>
 
+      {program.isError && <FirstProgram />}
       {!instances.isLoading && total === 0 && program.data && <FirstStart flows={program.data.flows} />}
+
+      <Glance />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section className="grid content-start gap-4 sm:grid-cols-2" aria-label="The flows of the program">
@@ -88,6 +95,28 @@ function hint(status: string, all: Counts): string {
   }
 }
 
+function FirstProgram() {
+  return (
+    <section className="grid gap-4 rounded-2xl border border-dashed bg-card/60 p-6 sm:grid-cols-[1fr_auto] sm:items-center">
+      <div className="grid gap-1.5">
+        <h2 className="text-lg font-semibold">The daemon runs no program yet</h2>
+        <p className="max-w-prose text-sm text-muted-foreground">
+          Write one in the editor, check it and deploy it from there; or deploy one from a terminal.
+        </p>
+        <p className="font-mono text-xs text-muted-foreground">
+          <Terminal className="mr-1 inline size-3.5" />
+          or: qoqi deploy shop.qi
+        </p>
+      </div>
+      <Button size="lg" asChild>
+        <Link to="/editor?new=1">
+          <Code2 /> Write a flow
+        </Link>
+      </Button>
+    </section>
+  );
+}
+
 function FirstStart({ flows }: { flows: FlowInfo[] }) {
   const launch = useLaunch();
   return (
@@ -109,49 +138,26 @@ function FirstStart({ flows }: { flows: FlowInfo[] }) {
   );
 }
 
-function FlowCard({ flow, counts }: { flow: FlowInfo; counts: Counts }) {
-  const launch = useLaunch();
-  const total = statuses.reduce((n, s) => n + counts[s], 0);
-  const active = counts.waiting + counts.running + counts.stopped;
+/** The last half year, a square a day: the whole of it on the page of activity. */
+function Glance() {
+  const stats = useStats(182);
+  if (!stats.data) return null;
+  const started = stats.data.days.reduce((n, d) => n + d.started, 0);
   return (
-    <article className="flex flex-col gap-4 rounded-xl border bg-card p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="grid gap-1">
-          <h2 className="flex items-center gap-2 font-semibold">
-            <Workflow className="size-4 text-primary" />
-            {flow.name}
-          </h2>
-          <span className="font-mono text-xs text-muted-foreground">Flow&lt;{flow.returns.text}&gt;</span>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => launch({ flow: flow.name })}>
-          <Play /> Start
-        </Button>
+    <section className="grid gap-3 rounded-xl border bg-card p-5" aria-label="The last half year">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">
+          <span className="tabular-nums">{started.toLocaleString()}</span> instances started in the last six months
+        </h2>
+        <Link to="/activity" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+          Activity <ArrowRight className="size-3.5" />
+        </Link>
       </div>
-      {flow.doc && <p className="line-clamp-3 text-sm text-muted-foreground">{flow.doc}</p>}
-      <div className="mt-auto grid gap-2">
-        <div className="flex h-2 overflow-hidden rounded-full bg-muted" role="img" aria-label={statuses.map((s) => `${counts[s]} ${s}`).join(', ')}>
-          {total > 0 && statuses.map((s) => counts[s] > 0 && <span key={s} className={statusStyle[s].dot} style={{ width: `${(counts[s] / total) * 100}%` }} />)}
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-          <span className="flex flex-wrap gap-3 text-muted-foreground">
-            {statuses
-              .filter((s) => counts[s] > 0)
-              .map((s) => (
-                <Link key={s} to={`/instances?flow=${flow.name}&status=${s}`} className="inline-flex items-center gap-1.5 hover:text-foreground">
-                  <StatusDot status={s} />
-                  <span className="tabular-nums">{counts[s]}</span> {s}
-                </Link>
-              ))}
-            {total === 0 && 'no instance yet'}
-          </span>
-          {total > 0 && (
-            <Link to={`/instances?flow=${flow.name}`} className="inline-flex items-center gap-1 font-medium text-primary hover:underline">
-              {active > 0 ? `${active} alive` : 'All'} <ArrowRight className="size-3.5" />
-            </Link>
-          )}
-        </div>
+      <ContributionGrid days={stats.data.days} value={(d) => d.started} what={(n) => `${n} started`} />
+      <div className="flex justify-end">
+        <Legend />
       </div>
-    </article>
+    </section>
   );
 }
 

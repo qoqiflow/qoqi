@@ -36,7 +36,7 @@ Code changed before a stage has run already, and changing it never breaks an ins
 
 ## `flow.lock`
 
-At each deploy, the **shape** of every stage is written down: the variables alive there and the fields of the flow, with their types. It goes in `flow.lock`, next to the program (`approvals.flow.lock` beside `approvals.qi`), written by `qoqi deploy` and `qoqi serve`. Commit it with the code.
+At each deploy, the **shape** of every stage is written down: the variables alive there and the fields of the flow, with their types. It goes in `flow.lock`, next to the program (`approvals.flow.lock` beside `approvals.qi`), written by `qoqi deploy`. Commit it with the code.
 
 ```json
 {

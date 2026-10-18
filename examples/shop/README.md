@@ -15,7 +15,8 @@ $ SHOP_SECRET=dev node examples/shop/app-ts/main.ts &
 
 $ cd examples/shop
 $ export SHOP_SECRET=dev WAREHOUSE_URL=http://127.0.0.1:8090/warehouse PAYMENTS_URL=http://127.0.0.1:8090/payments
-$ qoqi serve orders.qi &
+$ qoqi serve &                     # the daemon reads the queues of the steps from this environment
+$ qoqi deploy orders.qi
 $ qoqi start Order order:1 '{"id": "1", "customer": "ada", "items": [{"sku": "mug", "quantity": 2, "cents": 1200}], "speed": "Standard"}'
 $ qoqi result order:1
 Ok(Receipt { charge: "ch-1", parcel: "parcel-1" })

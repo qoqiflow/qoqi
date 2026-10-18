@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { useLaunch } from '@/components/launch';
+import { useLaunch } from '@/features/instances/launch';
 import { StatusBadge, StatusDot } from '@/components/status';
 import { doing } from '@/lib/describe';
 import { emptyCounts, useInstances, useProgram } from '@/lib/queries';
@@ -21,13 +21,33 @@ import { cn } from '@/lib/utils';
 const order: Record<Status, number> = { stopped: 0, running: 1, waiting: 2, done: 3, failed: 4 };
 
 export function InstancesPage() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const flow = params.get('flow') ?? '';
+  const launch = useLaunch();
+  return (
+    <div className="grid gap-5">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="grid gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Instances</h1>
+          <p className="text-sm text-muted-foreground">Each is one process of a flow: what it is doing now is read from what the store keeps of it.</p>
+        </div>
+        <Button variant="outline" onClick={() => launch(flow ? { flow } : undefined)}>
+          <Play /> Start {flow || 'a flow'}
+        </Button>
+      </div>
+      <InstanceList />
+    </div>
+  );
+}
+
+/** The instances, of every flow or of one, filtered as the address says. */
+export function InstanceList({ only }: { only?: string }) {
+  const [params, setParams] = useSearchParams();
+  const flow = only ?? params.get('flow') ?? '';
   const status = (params.get('status') ?? '') as Status | '';
   const q = params.get('q') ?? '';
   const instances = useInstances();
   const program = useProgram();
-  const launch = useLaunch();
   const navigate = useNavigate();
   const now = useNow();
 
@@ -54,16 +74,6 @@ export function InstancesPage() {
 
   return (
     <div className="grid gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="grid gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Instances</h1>
-          <p className="text-sm text-muted-foreground">Each is one process of a flow: what it is doing now is read from what the store keeps of it.</p>
-        </div>
-        <Button variant="outline" onClick={() => launch(flow ? { flow } : undefined)}>
-          <Play /> Start {flow || 'a flow'}
-        </Button>
-      </div>
-
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex flex-wrap gap-1 rounded-lg border bg-card p-1" role="tablist" aria-label="Status">
           <StatusTab active={!status} onClick={() => set('status', '')} label="all" count={ofFlow.length} />
@@ -71,7 +81,7 @@ export function InstancesPage() {
             <StatusTab key={s} active={status === s} onClick={() => set('status', s)} label={s} count={counts[s]} status={s} />
           ))}
         </div>
-        <Select value={flow || '*'} onValueChange={(v) => set('flow', v === '*' ? '' : v)}>
+        {!only && <Select value={flow || '*'} onValueChange={(v) => set('flow', v === '*' ? '' : v)}>
           <SelectTrigger className="w-44">
             <SelectValue />
           </SelectTrigger>
@@ -83,7 +93,7 @@ export function InstancesPage() {
               </SelectItem>
             ))}
           </SelectContent>
-        </Select>
+        </Select>}
         <div className="relative min-w-56 flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input className="pl-9" placeholder="A name, or a value of its fields" value={q} onChange={(e) => set('q', e.target.value)} aria-label="Filter" />

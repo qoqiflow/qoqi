@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { CircleStop, Loader2, Play } from 'lucide-react';
+import { CircleStop, Loader2, MessageSquareReply, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { keyParts } from '@/lib/qoqi';
-import type { ResumePlan, View } from '@/lib/types';
+import type { Detail, ResumePlan, View } from '@/lib/types';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 
 // A stopped instance waits for a person. Once the program is fixed, it is
 // resumed: taken up from its last stage in the newest version, what was
@@ -183,5 +185,101 @@ function Stage({ n, title, children }: { n: number; title: string; children?: Re
         {children && <span className="text-sm text-muted-foreground">{children}</span>}
       </span>
     </li>
+  );
+}
+
+/**
+ * A step the application could not tell of: its queue answered others and
+ * not it, or the connection was cut once it left. A person who knows what
+ * it did says so; then the instance is resumed, and takes it as done.
+ */
+export function AnswerDialog({ instance, open, onOpenChange }: { instance: Detail; open: boolean; onOpenChange: (on: boolean) => void }) {
+  const keys = instance.unanswered ?? [];
+  const [key, setKey] = useState('');
+  const [value, setValue] = useState('{"Ok": null}');
+  const [nothing, setNothing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (open) setKey(keys[0] ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  let parsed: unknown = undefined;
+  let invalid = '';
+  if (!nothing) {
+    try {
+      parsed = JSON.parse(value);
+    } catch (e) {
+      invalid = e instanceof Error ? e.message : 'not JSON';
+    }
+  }
+
+  const answer = async () => {
+    setBusy(true);
+    try {
+      await api.answer(instance.id, key.trim(), parsed, nothing);
+      toast.success(`${keyParts(key).step} is answered`, { description: 'Resume the instance: it takes the answer up.' });
+      onOpenChange(false);
+    } catch (e) {
+      toast.error('Not answered', { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Answer a step by hand</DialogTitle>
+          <DialogDescription>
+            For a step its application could not tell of. Say what it did, as the application would have answered; or that it did nothing, and it is sent again. Then resume
+            the instance.
+          </DialogDescription>
+        </DialogHeader>
+        <label className="grid gap-1.5">
+          <span className="text-sm font-medium">The step</span>
+          {keys.length > 0 ? (
+            <select
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              className="h-9 rounded-md border bg-transparent px-2 font-mono text-sm"
+            >
+              {keys.map((k) => (
+                <option key={k} value={k}>
+                  {keyParts(k).step}#{keyParts(k).n} — {k}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <Input value={key} onChange={(e) => setKey(e.target.value)} placeholder={`${instance.id}/…`} className="font-mono" />
+          )}
+        </label>
+        <label className="flex items-center justify-between gap-3">
+          <span className="grid gap-0.5">
+            <span className="text-sm font-medium">It did nothing</span>
+            <span className="text-xs text-muted-foreground">It is sent again when the instance is resumed.</span>
+          </span>
+          <Switch checked={nothing} onCheckedChange={setNothing} />
+        </label>
+        {!nothing && (
+          <label className="grid gap-1.5">
+            <span className="text-sm font-medium">What it did, as JSON</span>
+            <Textarea value={value} onChange={(e) => setValue(e.target.value)} className="min-h-24 font-mono text-sm" aria-invalid={!!invalid} />
+            <span className={invalid ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+              {invalid || 'As the application answers: {"Ok": "ch-1"}, {"Err": "declined"}, or the value itself.'}
+            </span>
+          </label>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={answer} disabled={busy || !key.trim() || !!invalid}>
+            {busy ? <Loader2 className="animate-spin" /> : <MessageSquareReply />} Answer
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

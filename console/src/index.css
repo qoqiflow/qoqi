@@ -779,3 +779,12 @@
     transform: rotate(0deg);
   }
 }
+
+/* Compact, as a person chooses in the settings: the rows of the tables closer */
+.density-compact [data-slot='table-cell'] {
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+.density-compact [data-slot='table-head'] {
+  height: 2.25rem;
+}

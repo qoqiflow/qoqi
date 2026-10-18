@@ -112,7 +112,7 @@ func (a *shopApplication) steps() string {
 	return strings.Join(a.seen, "\n")
 }
 
-// qoqi serve sends the steps of the project's queues to the
+// The daemon sends the steps of the project's queues to the
 // application, at the addresses the environment gives, and the flows go
 // on with what it answers: an Err undone by the release it named.
 func TestStepsTheApplicationCarriesOut(t *testing.T) {
@@ -126,28 +126,17 @@ func TestStepsTheApplicationCarriesOut(t *testing.T) {
 	server := httptest.NewServer(app)
 	defer server.Close()
 
+	// The queues' addresses are the daemon's to know: it reads them when
+	// the program is deployed to it
 	out := &lockedWriter{}
-	cmd := exec.Command(qoqi, "serve", "shop.qi", "--listen", "127.0.0.1:0")
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
+	cmd := startDaemon(t, dir, out,
 		"WAREHOUSE_URL="+server.URL+"/flow-steps?queue=warehouse",
 		"BILLING_URL="+server.URL+"/flow-steps?queue=billing",
 		"SHOP_SECRET=s3cret")
-	cmd.Stdout, cmd.Stderr = out, out
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
 	defer func() {
 		cmd.Process.Signal(syscall.SIGTERM)
 		cmd.Wait()
 	}()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(filepath.Join(dir, "flows.db.daemon")); err == nil && strings.Contains(string(data), `"pid": `+itoa(cmd.Process.Pid)) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 
 	for _, c := range []struct{ id, amount, variant, result string }{
 		{"o1", "300", "Ok", "h-1 paid 300"},
@@ -178,8 +167,8 @@ func TestStepsTheApplicationCarriesOut(t *testing.T) {
 	}
 }
 
-// A queue the environment does not say where to find stops the daemon
-// before it serves, naming the variable.
+// A queue the daemon's environment does not say where to find: the
+// program is refused when it is deployed, the variable named.
 func TestAQueueWithoutItsAddress(t *testing.T) {
 	dir := t.TempDir()
 	for name, text := range map[string]string{"shop.qi": queuedShop, "qoqi.json": queuedProject} {
@@ -187,22 +176,18 @@ func TestAQueueWithoutItsAddress(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command(qoqi, "serve", "shop.qi", "--listen", "127.0.0.1:0")
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "BILLING_URL=", "WAREHOUSE_URL=", "SHOP_SECRET=")
-	done := make(chan []byte)
-	go func() {
-		output, _ := cmd.CombinedOutput()
-		done <- output
+	out := &lockedWriter{}
+	cmd := serveIn(t, dir, out, "BILLING_URL=", "WAREHOUSE_URL=", "SHOP_SECRET=")
+	defer func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		cmd.Wait()
 	}()
-	select {
-	case output := <-done:
-		if !strings.Contains(string(output), "the queue billing takes its url from BILLING_URL, which the environment does not set") {
-			t.Errorf("expected the variable named, got:\n%s", output)
-		}
-	case <-time.After(20 * time.Second):
-		cmd.Process.Kill()
-		t.Fatal("the daemon served without its queues")
+	output, code := flowCommand(t, dir, "deploy", "shop.qi")
+	if code == 0 || !strings.Contains(output, "the queue billing takes its url from BILLING_URL, which the environment does not set") || strings.Contains(output, "shop deployed") {
+		t.Errorf("expected the deploy refused, the variable named, got %d:\n%s\ndaemon:\n%s", code, output, out.String())
+	}
+	if got, _ := flowCommand(t, dir, "versions"); strings.Contains(got, "shop") {
+		t.Errorf("expected nothing deployed, got:\n%s", got)
 	}
 }
 
@@ -237,7 +222,7 @@ func TestAStepAnsweredLaterOverHTTP(t *testing.T) {
 	told := make(chan string, 4)
 	app := &shopApplication{}
 	app.later = func(key string, attempt int, token string) {
-		data, err := os.ReadFile(filepath.Join(dir, "flows.db.daemon"))
+		data, err := os.ReadFile(filepath.Join(dir, "daemon.json"))
 		var address struct{ URL string }
 		if err != nil || json.Unmarshal(data, &address) != nil {
 			told <- fmt.Sprintf("no address: %v", err)
@@ -261,28 +246,17 @@ func TestAStepAnsweredLaterOverHTTP(t *testing.T) {
 	server := httptest.NewServer(app)
 	defer server.Close()
 
+	// The queues' addresses are the daemon's to know: it reads them when
+	// the program is deployed to it
 	out := &lockedWriter{}
-	cmd := exec.Command(qoqi, "serve", "shop.qi", "--listen", "127.0.0.1:0")
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
+	cmd := startDaemon(t, dir, out,
 		"WAREHOUSE_URL="+server.URL+"/flow-steps?queue=warehouse",
 		"BILLING_URL="+server.URL+"/flow-steps?queue=billing",
 		"SHOP_SECRET=s3cret")
-	cmd.Stdout, cmd.Stderr = out, out
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
 	defer func() {
 		cmd.Process.Signal(syscall.SIGTERM)
 		cmd.Wait()
 	}()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(filepath.Join(dir, "flows.db.daemon")); err == nil && strings.Contains(string(data), `"pid": `+itoa(cmd.Process.Pid)) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 
 	fields := `{"cart": {"id": "o3", "amount": 300}}`
 	if got, code := flowCommand(t, dir, "start", "Order", "o3", fields); code != 0 {

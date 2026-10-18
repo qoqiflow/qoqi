@@ -50,12 +50,14 @@ type hub struct {
 	mu      sync.Mutex
 	clients map[chan Event]bool
 	seen    map[string]string // by instance, what it looked like last
+	status  map[string]string // by instance and birth, its status last
+	flowOf  map[string]string // by instance, its flow
 	lines   []Line
 	partial map[string][]byte // by instance, a line printed without its end yet
 }
 
 func newHub() *hub {
-	return &hub{clients: map[chan Event]bool{}, seen: map[string]string{}, partial: map[string][]byte{}}
+	return &hub{clients: map[chan Event]bool{}, seen: map[string]string{}, status: map[string]string{}, flowOf: map[string]string{}, partial: map[string][]byte{}}
 }
 
 func stamp() string { return time.Now().UTC().Format(time.RFC3339Nano) }
@@ -155,14 +157,21 @@ func (h *hub) output(id string, limit int) []Line {
 }
 
 // observe sends an event for every instance that changed since it was
-// last looked at.
-func (h *hub) observe(store flowrt.Store) {
+// last looked at, and says those whose status changed.
+func (h *hub) observe(store flowrt.Store, program string) []Happened {
 	instances := store.List("", "")
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	var happened []Happened
+	now := time.Now().UnixMilli()
 	for _, inst := range instances {
 		if inst.Status != flowrt.Running {
 			h.flush(inst.ID)
+		}
+		h.flowOf[inst.ID] = inst.Flow
+		if life := inst.ID + "/" + inst.Birth; h.status[life] != string(inst.Status) {
+			h.status[life] = string(inst.Status)
+			happened = append(happened, Happened{Instance: inst.ID, Birth: inst.Birth, Status: string(inst.Status), Flow: inst.Flow, Program: program, At: now})
 		}
 		v := viewOf(inst)
 		signature := fmt.Sprint(v.Status, v.WakeAt, v.Phase, v.Cancel, v.Stopped, len(v.Steps), len(v.Undos), len(v.Children), v.Awaits, len(inst.State))
@@ -172,6 +181,14 @@ func (h *hub) observe(store flowrt.Store) {
 		h.seen[inst.ID] = signature
 		h.sendLocked(Event{Kind: "instance", At: stamp(), ID: inst.ID, Instance: &v})
 	}
+	return happened
+}
+
+// flow is the flow of an instance seen.
+func (h *hub) flow(id string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.flowOf[id]
 }
 
 // events streams what happens, until the client goes.

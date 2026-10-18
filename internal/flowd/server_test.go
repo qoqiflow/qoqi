@@ -191,7 +191,7 @@ func TestResultsAndLists(t *testing.T) {
 // Where a daemon is, for the commands: written readable by its user
 // alone, read back.
 func TestTheAddressFile(t *testing.T) {
-	store := t.TempDir() + "/flows.db"
+	store := t.TempDir()
 	if _, err := flowd.ReadAddress(store); err == nil || !strings.Contains(err.Error(), "qoqi serve") {
 		t.Errorf("no daemon: expected to be told how to start one, got %v", err)
 	}

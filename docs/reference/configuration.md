@@ -60,7 +60,7 @@ With an `entry`, the commands that take a source file can be given the project's
 qoqi run                    # the project of the current folder (or of a folder above)
 qoqi run path/to/greeter    # the project in that folder
 qoqi run .                  # the same as nothing
-qoqi serve                  # the flows of the project of the current folder
+qoqi deploy .               # the flows of the project of the current folder, to the daemon
 qoqi check path/to/greeter
 qoqi dump --ir
 ```

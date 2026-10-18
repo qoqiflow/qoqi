@@ -70,6 +70,7 @@ export interface Detail extends View {
   tries?: Record<string, number>;
   retries?: Record<string, string>;
   output: Line[];
+  unanswered?: string[]; // the steps that left, their answer not kept: a person may answer them
 }
 
 export interface FlowCounts {
@@ -230,4 +231,130 @@ export interface Diff {
   to: DeployView;
   files: FileDiff[];
   stages?: string[];
+}
+
+/** Who asks: a person signed in, or a holder of the daemon's token. */
+export interface Principal {
+  user?: string;
+  token?: boolean;
+  renew?: boolean; // a password given them: changed before anything else
+}
+
+export interface AuthState {
+  accounts: boolean; // whether the daemon keeps people at all
+  me?: Principal;
+  prefs?: Prefs;
+}
+
+/** A person's choices of the pages, kept by the daemon. */
+export interface Prefs {
+  density?: 'comfortable' | 'compact';
+  editorFontSize?: number;
+  editorWrap?: boolean;
+  weekStart?: 0 | 1;
+}
+
+export interface User {
+  name: string;
+  created: number;
+  renew?: boolean; // to choose a password of their own at their next sign in
+}
+
+/** A program as the editor lists it. */
+export interface WorkspaceProgram {
+  program: string;
+  files: string[];
+  draft: boolean; // changed in the console, not deployed
+  deployed?: string; // the version served
+  updated?: number;
+  author?: string;
+}
+
+export interface WorkspaceFile {
+  file: string;
+  text: string;
+  updated?: number;
+  author?: string;
+}
+
+/** A program opened in the editor: its draft, or what was deployed of it. */
+export interface Opened {
+  program: string;
+  entry: string;
+  draft: boolean;
+  deployed?: string;
+  files: WorkspaceFile[];
+}
+
+/** A diagnostic of the compiler. */
+export interface Problem {
+  severity: 'error' | 'warning' | 'info' | 'hint' | string;
+  code?: string;
+  message: string;
+  file: string;
+  line: number;
+  column: number;
+  endColumn?: number;
+  suggestion?: string;
+}
+
+export interface Checked {
+  ok: boolean;
+  flows: string[];
+  problems: Problem[];
+}
+
+/** What a deploy did, or would do. */
+export interface Report {
+  seq?: number;
+  program: string;
+  version: string;
+  before?: string;
+  new?: boolean;
+  same?: boolean;
+  changes?: string[];
+  said?: string[];
+  moving: number;
+}
+
+export interface DraftDeploy extends Checked {
+  report?: Report;
+  why?: string[];
+}
+
+export interface DayStats {
+  day: string;
+  started: number;
+  done: number;
+  failed: number;
+  stopped: number;
+  steps: number;
+}
+
+export interface FlowStats {
+  flow: string;
+  program: string;
+  started: number;
+  done: number;
+  failed: number;
+  stopped: number;
+  p50: number;
+  p95: number;
+  max: number;
+}
+
+export interface StepRuns {
+  hour?: string;
+  flow: string;
+  step: string;
+  runs: number;
+}
+
+export interface Stats {
+  from: string;
+  to: string;
+  days: DayStats[];
+  flows: FlowStats[];
+  steps: StepRuns[];
+  hours: number[][];
 }

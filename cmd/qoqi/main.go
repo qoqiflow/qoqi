@@ -266,8 +266,8 @@ func printHelp() {
 	fmt.Println("Usage: qoqi <command> [arguments]")
 	fmt.Println()
 	fmt.Println("Flows:")
-	fmt.Println("  qoqi serve [program]        Run the flows of a program, kept in flows.db; qoqi serve --help for the rest")
-	fmt.Println("  qoqi deploy <program>       A new version of a program, to the daemon that serves it")
+	fmt.Println("  qoqi serve                  The daemon: runs the flows deployed to it, its files in QOQI_PATH (~/.qoqi)")
+	fmt.Println("  qoqi deploy <program>       A new version of a program, to the daemon; --watch deploys each change")
 	fmt.Println("  qoqi start <Flow> <name>    Start an instance, with its fields as JSON")
 	fmt.Println("  qoqi ls                     The instances, and what each is doing")
 	fmt.Println("  qoqi show <name>            An instance: where it is, what it was given, what its steps returned")
@@ -275,8 +275,10 @@ func printHelp() {
 	fmt.Println("  qoqi send <name> <inbox>    A message for an inbox of an instance")
 	fmt.Println("  qoqi cancel <name>          End it: what it gave flow.undo runs")
 	fmt.Println("  qoqi ui                     Open the console in a browser")
+	fmt.Println("  qoqi users add <name>       A person who signs in to the console; also ls, passwd, rm")
 	fmt.Println("  qoqi gen go|php|ts <program>  What an application needs to carry out the steps of its queues")
 	fmt.Println("  Also: undeploy, versions, diff, resume, answer, end. Each says its usage with --help")
+	fmt.Println("  They talk to the daemon of QOQI_PATH, or to --url/--token (QOQI_URL, QOQI_TOKEN) elsewhere")
 	fmt.Println()
 	fmt.Println("Programs:")
 	fmt.Println("  qoqi run <file> [args]      Run a program; qoqi <file.qi> is the same")
@@ -298,7 +300,7 @@ func printHelp() {
 	fmt.Println("  starts (\"entry\"), where module paths start (\"root\"), which packages it")
 	fmt.Println("  uses (\"packages\"), the queues of its steps (\"queues\") and its limits")
 	fmt.Println("  (\"heap_mb\", \"max_depth\"). With one, a command takes a project folder, or")
-	fmt.Println("  nothing at all: qoqi serve runs the project of the current folder.")
+	fmt.Println("  nothing at all: qoqi deploy . deploys the project of the current folder.")
 }
 
 // compileSource runs the compilation pipeline on a .qi file. Diagnostics

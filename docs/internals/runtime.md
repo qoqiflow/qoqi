@@ -4,10 +4,11 @@ How the daemon runs flows: the store, the life of an instance, the moments it is
 
 ## How it runs
 
-The daemon, `qoqi serve`, runs the flows of a folder against a store:
+The daemon, `qoqi serve`, runs the flows deployed to it against a store:
 
 ```text
-$ qoqi serve flows/ --store flows.db --name shop-1
+$ qoqi serve --store postgres://flows@db/flows
+$ qoqi deploy flows/
 ```
 
 It is the scheduler of [tasks](../reference/language/tasks.md), made durable: today the tasks of a program wait in a queue in memory; the tasks of flows wait in the store, and the daemon is the scheduler of all of them. Here is all it does, in order. Every word in `this face` below is a column or a call of [the store](#the-store).

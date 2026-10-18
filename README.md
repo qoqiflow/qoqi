@@ -68,7 +68,8 @@ step fn managerOf(name: String) -> String { ... }
 ```
 
 ```console
-$ qoqi serve approvals.qi
+$ qoqi serve &                      # the daemon: its files in ~/.qoqi (QOQI_PATH)
+$ qoqi deploy approvals.qi
 $ qoqi start Expense expense:1 '{"id": "1", "author": "lin"}'
 $ qoqi send expense:1 answers '{"approved": true, "why": ""}'
 $ qoqi result expense:1
@@ -131,10 +132,11 @@ step fn sendReminder(user: String) { ... }
 Serve it and start an instance:
 
 ```console
-$ qoqi serve reminder.qi
+$ qoqi serve &
+$ qoqi deploy reminder.qi
 $ qoqi start Reminder reminder:ada '{"user": "ada"}'
 $ qoqi ls
-$ qoqi ui                   # the console, in a browser
+$ qoqi ui                   # the console, in a browser: admin, admin the first time
 ```
 
 ## Writing flows
@@ -208,7 +210,7 @@ The same shop, with its application written three times, is in [examples/shop](e
 
 ```console
 $ qoqi serve --store postgres://user:pass@db/flows --workers 8
-$ qoqi deploy shop.qi              # a new version, served at once
+$ qoqi deploy shop.qi              # a new version, served at once; from anywhere with QOQI_URL, QOQI_TOKEN
 $ qoqi versions                    # what runs on each version
 $ qoqi diff 12                     # what a deploy changed
 ```

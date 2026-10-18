@@ -7,6 +7,7 @@ import { useDeployments, useDiff } from '@/lib/queries';
 import { clock, relative, useNow } from '@/lib/time';
 import type { DeployView, FileDiff, Hunk } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { DeployActions } from './actions';
 
 // The versions deployed, one after another: what each changed of the
 // stages, what still runs on it, and what changed of the source from the
@@ -23,12 +24,12 @@ export function VersionsPage() {
   return (
     <div className="grid gap-6">
       <div className="grid gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Versions</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Deployments</h1>
         <p className="text-sm text-muted-foreground">Each deploy is kept: what it changed, what still runs on it, and its source.</p>
       </div>
       {list.length === 0 ? (
         <p className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
-          Nothing deployed yet: <span className="font-mono text-foreground">qoqi deploy program.lum</span>
+          Nothing deployed yet: <span className="font-mono text-foreground">qoqi deploy shop.qi</span>, or the editor
         </p>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
@@ -133,6 +134,7 @@ function DiffPanel({ to, earlier }: { to: DeployView; earlier: DeployView[] }) {
           {to.moving > 0 && ` · ${to.moving} instances were to move to it`}
         </span>
       </div>
+      <DeployActions deploy={to} />
 
       {(diff.data?.stages?.length ?? 0) > 0 && (
         <div className="grid gap-1.5 rounded-xl border border-warning/30 bg-warning/6 p-4">

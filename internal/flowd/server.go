@@ -7,7 +7,6 @@ package flowd
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -19,14 +18,13 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/qoqiflow/qoqi/internal/flowrt"
-	"github.com/qoqiflow/qoqi/internal/sqldb"
 	"github.com/qoqiflow/qoqi/internal/vm"
 )
 
@@ -51,6 +49,15 @@ type Daemon struct {
 	Deployments flowrt.Deployments
 	Workers     int
 	Out         io.Writer
+
+	// Keep is what the console keeps: its users, its drafts, what
+	// happened. Without it, the daemon answers to its token alone
+	Keep *Keep
+
+	accountsMu sync.Mutex // one change of the users at a time
+	logins     throttle
+	steps      stepCounts
+	drafting   sync.Mutex // one change of the drafts at a time
 
 	deploying sync.Mutex                   // one deploy at a time
 	pmu       sync.RWMutex                 // Programs, Flows and Schema, which a deploy changes
@@ -156,7 +163,9 @@ func (d *Daemon) observe(rt *flowrt.Runtime) {
 		if ran != nil {
 			ran(step, key, once)
 		}
-		d.hub.send(Event{Kind: "step", At: stamp(), ID: instanceOfKey(key), Step: step, Key: key, Once: once})
+		id := instanceOfKey(key)
+		d.countStep(d.hub.flow(id), step)
+		d.hub.send(Event{Kind: "step", At: stamp(), ID: id, Step: step, Key: key, Once: once})
 	}
 }
 
@@ -183,45 +192,6 @@ func NewToken() string {
 	return hex.EncodeToString(b[:])
 }
 
-// Beside is where the files about a store are kept on this machine: next
-// to a file of SQLite; for a store on a server, in the user's folder of
-// Qoqi, under a name drawn from its address without its password.
-func Beside(store string) string {
-	if !sqldb.IsServer(store) {
-		return store
-	}
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
-	dir = filepath.Join(dir, "qoqi", "stores")
-	_ = os.MkdirAll(dir, 0o700)
-	return filepath.Join(dir, sqldb.Fingerprint(store))
-}
-
-// TokenFile is where a daemon keeps its token, beside its store,
-// readable by its user alone: a daemon started again on the store has the
-// same, so that the pages open on it and the programs that talk to it go
-// on as they were.
-func TokenFile(store string) string { return Beside(store) + ".token" }
-
-// StoreToken is the token of the daemons of a store: the one kept next to
-// it, or one drawn now and kept there.
-func StoreToken(store string) (string, error) {
-	data, err := os.ReadFile(TokenFile(store))
-	if err == nil {
-		if token := strings.TrimSpace(string(data)); len(token) >= 32 {
-			return token, nil
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	token := NewToken()
-	if err := os.WriteFile(TokenFile(store), []byte(token+"\n"), 0o600); err != nil {
-		return "", err
-	}
-	return token, nil
-}
 
 // Run wakes what is due until ctx is done: at once when told (a start),
 // otherwise every tick.
@@ -245,7 +215,7 @@ func (d *Daemon) Run(ctx context.Context, tick time.Duration) error {
 		}
 		for _, p := range d.programs() {
 			_, err := p.Runtime.RunDue()
-			d.hub.observe(p.Runtime.Store)
+			d.keepWhatHappened(d.hub.observe(p.Runtime.Store, p.Name))
 			if err != nil {
 				d.mu.Lock()
 				d.failure = err
@@ -254,8 +224,10 @@ func (d *Daemon) Run(ctx context.Context, tick time.Duration) error {
 				return err
 			}
 		}
+		d.keepSteps(false)
 		select {
 		case <-ctx.Done():
+			d.keepSteps(true)
 			return nil
 		case <-d.wake:
 		case <-timer.C:
@@ -307,9 +279,28 @@ func (d *Daemon) Handler(hosts ...string) http.Handler {
 	mux.HandleFunc("GET /api/deployments", d.deployments)
 	mux.HandleFunc("GET /api/deployments/{seq}", d.deployment)
 	mux.HandleFunc("GET /api/deployments/{seq}/diff", d.diff)
+	mux.HandleFunc("POST /api/deployments/{seq}/redeploy", d.redeploy)
 	mux.HandleFunc("GET /api/source", d.source)
 	mux.HandleFunc("GET /api/events", d.events)
 	mux.HandleFunc("GET /api/output", d.output)
+	mux.HandleFunc("GET /api/users", d.listUsers)
+	mux.HandleFunc("POST /api/users", d.createUser)
+	mux.HandleFunc("DELETE /api/users/{name}", d.removeUser)
+	mux.HandleFunc("POST /api/users/{name}/password", d.password)
+	mux.HandleFunc("PUT /api/me/prefs", d.prefs)
+	mux.HandleFunc("GET /api/workspace", d.workspace)
+	mux.HandleFunc("GET /api/workspace/{program}", d.draft)
+	mux.HandleFunc("DELETE /api/workspace/{program}", d.discard)
+	mux.HandleFunc("PUT /api/workspace/{program}/files/{file...}", d.saveFile)
+	mux.HandleFunc("DELETE /api/workspace/{program}/files/{file...}", d.removeFile)
+	mux.HandleFunc("POST /api/workspace/{program}/check", d.check)
+	mux.HandleFunc("POST /api/workspace/{program}/deploy", d.deployDraft)
+	mux.HandleFunc("POST /api/format", d.format)
+	mux.HandleFunc("GET /api/stats", d.stats)
+	public := http.NewServeMux()
+	public.HandleFunc("GET /api/auth", d.authState)
+	public.HandleFunc("POST /api/auth/login", d.login)
+	public.HandleFunc("POST /api/auth/logout", d.logout)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !allowedHost(r.Host, hosts) {
 			fail(w, http.StatusForbidden, "host", "this daemon answers to its own address only, not to "+r.Host)
@@ -327,12 +318,22 @@ func (d *Daemon) Handler(hosts ...string) http.Handler {
 			d.attempt(w, r)
 			return
 		}
-		given := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(given), []byte(d.Token)) != 1 {
-			fail(w, http.StatusUnauthorized, "token", "every request carries the daemon's token: Authorization: Bearer <token>")
+		if strings.HasPrefix(r.URL.Path, "/api/auth") {
+			// Before anyone signs in: who they are, setting up, signing in
+			public.ServeHTTP(w, r)
 			return
 		}
-		mux.ServeHTTP(w, r)
+		p, problem := d.authenticate(r)
+		if problem != "" {
+			fail(w, http.StatusUnauthorized, "token", problem)
+			return
+		}
+		if p.Renew && r.URL.Path != "/api/users/"+p.User+"/password" {
+			// A password given, admin's first: changed before anything else
+			fail(w, http.StatusForbidden, "renew", "change your password first: it is one you were given")
+			return
+		}
+		mux.ServeHTTP(w, withPrincipal(r, p))
 	})
 }
 
@@ -537,6 +538,9 @@ type Detail struct {
 	Tries   map[string]int    `json:"tries,omitempty"`   // by key: how many times it left
 	Retries map[string]string `json:"retries,omitempty"` // by key: when it is tried again
 	Output  []Line            `json:"output"`
+	// Unanswered are the steps that left and whose answer is not kept:
+	// what a person may answer by hand, for a stopped instance
+	Unanswered []string `json:"unanswered,omitempty"`
 }
 
 func (d *Daemon) detailOf(rt *flowrt.Runtime, inst *flowrt.Instance) Detail {
@@ -553,6 +557,23 @@ func (d *Daemon) detailOf(rt *flowrt.Runtime, inst *flowrt.Instance) Detail {
 		if kept := lister.Results(flowrt.Prefix(inst)); kept != nil {
 			detail.Kept = kept
 		}
+	}
+	if inst.Status == flowrt.Stopped {
+		kept := map[string]bool{}
+		for _, k := range detail.Kept {
+			kept[k.Key] = true
+		}
+		for key := range inst.Tries {
+			if !kept[key] {
+				detail.Unanswered = append(detail.Unanswered, key)
+			}
+		}
+		for key := range inst.Working {
+			if !kept[key] && !slices.Contains(detail.Unanswered, key) {
+				detail.Unanswered = append(detail.Unanswered, key)
+			}
+		}
+		sort.Strings(detail.Unanswered)
 	}
 	for key, at := range inst.Retried {
 		if detail.Retries == nil {
@@ -863,36 +884,6 @@ func fail(w http.ResponseWriter, status int, code, message string) {
 	answer(w, status, map[string]string{"error": code, "message": message})
 }
 
-// Address is what the daemon writes for its clients next to its store:
-// where it listens and its token, readable by its user alone.
-type Address struct {
-	URL   string `json:"url"`
-	Token string `json:"token"`
-	PID   int    `json:"pid"`
-}
-
-// AddressFile is where a daemon on a store says where it is.
-func AddressFile(store string) string { return Beside(store) + ".daemon" }
-
-// WriteAddress writes where the daemon is, for the commands.
-func WriteAddress(store string, a Address) error {
-	data, _ := json.MarshalIndent(a, "", "  ")
-	return os.WriteFile(AddressFile(store), data, 0o600)
-}
-
-// ReadAddress reads where the daemon on a store is.
-func ReadAddress(store string) (Address, error) {
-	var a Address
-	data, err := os.ReadFile(AddressFile(store))
-	if errors.Is(err, os.ErrNotExist) {
-		return a, fmt.Errorf("no daemon is serving %s on this machine: start one with qoqi serve <program> --store %s", sqldb.Redacted(store), sqldb.Redacted(store))
-	}
-	if err != nil {
-		return a, err
-	}
-	err = json.Unmarshal(data, &a)
-	return a, err
-}
 
 // The pages: the console, built from console/ in the repository (npm run
 // build there writes it here), served as it is. A path that is not a file

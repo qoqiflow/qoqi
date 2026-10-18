@@ -8,7 +8,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
 
 // The Go of the shop's steps is what qoqi gen writes from its
@@ -29,7 +28,7 @@ func TestTheGoOfTheShopIsWrittenFromItsFlow(t *testing.T) {
 	}
 }
 
-// The shop's flow, served by qoqi serve, its steps carried out by
+// The shop's flow, deployed to qoqi serve, its steps carried out by
 // the shop's application in Go, built from the example.
 func TestTheShopInGo(t *testing.T) {
 	dir := t.TempDir()
@@ -169,25 +168,13 @@ func theShop(t *testing.T, dir string, start func(address string) *exec.Cmd) {
 	}()
 
 	out := &lockedWriter{}
-	daemon := exec.Command(qoqi, "serve", "orders.qi", "--listen", "127.0.0.1:0")
-	daemon.Dir = dir
-	daemon.Env = append(os.Environ(), "SHOP_SECRET=dev",
+	daemon := serveIn(t, dir, out, "SHOP_SECRET=dev",
 		"WAREHOUSE_URL=http://"+address+"/warehouse", "PAYMENTS_URL=http://"+address+"/payments")
-	daemon.Stdout, daemon.Stderr = out, out
-	if err := daemon.Start(); err != nil {
-		t.Fatal(err)
-	}
 	defer func() {
 		daemon.Process.Signal(syscall.SIGTERM)
 		daemon.Wait()
 	}()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(filepath.Join(dir, "flows.db.daemon")); err == nil && strings.Contains(string(data), `"pid": `+itoa(daemon.Process.Pid)) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	deployIn(t, dir, "orders.qi", out)
 
 	for _, c := range []struct{ id, customer, items, result string }{
 		{"o1", "ada", `[{"sku": "mug", "quantity": 2, "cents": 1200}], "speed": "Standard"`, `Ok(Receipt { charge: "ch-1", parcel: "parcel-1" })`},

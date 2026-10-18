@@ -80,5 +80,5 @@ fuzz:
 
 clean:
 	@rm -f qoqi
-	@rm -f flows.db flows.db-wal flows.db-shm flows.db.daemon flows.db.token
+	@rm -f flows.db flows.db-wal flows.db-shm
 	@find . -name "*.test" -delete

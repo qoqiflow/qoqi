@@ -1,1 +1,1 @@
-The flows of this program are served by: qoqi serve examples/shop/orders.qi
+The flows of this program are given to the daemon by: qoqi deploy examples/shop/orders.qi

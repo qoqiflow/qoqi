@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// A daemon started with no program, given its programs by qoqi flow
+// A daemon started with no program, given its programs by qoqi
 // deploy, a version after another with no restart; the versions kept, and
 // what changed between them; served again when it starts on its store.
 
@@ -53,28 +53,6 @@ fn main() {}
 `
 }
 
-// serveIn starts a daemon in a folder, with what follows serve, and waits
-// until it says where it is.
-func serveIn(t *testing.T, dir string, out *lockedWriter, args ...string) *exec.Cmd {
-	t.Helper()
-	cmd := exec.Command(qoqi, append([]string{"serve"}, append(args, "--listen", "127.0.0.1:0")...)...)
-	cmd.Dir = dir
-	cmd.Stdout, cmd.Stderr = out, out
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if data, err := os.ReadFile(filepath.Join(dir, "flows.db.daemon")); err == nil && strings.Contains(string(data), `"pid": `+itoa(cmd.Process.Pid)) {
-			return cmd
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	cmd.Process.Kill()
-	t.Fatalf("the daemon did not start:\n%s", out.String())
-	return nil
-}
-
 func waitOut(t *testing.T, out *lockedWriter, what string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
@@ -95,7 +73,13 @@ func TestDeployingToADaemonThatRuns(t *testing.T) {
 		daemon.Process.Signal(syscall.SIGTERM)
 		daemon.Wait()
 	}()
-	waitOut(t, out, "no program yet")
+	waitOut(t, out, "qoqi: no program yet: qoqi deploy <program> gives it one")
+	if !strings.Contains(out.String(), "qoqi: serving from "+dir+", store "+filepath.Join(dir, "flows.db")+", at http://127.0.0.1:") {
+		t.Errorf("expected the daemon to say its home, its store and its address:\n%s", out.String())
+	}
+	if log, err := os.ReadFile(filepath.Join(dir, "logs", "daemon.log")); err != nil || !strings.Contains(string(log), "serving from "+dir) {
+		t.Errorf("expected what the daemon says in its log: %v\n%s", err, log)
+	}
 
 	// The first version
 	os.WriteFile(program, []byte(greeter("Hello")), 0o644)
@@ -148,7 +132,7 @@ func TestDeployingToADaemonThatRuns(t *testing.T) {
 	daemon.Wait()
 	again := &lockedWriter{}
 	daemon = serveIn(t, dir, again)
-	waitOut(t, again, "Greeter, on flows.db")
+	waitOut(t, again, "flows: Greeter")
 	flowCommand(t, dir, "send", "g", "names", `"dee"`, "--key", "5")
 	waitOut(t, again, "Bonjour dee")
 	flowCommand(t, dir, "send", "g", "names", `"stop"`, "--key", "6")
@@ -165,32 +149,47 @@ func TestDeployingToADaemonThatRuns(t *testing.T) {
 	}
 }
 
-// --watch deploys again what is saved: a mistake is said, and the version
+// qoqi deploy --watch deploys again what is saved: a mistake is said, and the version
 // before goes on.
 func TestWatching(t *testing.T) {
 	dir := t.TempDir()
 	program := filepath.Join(dir, "greeter.qi")
 	os.WriteFile(program, []byte(greeter("Hello")), 0o644)
 	out := &lockedWriter{}
-	daemon := serveIn(t, dir, out, "greeter.qi", "--watch")
+	daemon := serveIn(t, dir, out)
 	defer func() {
 		daemon.Process.Signal(syscall.SIGTERM)
 		daemon.Wait()
 	}()
-	waitOut(t, out, "watching greeter.qi")
+
+	// qoqi deploy --watch, beside the daemon
+	watched := &lockedWriter{}
+	watch := exec.Command(qoqi, "deploy", "greeter.qi", "--watch")
+	watch.Dir = dir
+	watch.Env = flowEnv(dir)
+	watch.Stdout, watch.Stderr = watched, watched
+	if err := watch.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		watch.Process.Signal(syscall.SIGTERM)
+		watch.Wait()
+	}()
+	waitOut(t, watched, "greeter deployed, version")
+	waitOut(t, watched, "watching greeter.qi")
 	flowCommand(t, dir, "start", "Greeter", "g")
 	flowCommand(t, dir, "send", "g", "names", `"ada"`, "--key", "1")
 	waitOut(t, out, "Hello ada")
 
 	// A mistake saved: said, nothing deployed
 	os.WriteFile(program, []byte(strings.Replace(greeter("Hello"), "greeted = greeted + 1;", "greeted = greeted + true;", 1)), 0o644)
-	waitOut(t, out, "the version before goes on")
+	waitOut(t, watched, "the version before goes on")
 	flowCommand(t, dir, "send", "g", "names", `"lin"`, "--key", "2")
 	waitOut(t, out, "Hello lin")
 
 	// Fixed, and greeting otherwise: deployed as it is saved
 	os.WriteFile(program, []byte(greeter("Hi")), 0o644)
-	waitOut(t, out, "instances move to it at their next stage")
+	waitOut(t, watched, "instances move to it at their next stage")
 	flowCommand(t, dir, "send", "g", "names", `"bo"`, "--key", "3")
 	waitOut(t, out, "Hi bo")
 }

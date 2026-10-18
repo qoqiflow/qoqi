@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { Inbox, Loader2, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Editor, initial } from '@/components/fields';
+import { Editor, initial } from '@/features/instances/fields';
 import { api } from '@/lib/api';
 import { awaited } from '@/lib/describe';
 import type { Data, Field, Program, View } from '@/lib/types';
