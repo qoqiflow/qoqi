@@ -1,0 +1,10 @@
+let answer = wait match {
+    case let a = self.answers.receive(): a;
+    case time.after(7.days()): null;
+};
+if answer == null {
+    return Outcome.Expired;
+}
+
+// $ qoqi send expense:1 answers '{"approved": true, "by": "grace"}'
+// or POST /api/instances/expense:1/inboxes/answers, with the daemon's token

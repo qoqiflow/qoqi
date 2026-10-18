@@ -1,0 +1,101 @@
+{
+  "id": "restate",
+  "order": 3,
+  "name": "Restate",
+  "title": "Qoqi Flow vs Restate",
+  "tagline": "Waiting for months is the point, not a smell.",
+  "lede": "Restate replays a journal, so every side effect goes through ctx.run and the clock through ctx.date, by discipline. Running invocations stay on their deployment, and its docs advise against handlers that run for days. A Qoqi flow waits as long as the process takes, moves to new code at a stage, and the compiler checks the rules.",
+  "cards": [
+    {
+      "title": "Long waits are what flows do",
+      "text": "An approval, a trial, a renewal: weeks, months. Restate advises splitting such handlers. In Qoqi, wait time.after(90.days()) is one line."
+    },
+    {
+      "title": "Nothing to wrap",
+      "text": "Forget a ctx.run in Restate and the call runs again on every replay, unrecorded. In Qoqi, a call outside a step does not compile."
+    },
+    {
+      "title": "Apache 2.0, one binary",
+      "text": "Restate's server is under the BSL 1.1. Qoqi Flow is Apache 2.0, one binary on SQLite, PostgreSQL or MySQL."
+    }
+  ],
+  "code": [
+    {
+      "title": "Wait for an answer, or seven days",
+      "text": "A durable promise, a timeout that throws, and a second handler to resolve it; or one wait match.",
+      "them": "restate/wait.ts",
+      "us": "shared/wait.qi"
+    },
+    {
+      "title": "Plain code, because nothing replays",
+      "text": "ctx.date, ctx.rand, ctx.run: Restate needs its own version of everything that changes between runs.",
+      "them": "restate/rules.ts",
+      "us": "shared/plain.qi"
+    }
+  ],
+  "rows": [
+    {
+      "label": "How it comes back",
+      "them": "Replays its journal",
+      "us": "Its state thawed, at the line it was at"
+    },
+    {
+      "label": "Code between steps",
+      "them": "Deterministic: ctx.date, ctx.rand, ctx.run",
+      "us": "Anything"
+    },
+    {
+      "label": "A call outside a step",
+      "them": "Not journaled; runs again on replay",
+      "us": "Refused at compile time (F0001)"
+    },
+    {
+      "label": "Waiting for weeks or months",
+      "them": "Advised against: split into delayed calls",
+      "us": "What flows are for"
+    },
+    {
+      "label": "New code under running work",
+      "them": "Stays on its deployment, kept up until it ends",
+      "us": "Instances move at a stage, checked against flow.lock"
+    },
+    {
+      "label": "A step that must never run twice",
+      "them": "ctx.run runs again if it was in progress",
+      "us": "Settled<T>: never run again; the flow is told Unknown and decides"
+    },
+    {
+      "label": "Crash testing",
+      "them": "alwaysReplay, to find non-determinism",
+      "us": "everyCrash: the test again, stopped after every write, same ending required"
+    },
+    {
+      "label": "Steps in your own services",
+      "them": "An SDK in each service's language",
+      "us": "Any server that speaks the protocol: a signed HTTP POST. SDKs for Go, PHP, TypeScript"
+    },
+    {
+      "label": "License",
+      "them": "BSL 1.1 server",
+      "us": "Apache 2.0"
+    }
+  ],
+  "faq": [
+    {
+      "q": "Is Qoqi Flow ready for production?",
+      "a": "It is at v0.1.0. The language, the runtime and the daemon work end to end, and they are tested by crashing them on purpose after every write. What it does not have yet is years in production. Start with a flow that matters, not the one that holds the company up."
+    },
+    {
+      "q": "How do Restate's ideas map?",
+      "a": "Workflow: impl Flow. ctx.run: step fn. Durable promise or awakeable: an Inbox field. ctx.sleep: wait time.after(...). orTimeout and RestatePromise.race: wait match. Deployments: stage."
+    },
+    {
+      "q": "Do I have to rewrite my services in Qoqi?",
+      "a": "No. Only the flow is Qoqi. A step that needs your code stays in your service: any server that answers Qoqi's protocol, a signed HTTP POST. qoqi gen writes the typed interfaces for Go, PHP and TypeScript; any other language implements the protocol in a page of code."
+    },
+    {
+      "q": "Where does it run?",
+      "a": "Anywhere one binary runs. SQLite on one machine; PostgreSQL or MySQL when several daemons share the work. There is no managed cloud yet."
+    }
+  ]
+}

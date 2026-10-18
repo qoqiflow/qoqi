@@ -1,0 +1,6 @@
+// Version 2 renames charge to chargeCard. An instance moves to new
+// code only at a stage: what it did before is done, and is not
+// done again, whatever its name now.
+stage shipping;
+
+ship(self.order);

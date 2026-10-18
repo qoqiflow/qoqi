@@ -1,0 +1,14 @@
+impl Flow<Void> for Trial {
+    fn run() {
+        // Every line runs once: the flow is thawed at its line,
+        // not called again from the top
+        let user = findUser(self.userId);
+        track("trial_started", user.id);
+
+        wait time.after(3.days());
+        sendTips(user.email);
+    }
+}
+
+// Reaching the world takes a step, and the compiler checks it
+step fn track(event: String, user: String) { analytics.track(event, user); }

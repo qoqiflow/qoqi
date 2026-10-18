@@ -1,0 +1,11 @@
+impl Flow<Void> for Renewal {
+    fn run() {
+        // The clock and chance are plain code: read once, never again
+        if time.now() < self.user.trialEnds {
+            wait time.after(2.days());
+        }
+        let tip = self.user.tips[random.below(self.user.tips.len())];
+
+        charge(self.user.id, tip);
+    }
+}

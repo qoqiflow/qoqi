@@ -1,0 +1,16 @@
+impl Flow<Outcome> for Expense {
+    fn run() -> Outcome {
+        notifyManager(self.id);
+        let answer = wait self.answers.receive();
+
+        // Running instances move to new code here, and only here
+        stage paying;
+
+        notifyAccounting(self.id);      // new in version 2
+        return pay(self.employee, self.cents);
+    }
+}
+
+// $ qoqi deploy expense.qi
+// expense deployed, version 7b02e1c4 in place of 43381189:
+// 12 instances move to it at their next stage

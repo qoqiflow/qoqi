@@ -1,0 +1,113 @@
+{
+  "title": "Qoqi Flow vs the rest",
+  "tagline": "They replay your code. Qoqi Flow freezes it.",
+  "lede": "Temporal, DBOS, Restate, Inngest and Workflow SDK bring a workflow back by running its code again, so the code has to behave the same every time. Qoqi Flow writes down the state of execution and goes on from the line it was at. Everything else follows.",
+  "columns": [
+    "Temporal",
+    "DBOS",
+    "Restate",
+    "Inngest",
+    "Workflow SDK"
+  ],
+  "rows": [
+    {
+      "label": "Comes back by",
+      "us": "Thawing its state",
+      "others": [
+        "Replay",
+        "Re-execution",
+        "Replay",
+        "Calling it again",
+        "Replay"
+      ]
+    },
+    {
+      "label": "Determinism rules",
+      "us": "None",
+      "others": [
+        "Yes",
+        "Yes",
+        "Yes",
+        "Yes",
+        "Yes, in a sandbox"
+      ]
+    },
+    {
+      "label": "Calls outside steps caught",
+      "us": "At compile time",
+      "others": [
+        "Partly: a Go linter, a Python sandbox",
+        "No",
+        "No",
+        "No",
+        "At load or run time"
+      ]
+    },
+    {
+      "label": "Running instances on new code",
+      "us": "Move at a stage, checked",
+      "others": [
+        "Patches, or pinned workers",
+        "App version, or patches",
+        "Pinned to a deployment",
+        "Matched by step id",
+        "Pinned to a deployment"
+      ]
+    },
+    {
+      "label": "A step never run twice",
+      "us": "Settled<T>",
+      "others": [
+        "At least once",
+        "At least once",
+        "At least once",
+        "At least once",
+        "At least once"
+      ]
+    },
+    {
+      "label": "Crash tests built in",
+      "us": "everyCrash",
+      "others": [
+        "No",
+        "No",
+        "No",
+        "No",
+        "No"
+      ]
+    },
+    {
+      "label": "Steps in any language",
+      "us": "Any server that speaks the protocol",
+      "others": [
+        "An SDK per language",
+        "Python, TS, Go, Java",
+        "An SDK per language",
+        "TS, Python, Go",
+        "TypeScript"
+      ]
+    },
+    {
+      "label": "To run it",
+      "us": "One binary",
+      "others": [
+        "Service, database, Elasticsearch, workers",
+        "A library, and Postgres",
+        "A server",
+        "A server, Postgres and Redis to scale",
+        "Vercel, or a World"
+      ]
+    },
+    {
+      "label": "License",
+      "us": "Apache 2.0",
+      "others": [
+        "MIT",
+        "MIT",
+        "BSL 1.1",
+        "SSPL",
+        "Apache 2.0"
+      ]
+    }
+  ]
+}

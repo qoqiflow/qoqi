@@ -1,0 +1,96 @@
+{
+  "id": "workflow-sdk",
+  "order": 5,
+  "name": "Workflow SDK",
+  "title": "Qoqi Flow vs Workflow SDK",
+  "tagline": "Durable without a sandbox, a compiler plugin or a host.",
+  "lede": "Vercel's Workflow SDK compiles \"use workflow\" functions into a sandbox that is replayed from an event log: a logical clock, a seeded Math.random, no fetch, no timers, no Node modules. Each run is pinned to the deployment that started it. Qoqi Flow is a whole language that never replays, moves to new code at a stage, and runs anywhere.",
+  "cards": [
+    {
+      "title": "No sandbox",
+      "text": "Workflow SDK takes Date, Math.random, fetch, setTimeout and Node modules away from workflow code. A Qoqi flow keeps the whole language; only reaching the world needs a step."
+    },
+    {
+      "title": "Deploy without keeping the old one",
+      "text": "A Workflow SDK run needs the deployment that started it to stay up for its whole life, or it must be re-run. Qoqi instances move to new code at a stage."
+    },
+    {
+      "title": "Not tied to a platform",
+      "text": "Built for Vercel, with a Postgres World to self-host. Qoqi Flow is one binary, on any machine, from SQLite to PostgreSQL."
+    }
+  ],
+  "code": [
+    {
+      "title": "Wait for an answer, or seven days",
+      "text": "A hook raced against a sleep, and a route of your own to resume it; or one wait match.",
+      "them": "workflow-sdk/wait.ts",
+      "us": "workflow-sdk/wait.qi"
+    },
+    {
+      "title": "Plain code, because nothing replays",
+      "text": "Workflow SDK swaps the clock and randomness for replayable stand-ins. Qoqi uses the real ones.",
+      "them": "workflow-sdk/sandbox.ts",
+      "us": "shared/plain.qi"
+    }
+  ],
+  "rows": [
+    {
+      "label": "How it comes back",
+      "them": "Replays its event log",
+      "us": "Its state thawed, at the line it was at"
+    },
+    {
+      "label": "Workflow code",
+      "them": "A sandbox: logical clock, seeded random, no fetch, timers or Node modules",
+      "us": "The whole language"
+    },
+    {
+      "label": "Mistakes",
+      "them": "Found when the bundle loads, or when the call runs",
+      "us": "Found when it compiles"
+    },
+    {
+      "label": "New code under running workflows",
+      "them": "Pinned to its deployment, kept up until it ends",
+      "us": "Instances move at a stage, checked against flow.lock"
+    },
+    {
+      "label": "A step that must never run twice",
+      "them": "Steps retried",
+      "us": "Settled<T>: never run again; the flow is told Unknown and decides"
+    },
+    {
+      "label": "Crash testing",
+      "them": "Not provided",
+      "us": "everyCrash: the test again, stopped after every write, same ending required"
+    },
+    {
+      "label": "Steps in your own services",
+      "them": "TypeScript; Python in beta",
+      "us": "Any server that speaks the protocol: a signed HTTP POST. SDKs for Go, PHP, TypeScript"
+    },
+    {
+      "label": "Where it runs",
+      "them": "Vercel; a Postgres World to self-host",
+      "us": "Anywhere: one binary"
+    }
+  ],
+  "faq": [
+    {
+      "q": "Is Qoqi Flow ready for production?",
+      "a": "It is at v0.1.0. The language, the runtime and the daemon work end to end, and they are tested by crashing them on purpose after every write. What it does not have yet is years in production. Start with a flow that matters, not the one that holds the company up."
+    },
+    {
+      "q": "How do Workflow SDK's ideas map?",
+      "a": "\"use workflow\": impl Flow. \"use step\": step fn. createHook and resumeHook: an Inbox field and qoqi send. sleep: wait time.after(...). Promise.race: wait match. FatalError and RetryableError: Result and flow.retry."
+    },
+    {
+      "q": "Do I have to rewrite my services in Qoqi?",
+      "a": "No. Only the flow is Qoqi. A step that needs your code stays in your service: any server that answers Qoqi's protocol, a signed HTTP POST. qoqi gen writes the typed interfaces for Go, PHP and TypeScript; any other language implements the protocol in a page of code."
+    },
+    {
+      "q": "Where does it run?",
+      "a": "Anywhere one binary runs. SQLite on one machine; PostgreSQL or MySQL when several daemons share the work. There is no managed cloud yet."
+    }
+  ]
+}

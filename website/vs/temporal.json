@@ -1,0 +1,107 @@
+{
+  "id": "temporal",
+  "order": 1,
+  "name": "Temporal",
+  "title": "Qoqi Flow vs Temporal",
+  "tagline": "Temporal's durability, without the determinism rules.",
+  "lede": "Temporal replays your workflow from its event history, so your code has to play back identically, forever. Qoqi Flow freezes the state of execution and thaws it at the line it was at. Nothing replays, so nothing has to be deterministic.",
+  "cards": [
+    {
+      "title": "No determinism rules",
+      "text": "In Temporal, time.Now, rand, goroutines and ranging over a map are bugs waiting for a replay. A Qoqi flow never runs twice: it is just code."
+    },
+    {
+      "title": "Mistakes caught at compile time",
+      "text": "A network call outside a step does not compile, and the error shows the path of calls that leads to it. Temporal finds out on replay, in production, or never."
+    },
+    {
+      "title": "One binary, not a cluster",
+      "text": "No Temporal Service, no Cassandra, no Elasticsearch, no worker fleet. qoqi serve and a SQLite file; PostgreSQL or MySQL to share the work."
+    }
+  ],
+  "code": [
+    {
+      "title": "Wait for an answer, or seven days",
+      "text": "The same wait, in Temporal's Go SDK and in Qoqi.",
+      "them": "temporal/wait.go",
+      "us": "shared/wait.qi"
+    },
+    {
+      "title": "Plain code, because nothing replays",
+      "text": "Temporal has a replacement for the clock, for sleep, for randomness, for goroutines. Qoqi needs none.",
+      "them": "temporal/rules.go",
+      "us": "shared/plain.qi"
+    },
+    {
+      "title": "Shipping a change under running workflows",
+      "text": "Temporal branches on a version marker, kept for as long as old executions live. A Qoqi instance moves to new code at a stage, its state checked against flow.lock.",
+      "them": "temporal/version.go",
+      "us": "shared/stage.qi"
+    }
+  ],
+  "rows": [
+    {
+      "label": "Workflow code",
+      "them": "Must replay identically: no time.Now, rand, goroutines, map ranges",
+      "us": "Plain code: the clock, chance, any order"
+    },
+    {
+      "label": "A call outside a step",
+      "them": "Allowed; runs again on every replay",
+      "us": "Refused at compile time (F0001)"
+    },
+    {
+      "label": "Waiting for a message or a deadline",
+      "them": "Selector, signal channel, timer, cancel",
+      "us": "wait match"
+    },
+    {
+      "label": "New code under running workflows",
+      "them": "GetVersion branches kept for good, or old workers kept until runs end",
+      "us": "Instances move at a stage, checked against flow.lock"
+    },
+    {
+      "label": "A step that must never run twice",
+      "them": "Activities run at least once",
+      "us": "Settled<T>: never run again; the flow is told Unknown and decides"
+    },
+    {
+      "label": "Long-lived workflows",
+      "them": "Event history capped at 51,200 events or 50 MB: Continue-As-New",
+      "us": "No event history to replay"
+    },
+    {
+      "label": "Crash testing",
+      "them": "Write it yourself",
+      "us": "everyCrash: the test again, stopped after every write, same ending required"
+    },
+    {
+      "label": "Steps in your own services",
+      "them": "An SDK in the worker's language",
+      "us": "Any server that speaks the protocol: a signed HTTP POST. SDKs for Go, PHP, TypeScript"
+    },
+    {
+      "label": "To run it",
+      "them": "Temporal Service, a database, Elasticsearch, your workers",
+      "us": "One binary"
+    }
+  ],
+  "faq": [
+    {
+      "q": "Is Qoqi Flow ready for production?",
+      "a": "It is at v0.1.0. The language, the runtime and the daemon work end to end, and they are tested by crashing them on purpose after every write. What it does not have yet is years in production. Start with a flow that matters, not the one that holds the company up."
+    },
+    {
+      "q": "How do Temporal's ideas map?",
+      "a": "Workflow: impl Flow. Activity: step fn. Signal: an Inbox field. Timer: wait time.after(...). Selector: wait match. Patching: stage, and migrate fn when the state changes shape. Worker: qoqi serve."
+    },
+    {
+      "q": "Do I have to rewrite my services in Qoqi?",
+      "a": "No. Only the flow is Qoqi. A step that needs your code stays in your service: any server that answers Qoqi's protocol, a signed HTTP POST. qoqi gen writes the typed interfaces for Go, PHP and TypeScript; any other language implements the protocol in a page of code."
+    },
+    {
+      "q": "Where does it run?",
+      "a": "Anywhere one binary runs. SQLite on one machine; PostgreSQL or MySQL when several daemons share the work. There is no managed cloud yet."
+    }
+  ]
+}

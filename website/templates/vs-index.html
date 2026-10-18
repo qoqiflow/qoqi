@@ -1,0 +1,54 @@
+{{define "vs-index.html"}}{{template "head" .}}
+<body class="home vs">
+{{template "header" (dict)}}
+<main>
+  <section class="hero vs-hero">
+    <div class="hero-glow" aria-hidden="true"></div>
+    <div class="hero-in">
+      <a class="pill" href="/"><span class="pill-dot"></span>Compare</a>
+      <h1>{{.H.Title}}</h1>
+      <p class="vs-tagline">{{.H.Tagline}}</p>
+      <p class="lede">{{.H.Lede}}</p>
+    </div>
+  </section>
+
+  <section class="vs-cards">
+    <div class="grid">
+      {{range .Others}}<a class="cell" href="/vs/{{.ID}}"><span class="tag">vs {{.Name}}</span><h3>{{.Tagline}}</h3><p>{{.Lede}}</p></a>
+      {{end}}
+    </div>
+  </section>
+
+  <section class="compare vs-table">
+    <div class="sec-head"><h2>All of them, side by side</h2></div>
+    <div class="table-wrap">
+      <table class="wide">
+        <thead><tr><th></th><th class="us">Qoqi Flow</th>{{range .H.Columns}}<th>{{.}}</th>{{end}}</tr></thead>
+        <tbody>
+          {{range .H.Rows}}<tr><th>{{.Label}}</th><td class="us">{{.Us}}</td>{{range .Others}}<td>{{.}}</td>{{end}}</tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="end">
+    <div class="end-glow" aria-hidden="true"></div>
+    <h2>Write the process. Let it wait.</h2>
+    <div class="install" data-copy-root>
+      <span class="prompt">$</span>
+      <code data-copy-text>curl -fsSL https://qoqi.dev/install.sh | sh</code>
+      <button type="button" class="copy" data-copy aria-label="Copy">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+    </div>
+    <p class="cta">
+      <a class="btn primary" href="/docs/getting-started/quickstart">Quickstart</a>
+      <a class="btn" href="https://github.com/qoqiflow/qoqi">GitHub</a>
+    </p>
+  </section>
+</main>
+{{template "footer"}}
+</body>
+</html>
+{{end}}

@@ -1,0 +1,96 @@
+{
+  "id": "inngest",
+  "order": 4,
+  "name": "Inngest",
+  "title": "Qoqi Flow vs Inngest",
+  "tagline": "Every line runs once. Not just the steps.",
+  "lede": "Inngest calls your function again and again, handing back the results of the steps it saved; the code around them runs each time, and a step is known by its string id. Qoqi Flow thaws the instance at its line: every line runs once, and a deploy never makes a step run twice.",
+  "cards": [
+    {
+      "title": "Every line runs once",
+      "text": "In Inngest, code outside step.run runs on every call back: a query, a log, a tracking event, again and again. A Qoqi flow is never called from the top again."
+    },
+    {
+      "title": "Rename without paying twice",
+      "text": "Rename an Inngest step and runs in flight meet it for the first time, and run it again. A Qoqi instance moves to new code only at a stage; what is behind it is done."
+    },
+    {
+      "title": "Tests on a real clock of their own",
+      "text": "Inngest's test engine asks you to mock sleeps and waits. A Qoqi trial runs the real waits on its own clock, three days in a moment, and everyCrash on top."
+    }
+  ],
+  "code": [
+    {
+      "title": "The code around the steps",
+      "text": "Called back after each step, an Inngest function runs its other lines again. A Qoqi flow is thawed, and every reach into the world is a step the compiler checks.",
+      "them": "inngest/outside.ts",
+      "us": "inngest/outside.qi"
+    },
+    {
+      "title": "A refactor that charges twice",
+      "text": "A step's identity is its id. Change it while runs are in flight, and they run it again.",
+      "them": "inngest/rename.ts",
+      "us": "inngest/rename.qi"
+    }
+  ],
+  "rows": [
+    {
+      "label": "How it comes back",
+      "them": "Your function called again, saved step results handed back",
+      "us": "Its state thawed, at the line it was at"
+    },
+    {
+      "label": "Code outside steps",
+      "them": "Runs again on every call; nothing checks it",
+      "us": "Runs once; reaching the world outside a step is refused at compile time"
+    },
+    {
+      "label": "Renaming a step",
+      "them": "Re-runs it in runs in flight",
+      "us": "Never re-runs what an instance did"
+    },
+    {
+      "label": "Waiting",
+      "them": "step.sleep, waitForEvent; a run's length capped by plan",
+      "us": "wait match over inboxes, timers and tasks"
+    },
+    {
+      "label": "A step that must never run twice",
+      "them": "Retried",
+      "us": "Settled<T>: never run again; the flow is told Unknown and decides"
+    },
+    {
+      "label": "Testing",
+      "them": "Test engine; sleeps and waits mocked",
+      "us": "Trials on their own clock; everyCrash"
+    },
+    {
+      "label": "Steps in your own services",
+      "them": "SDKs for TypeScript, Python, Go",
+      "us": "Any server that speaks the protocol: a signed HTTP POST. SDKs for Go, PHP, TypeScript"
+    },
+    {
+      "label": "License",
+      "them": "SSPL server, Apache 2.0 after three years",
+      "us": "Apache 2.0"
+    }
+  ],
+  "faq": [
+    {
+      "q": "Is Qoqi Flow ready for production?",
+      "a": "It is at v0.1.0. The language, the runtime and the daemon work end to end, and they are tested by crashing them on purpose after every write. What it does not have yet is years in production. Start with a flow that matters, not the one that holds the company up."
+    },
+    {
+      "q": "How do Inngest's ideas map?",
+      "a": "createFunction: impl Flow. step.run: step fn. step.sleep: wait time.after(...). step.waitForEvent: an Inbox field and wait match. step.invoke: flow.start. cancelOn: flow.cancelled()."
+    },
+    {
+      "q": "Do I have to rewrite my services in Qoqi?",
+      "a": "No. Only the flow is Qoqi. A step that needs your code stays in your service: any server that answers Qoqi's protocol, a signed HTTP POST. qoqi gen writes the typed interfaces for Go, PHP and TypeScript; any other language implements the protocol in a page of code."
+    },
+    {
+      "q": "Where does it run?",
+      "a": "Anywhere one binary runs. SQLite on one machine; PostgreSQL or MySQL when several daemons share the work. There is no managed cloud yet."
+    }
+  ]
+}

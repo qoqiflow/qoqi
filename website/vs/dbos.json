@@ -1,0 +1,102 @@
+{
+  "id": "dbos",
+  "order": 2,
+  "name": "DBOS",
+  "title": "Qoqi Flow vs DBOS",
+  "tagline": "Recovery that does not run your code twice.",
+  "lede": "DBOS recovers a workflow by calling it again and skipping the steps it checkpointed, so the code has to take the same path every time. Qoqi Flow thaws the frozen state at the line it was at: no re-execution, no determinism, and a compiler that checks what DBOS leaves to discipline.",
+  "cards": [
+    {
+      "title": "No re-execution",
+      "text": "A workflow that read the clock or drew a random number takes another path on recovery, and DBOS raises DBOSStepNondeterminismError. A Qoqi flow is never run again."
+    },
+    {
+      "title": "The compiler holds the line",
+      "text": "A requests.post written straight in a DBOS workflow runs again on every recovery, unrecorded. In Qoqi it does not compile."
+    },
+    {
+      "title": "Deploy any day",
+      "text": "DBOS recovers a workflow only on processes of the same application version, or behind a patch. Qoqi instances move to new code at a stage."
+    }
+  ],
+  "code": [
+    {
+      "title": "Recovery means running it again",
+      "text": "Everything outside a step runs once more when DBOS recovers the workflow, and has to take the same path. In Qoqi, the clock and chance are plain code.",
+      "them": "dbos/rules.py",
+      "us": "shared/plain.qi"
+    },
+    {
+      "title": "The stray call, caught",
+      "text": "A request written straight in the workflow. DBOS runs it again on every recovery; Qoqi does not compile it.",
+      "them": "dbos/stray.py",
+      "us": "shared/f0001.console"
+    },
+    {
+      "title": "Shipping a change under running workflows",
+      "text": "DBOS patches branch on a name, then get deprecated, then removed. A Qoqi instance moves at a stage.",
+      "them": "dbos/version.py",
+      "us": "shared/stage.qi"
+    }
+  ],
+  "rows": [
+    {
+      "label": "How a workflow comes back",
+      "them": "Called again from the top, checkpointed steps skipped",
+      "us": "Its state thawed, at the line it was at"
+    },
+    {
+      "label": "Workflow code",
+      "them": "Same steps, same inputs, same order, or DBOSStepNondeterminismError",
+      "us": "Anything"
+    },
+    {
+      "label": "A call outside a step",
+      "them": "Runs again on every recovery, silently",
+      "us": "Refused at compile time (F0001)"
+    },
+    {
+      "label": "New code under running workflows",
+      "them": "Recovered by the same application version only; patches",
+      "us": "Instances move at a stage, checked against flow.lock"
+    },
+    {
+      "label": "A step that must never run twice",
+      "them": "Steps run at least once",
+      "us": "Settled<T>: never run again; the flow is told Unknown and decides"
+    },
+    {
+      "label": "Crash testing",
+      "them": "Not provided",
+      "us": "everyCrash: the test again, stopped after every write, same ending required"
+    },
+    {
+      "label": "Steps in your own services",
+      "them": "Inside your Python, TypeScript, Go or Java process",
+      "us": "Any server that speaks the protocol: a signed HTTP POST. SDKs for Go, PHP, TypeScript"
+    },
+    {
+      "label": "Console",
+      "them": "DBOS Conductor, proprietary",
+      "us": "Built into qoqi serve, open source"
+    }
+  ],
+  "faq": [
+    {
+      "q": "Is Qoqi Flow ready for production?",
+      "a": "It is at v0.1.0. The language, the runtime and the daemon work end to end, and they are tested by crashing them on purpose after every write. What it does not have yet is years in production. Start with a flow that matters, not the one that holds the company up."
+    },
+    {
+      "q": "DBOS is a library. Isn't a daemon heavier?",
+      "a": "It is one binary on a SQLite file to start with. In exchange your application stays in its own language, the flow is readable in one place, and the daemon's console shows every instance at the line it is at."
+    },
+    {
+      "q": "How do DBOS's ideas map?",
+      "a": "@DBOS.workflow: impl Flow. @DBOS.step: step fn. DBOS.recv and DBOS.send: an Inbox field and qoqi send. DBOS.sleep: wait time.after(...). SetWorkflowID: the instance's name, qoqi start Flow name. DBOS.patch: stage."
+    },
+    {
+      "q": "Where does it run?",
+      "a": "Anywhere one binary runs. SQLite on one machine; PostgreSQL or MySQL when several daemons share the work. There is no managed cloud yet."
+    }
+  ]
+}

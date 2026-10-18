@@ -194,8 +194,6 @@ func build(root, out string) (int, error) {
 	}
 	sort.Slice(pages, func(i, j int) bool { return pages[i].Src < pages[j].Src })
 
-	hasCompare = byPath["docs/compare/README.md"] != nil
-
 	nav, err := navigation(root, md, byPath)
 	if err != nil {
 		return 0, err
@@ -235,6 +233,9 @@ func build(root, out string) (int, error) {
 		}
 	}
 
+	if others, err := comparisons(); err == nil {
+		hasCompare = len(others) > 0
+	}
 	landing, err := landingData(root)
 	if err != nil {
 		return 0, err
@@ -243,6 +244,30 @@ func build(root, out string) (int, error) {
 	if err := render(tmpl, "landing.html", filepath.Join(out, "index.html"), landing); err != nil {
 		return 0, err
 	}
+	others, err := comparisons()
+	if err != nil {
+		return 0, err
+	}
+	hasCompare = len(others) > 0
+	if hasCompare {
+		for _, v := range others {
+			if err := render(tmpl, "vs.html", filepath.Join(out, "vs", v.ID+".html"), map[string]any{
+				"Title": v.Title + " · Qoqi Flow", "Description": v.Lede, "URL": site + "/vs/" + v.ID, "V": v, "Others": others,
+			}); err != nil {
+				return 0, err
+			}
+		}
+		hub, err := comparisonHub()
+		if err != nil {
+			return 0, err
+		}
+		if err := render(tmpl, "vs-index.html", filepath.Join(out, "vs", "index.html"), map[string]any{
+			"Title": hub.Title + " · Qoqi Flow", "Description": hub.Lede, "URL": site + "/vs/", "H": hub, "Others": others,
+		}); err != nil {
+			return 0, err
+		}
+	}
+
 	if err := render(tmpl, "404.html", filepath.Join(out, "404.html"), map[string]any{"Title": "Not found · Qoqi Flow", "Nav": nav}); err != nil {
 		return 0, err
 	}
@@ -250,7 +275,7 @@ func build(root, out string) (int, error) {
 	if err := writeJSON(filepath.Join(out, "search.json"), index); err != nil {
 		return 0, err
 	}
-	if err := sitemap(filepath.Join(out, "sitemap.xml"), pages); err != nil {
+	if err := sitemap(filepath.Join(out, "sitemap.xml"), pages, others); err != nil {
 		return 0, err
 	}
 	if err := os.WriteFile(filepath.Join(out, "robots.txt"), []byte("User-agent: *\nAllow: /\nSitemap: "+site+"/sitemap.xml\n"), 0o644); err != nil {
@@ -605,8 +630,8 @@ func describe(pg *page) string {
 	return "Qoqi Flow: durable workflows as plain programs."
 }
 
-// Whether the documentation has its comparisons, docs/compare/: linked
-// from the top of each page, and from the landing page.
+// Whether the site has its comparisons, website/vs/: linked from the top
+// of each page, and from the landing page.
 var hasCompare bool
 
 func templates() (*template.Template, error) {
@@ -741,6 +766,120 @@ func highlight(lang, source string) (template.HTML, error) {
 	return template.HTML(buf.String()), nil
 }
 
+// The pages that set Qoqi Flow beside another tool, /vs/temporal and the
+// others: each is website/vs/<id>.json, and the code it shows side by side
+// is in files of website/vs/<id>/, coloured as the documentation is.
+type versus struct {
+	ID      string   `json:"id"`
+	Order   int      `json:"order"`
+	Name    string   `json:"name"`
+	Title   string   `json:"title"`
+	Tagline string   `json:"tagline"`
+	Lede    string   `json:"lede"`
+	Cards   []vsCard `json:"cards"`
+	Code    []vsCode `json:"code"`
+	Rows    []vsRow  `json:"rows"`
+	FAQ     []vsQA   `json:"faq"`
+}
+
+type vsCard struct {
+	Title string `json:"title"`
+	Text  string `json:"text"`
+}
+
+type vsCode struct {
+	Title    string `json:"title"`
+	Text     string `json:"text"`
+	ThemFile string `json:"them"`
+	UsFile   string `json:"us"`
+	Them     template.HTML
+	Us       template.HTML
+	ThemName string
+	UsName   string
+	ThemLen  int
+	UsLen    int
+}
+
+type vsRow struct {
+	Label string `json:"label"`
+	Them  string `json:"them"`
+	Us    string `json:"us"`
+}
+
+type vsQA struct {
+	Q string `json:"q"`
+	A string `json:"a"`
+}
+
+// The page that lists them: a table of all, and a card for each.
+type vsHub struct {
+	Title   string   `json:"title"`
+	Tagline string   `json:"tagline"`
+	Lede    string   `json:"lede"`
+	Columns []string `json:"columns"`
+	Rows    []struct {
+		Label  string   `json:"label"`
+		Us     string   `json:"us"`
+		Others []string `json:"others"`
+	} `json:"rows"`
+}
+
+func comparisons() ([]versus, error) {
+	files, err := filepath.Glob("vs/*.json")
+	if err != nil {
+		return nil, err
+	}
+	var all []versus
+	for _, f := range files {
+		if filepath.Base(f) == "index.json" {
+			continue
+		}
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		var v versus
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return nil, fmt.Errorf("%s: %w", f, err)
+		}
+		for i := range v.Code {
+			c := &v.Code[i]
+			for _, side := range []struct {
+				file string
+				html *template.HTML
+				name *string
+				n    *int
+			}{{c.ThemFile, &c.Them, &c.ThemName, &c.ThemLen}, {c.UsFile, &c.Us, &c.UsName, &c.UsLen}} {
+				src, err := os.ReadFile(filepath.Join("vs", side.file))
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", f, err)
+				}
+				lang := map[string]string{".go": "go", ".py": "python", ".ts": "typescript", ".qi": "qoqi", ".console": "console"}[filepath.Ext(side.file)]
+				if *side.html, err = highlight(lang, string(src)); err != nil {
+					return nil, err
+				}
+				*side.name = filepath.Base(side.file)
+				*side.n = strings.Count(strings.TrimRight(string(src), "\n"), "\n") + 1
+			}
+		}
+		all = append(all, v)
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Order < all[j].Order })
+	return all, nil
+}
+
+func comparisonHub() (vsHub, error) {
+	var h vsHub
+	raw, err := os.ReadFile("vs/index.json")
+	if err != nil {
+		return h, err
+	}
+	if err := json.Unmarshal(raw, &h); err != nil {
+		return h, fmt.Errorf("vs/index.json: %w", err)
+	}
+	return h, nil
+}
+
 func writeJSON(file string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -752,12 +891,18 @@ func writeJSON(file string, v any) error {
 	return os.WriteFile(file, b, 0o644)
 }
 
-func sitemap(file string, pages []*page) error {
+func sitemap(file string, pages []*page, others []versus) error {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n" + `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
 	b.WriteString("  <url><loc>" + site + "/</loc></url>\n")
 	for _, pg := range pages {
 		b.WriteString("  <url><loc>" + site + pg.URL + "</loc></url>\n")
+	}
+	if len(others) > 0 {
+		b.WriteString("  <url><loc>" + site + "/vs/</loc></url>\n")
+	}
+	for _, v := range others {
+		b.WriteString("  <url><loc>" + site + "/vs/" + v.ID + "</loc></url>\n")
 	}
 	b.WriteString("</urlset>\n")
 	return os.WriteFile(file, []byte(b.String()), 0o644)

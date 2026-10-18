@@ -1,0 +1,96 @@
+{{define "vs.html"}}{{template "head" .}}
+<body class="home vs">
+{{template "header" (dict)}}
+<main>
+  <section class="hero vs-hero">
+    <div class="hero-glow" aria-hidden="true"></div>
+    <div class="hero-in">
+      <a class="pill" href="/vs/"><span class="pill-dot"></span>Compare</a>
+      <h1>{{.V.Title}}</h1>
+      <p class="vs-tagline">{{.V.Tagline}}</p>
+      <p class="lede">{{.V.Lede}}</p>
+      <p class="cta">
+        <a class="btn primary" href="/docs/getting-started/quickstart">Try it in five minutes</a>
+        <a class="btn" href="#side-by-side">See the code</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="vs-cards">
+    <div class="grid">
+      {{range .V.Cards}}<div class="cell"><h3>{{.Title}}</h3><p>{{.Text}}</p></div>
+      {{end}}
+    </div>
+  </section>
+
+  <section class="vs-code" id="side-by-side">
+    {{range .V.Code}}
+    <div class="vs-pair">
+      <div class="sec-head">
+        <h2>{{.Title}}</h2>
+        <p>{{.Text}}</p>
+      </div>
+      <div class="pair">
+        <div class="window them">
+          <div class="bar"><span class="file">{{$.V.Name}} · {{.ThemName}}</span><span class="count">{{.ThemLen}} lines</span></div>
+          <pre class="chroma"><code>{{.Them}}</code></pre>
+        </div>
+        <div class="window us">
+          <div class="bar"><span class="file">Qoqi Flow · {{.UsName}}</span><span class="count">{{.UsLen}} lines</span></div>
+          <pre class="chroma"><code>{{.Us}}</code></pre>
+        </div>
+      </div>
+    </div>
+    {{end}}
+  </section>
+
+  <section class="compare vs-table">
+    <div class="sec-head">
+      <h2>Side by side</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>{{.V.Name}}</th><th class="us">Qoqi Flow</th></tr></thead>
+        <tbody>
+          {{range .V.Rows}}<tr><th>{{.Label}}</th><td>{{.Them}}</td><td class="us">{{.Us}}</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="vs-faq">
+    <div class="sec-head"><h2>Questions</h2></div>
+    <div class="faq">
+      {{range .V.FAQ}}<details><summary>{{.Q}}</summary><p>{{.A}}</p></details>
+      {{end}}
+    </div>
+  </section>
+
+  <section class="vs-more">
+    <p class="eyebrow">Also compared</p>
+    <div class="vs-links">
+      {{range .Others}}{{if ne .ID $.V.ID}}<a href="/vs/{{.ID}}">vs {{.Name}} <span aria-hidden="true">→</span></a>{{end}}{{end}}
+    </div>
+  </section>
+
+  <section class="end">
+    <div class="end-glow" aria-hidden="true"></div>
+    <h2>Write the process. Let it wait.</h2>
+    <div class="install" data-copy-root>
+      <span class="prompt">$</span>
+      <code data-copy-text>curl -fsSL https://qoqi.dev/install.sh | sh</code>
+      <button type="button" class="copy" data-copy aria-label="Copy">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+    </div>
+    <p class="cta">
+      <a class="btn primary" href="/docs/getting-started/quickstart">Quickstart</a>
+      <a class="btn" href="https://github.com/qoqiflow/qoqi">GitHub</a>
+    </p>
+  </section>
+</main>
+{{template "footer"}}
+</body>
+</html>
+{{end}}

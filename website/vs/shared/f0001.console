@@ -1,0 +1,8 @@
+$ qoqi check renewal.qi
+[ERROR] F0001: a flow reaches the network outside a step
+  --> renewal.qi:26:67 in function 'Renewal.run'
+    |
+ 26 |         http.to(Method.Post, "https://hooks.example.com/renewals").body(self.user.id).send();
+    |                                                                   ^
+    |
+    = Suggestion: Move the call into a step fn, and call the step here
