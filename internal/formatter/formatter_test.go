@@ -226,6 +226,33 @@ func TestStyle(t *testing.T) {
 		src  string
 		want string
 	}{
+		{"a case does one statement without a block",
+			`fn f(x:Result<Int,String>)->Int{let n=0;match x{case Ok(v):n+=v;case Err(e):return -1;} for i in [1]{match i{case 1:continue;default:break;}} let m=match n{case 0:return 0;default:n*2,};return m;}`,
+			lines(
+				"fn f(x: Result<Int, String>) -> Int {",
+				"    let n = 0;",
+				"",
+				"    match x {",
+				"        case Ok(v): n += v;",
+				"        case Err(e): return -1;",
+				"    }",
+				"",
+				"    for i in [1] {",
+				"        match i {",
+				"            case 1: continue;",
+				"            default: break;",
+				"        }",
+				"    }",
+				"",
+				"    let m = match n {",
+				"        case 0: return 0;",
+				"        default: n * 2;",
+				"    };",
+				"",
+				"    return m;",
+				"}",
+			),
+		},
 		{"keywords used as names are names",
 			`fn f(case:Case,in:[Int])->Int{for case in cases{log(case.name);} let match=in[0];match.count+=1;if match{log(match);} match match{case 1:{log(1);} default:{}} return in.len()+match;}`,
 			lines(
@@ -925,7 +952,8 @@ func TestProblems(t *testing.T) {
 		{"an insertion left open", "const a = \"${name\";", "1:18: unterminated string literal"},
 		{"a comment left open", "fn main() {}\n/* never closed", "2:1: unterminated block comment"},
 		{"a character that is no token", "fn main() { let a = 1 # 2; }", "1:23: unexpected character '#'"},
-		{"a case without its end", "fn f() { match a { case 1: b } }", "1:30: expected ';' after the value of a case, found '}'"},
+		{"a case without its end", "fn f() { match a { case 1: b } }", "1:30: expected ';', found '}'"},
+		{"a value case without its end", "fn f() { let x = match a { case 1: b c }; }", "1:38: expected ';' after the value of a case, found 'c'"},
 		{"an arrow from another language", "fn main() { let f = x => x; }", "1:23: expected '->', found '=>'"},
 	}
 	for _, c := range cases {

@@ -1,0 +1,67 @@
+// A case does a statement that leaves, return, break or continue, without
+// a block around it: case Err(e): return Err(e);
+
+enum Shape {
+    Circle(Float),
+    Square(Float),
+    Dot,
+}
+
+fn area(s: Shape) -> Float {
+    match s {
+        case Shape.Circle(r): return 3.0 * r * r;
+        case Shape.Square(c): return c * c;
+        case Shape.Dot: return 0.0;
+    }
+}
+
+fn firstBig(xs: [Int]) -> Int {
+    let found = -1;
+
+    for x in xs {
+        match x {
+            case 0: continue;
+            case 1..10: println("small ${x}");
+
+            default: {
+                found = x;
+            }
+        }
+
+        if found >= 0 {
+            break;
+        }
+    }
+
+    return found;
+}
+
+fn until(xs: [Int], stop: Int) -> Int {
+    let sum = 0;
+
+    for x in xs {
+        match x == stop {
+            case true: break;
+            case false: sum += x;
+        }
+    }
+
+    return sum;
+}
+
+fn parse(text: String) -> Result<Int, String> {
+    let n = match text {
+        case "one": 1;
+        case "two": 2;
+        default: return Err("unknown ${text}");
+    };
+
+    return Ok(n * 10);
+}
+
+fn main() {
+    println(area(Shape.Circle(1.0)), area(Shape.Square(2.0)), area(Shape.Dot));
+    println(firstBig([0, 3, 0, 42, 7]));
+    println(until([1, 2, 3, 4], 3));
+    println(parse("two"), parse("three"));
+}

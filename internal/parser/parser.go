@@ -1458,6 +1458,14 @@ func (p *Parser) parseMatchStmt() *ast.MatchStmt {
 //	case Shape.Rect(w, h): ...           a variant, its values named
 //	case Light.Red | Light.Amber: ...    any of several patterns
 //	case Shape.Circle(r) if r > 10.0:    a pattern and a condition
+//
+// What a case does is a block, or one statement as a block of it would be:
+//
+//	case Err(e): return Err(e);          case Err(e): { return Err(e); }
+//	case Light.Red: stops += 1;          case Light.Red: { stops += 1; }
+//
+// Where a value is expected, it is an expression, or a statement that
+// leaves: return, break, continue.
 func (p *Parser) parseMatch(asValue bool) *ast.MatchStmt {
 	tok := p.expect(token.MATCH, "'match'")
 	stmt := &ast.MatchStmt{BaseNode: base(tok)}
@@ -1488,6 +1496,8 @@ func (p *Parser) parseMatch(asValue bool) *ast.MatchStmt {
 		p.expect(token.COLON, "':'")
 
 		switch {
+		case p.atLeaving():
+			matchCase.Body = p.parseLeaving()
 		case p.at(token.LBRACE) && asValue:
 			// As the branch of an if: statements, then the value, or a
 			// block that leaves
@@ -1506,13 +1516,37 @@ func (p *Parser) parseMatch(asValue bool) *ast.MatchStmt {
 				p.fail("expected ';' after the value of a case, found %s", describe(p.cur()))
 			}
 		default:
-			matchCase.Body = p.parseExpr()
-			p.expectSemicolon()
+			matchCase.Body = p.parseCaseStmt()
 		}
 		stmt.Cases = append(stmt.Cases, matchCase)
 	}
 	p.expect(token.RBRACE, "'}'")
 	return stmt
+}
+
+// atLeaving says whether a case does a statement that leaves: return,
+// break, continue.
+func (p *Parser) atLeaving() bool {
+	return p.at(token.RETURN) || p.at(token.BREAK) || p.at(token.CONTINUE)
+}
+
+// parseLeaving parses the statement that leaves a case does, as the block
+// that holds it alone.
+func (p *Parser) parseLeaving() *ast.BlockStmt {
+	tok := p.cur()
+	return &ast.BlockStmt{BaseNode: base(tok), Stmts: []ast.Stmt{p.parseStmt()}}
+}
+
+// parseCaseStmt parses the one statement a case of a match statement
+// does: an expression stays one, as it was before a case took any
+// statement; another is the block that holds it alone.
+func (p *Parser) parseCaseStmt() ast.Node {
+	tok := p.cur()
+	stmt := p.parseStmt()
+	if e, ok := stmt.(*ast.ExprStmt); ok && e.Stage == "" {
+		return e.Expr
+	}
+	return &ast.BlockStmt{BaseNode: base(tok), Stmts: []ast.Stmt{stmt}}
 }
 
 // parseCasePattern parses one pattern of a case.

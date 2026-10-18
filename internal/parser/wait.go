@@ -107,6 +107,8 @@ func (p *Parser) parseWaitMatch(wait token.Token, asValue bool) ast.Node {
 // parseCaseBody parses what a case does, as parseMatch does.
 func (p *Parser) parseCaseBody(asValue bool) ast.Node {
 	switch {
+	case p.atLeaving():
+		return p.parseLeaving()
 	case p.at(token.LBRACE) && asValue:
 		body := p.parseValueBlock()
 		p.accept(token.COMMA)
@@ -123,9 +125,8 @@ func (p *Parser) parseCaseBody(asValue bool) ast.Node {
 		}
 		return body
 	default:
-		body := p.parseExpr()
-		p.expectSemicolon()
-		return &ast.BlockStmt{BaseNode: base(body.Token()), Stmts: []ast.Stmt{&ast.ExprStmt{BaseNode: base(body.Token()), Expr: body}}}
+		tok := p.cur()
+		return &ast.BlockStmt{BaseNode: base(tok), Stmts: []ast.Stmt{p.parseStmt()}}
 	}
 }
 

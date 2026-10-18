@@ -92,6 +92,15 @@ match event {
 }
 ```
 
+**One statement** needs no braces: it is the block of it.
+
+```rust
+match result {
+    case Ok(value): total += value;
+    case Err(e): return Err(e);
+}
+```
+
 **Names.** A name in a pattern becomes a variable of that case, holding the value at that position. It exists only in the case. `_` takes a value without naming it.
 
 ```rust
@@ -201,7 +210,7 @@ let total = price * match customer {
 } / 100;
 ```
 
-*   A case is an expression followed by `;` (a `,` does as well, and the last case needs neither), or a block that leaves: `{ return ...; }`, `{ break; }`, `{ continue; }`, `{ panic(...); }`. A block that reaches its end gives nothing, and is refused (`E2040`).
+*   A case is an expression followed by `;` (a `,` does as well, and the last case needs neither), or a block that leaves: `{ return ...; }`, `{ break; }`, `{ continue; }`, `{ panic(...); }`. A `return`, `break` or `continue` needs no braces: `default: return Err("unknown");`. A block that reaches its end gives nothing, and is refused (`E2040`).
 *   The cases give the same type (`E2001`). One of them `null` makes the value optional; a type expected where the match stands (a declared variable, a return type) takes cases of different structs that implement the same trait.
 *   It must have a value whatever is matched: every variant handled, or a `default` (`E2028`). On anything but an enum that means a `default`.
 

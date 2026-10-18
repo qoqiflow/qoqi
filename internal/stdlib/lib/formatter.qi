@@ -1783,7 +1783,14 @@ impl Parser {
             entry.push(self.expect(":"));
             entry.push(space());
 
-            if self.is("{") {
+            if !self.is("{")
+                && (!asValue || self.is("return") || self.is("break") || self.is("continue"))
+            {
+                // One statement, as a block of it would be: case Err(e):
+                // return Err(e);, case Light.Red: stops += 1;. Where a
+                // value is expected, only one that leaves
+                entry.push(self.statement());
+            } else if self.is("{") {
                 // Where a value is expected, as the branch of an if:
                 // statements, then the value
                 entry.push(if asValue { self.valueBlock() } else { self.block() });
