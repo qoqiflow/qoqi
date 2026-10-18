@@ -1,4 +1,4 @@
-.PHONY: help build all clean test test-unit test-e2e test-race bench fuzz console console-check console-dev
+.PHONY: help build all clean test test-unit test-e2e test-race bench fuzz console console-check console-dev site site-dev site-deploy server-setup
 
 # The go on the PATH, or where the official installer puts it
 GO ?= $(shell command -v go 2>/dev/null || echo /usr/local/go/bin/go)
@@ -17,6 +17,10 @@ help:
 	@echo "  make console            Build the console of qoqi serve into qoqi (needs node)"
 	@echo "  make console-check      Typecheck and test the console, without building it"
 	@echo "  make console-dev        Serve the console from its source, against a daemon on :7070"
+	@echo "  make site               Build qoqi.dev, the landing page and docs/, into website/dist"
+	@echo "  make site-dev           Serve qoqi.dev at http://127.0.0.1:8080, built again at each page"
+	@echo "  make site-deploy        Build qoqi.dev and send it to its server"
+	@echo "  make server-setup       Set up the server of qoqi.dev and demo.qoqi.dev (see deploy/)"
 	@echo "  make clean              Remove what the build and the tests leave"
 
 build:
@@ -77,6 +81,24 @@ FUZZ_TIME := 60s
 fuzz:
 	@$(GO) test ./test/fuzz -run '^$$' -fuzz FuzzSource -fuzztime $(FUZZ_TIME) -parallel 4 -timeout 900s
 	@$(GO) test ./test/fuzz -run '^$$' -fuzz FuzzBytecode -fuzztime $(FUZZ_TIME) -parallel 4 -timeout 900s
+
+# qoqi.dev: the landing page, and the documentation made from docs/ by
+# website/, a module of its own. Its links are checked as it is built.
+SERVER ?= qoqi.dev
+
+site:
+	@cd website && $(GO) run .
+
+site-dev:
+	@cd website && $(GO) run . -serve 127.0.0.1:8080
+
+site-deploy: site
+	@rsync -az --delete website/dist/ deploy@$(SERVER):/var/www/qoqi.dev/
+	@echo "Sent to https://qoqi.dev"
+
+server-setup:
+	@rsync -az --delete deploy/server/ install.sh root@$(SERVER):/opt/qoqi-ops/
+	@ssh root@$(SERVER) sh /opt/qoqi-ops/setup.sh
 
 clean:
 	@rm -f qoqi

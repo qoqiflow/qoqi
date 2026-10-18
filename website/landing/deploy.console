@@ -1,0 +1,4 @@
+$ qoqi serve --store postgres://user:pass@db/flows --workers 8
+$ qoqi deploy shop.qi
+$ qoqi versions
+$ qoqi diff 12

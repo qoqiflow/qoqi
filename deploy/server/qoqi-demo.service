@@ -1,0 +1,22 @@
+[Unit]
+Description=Qoqi Flow, the demo daemon of demo.qoqi.dev
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=qoqi
+Group=qoqi
+Environment=QOQI_PATH=/var/lib/qoqi
+ExecStart=/usr/local/bin/qoqi serve --listen 127.0.0.1:7070 --hosts demo.qoqi.dev --workers 2
+Restart=on-failure
+RestartSec=2
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/qoqi
+MemoryMax=1536M
+
+[Install]
+WantedBy=multi-user.target

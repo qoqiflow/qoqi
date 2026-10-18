@@ -1,0 +1,46 @@
+name: Site
+
+# qoqi.dev: built, and its links checked, on each change of what it is made
+# of; sent to its server from main. The key is the secret SITE_SSH_KEY, of
+# the user deploy (deploy/server/setup.sh).
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**", "website/**", "assets/**", "install.sh", "llms.txt", ".github/workflows/site.yml"]
+  pull_request:
+    paths: ["docs/**", "website/**", "assets/**", "install.sh", "llms.txt", ".github/workflows/site.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: website/go.mod
+          cache-dependency-path: website/go.sum
+      - name: The flows of the landing page compile
+        run: |
+          make build
+          for f in website/landing/flows/*.qi; do ./qoqi check "$f" > /dev/null; done
+      - name: Build, and check the links
+        run: make site
+      - name: Send to qoqi.dev
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          KEY: ${{ secrets.SITE_SSH_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "No SITE_SSH_KEY: not sent"; exit 0; fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/key && chmod 600 ~/.ssh/key
+          # The key of the server, as it was set up: not trusted at first sight
+          echo 'qoqi.dev ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwk9omtlirQtd9KHoZA/xsF9F+XALHFRFwGM55/pPEa' >> ~/.ssh/known_hosts
+          rsync -az --delete -e "ssh -i ~/.ssh/key" website/dist/ deploy@qoqi.dev:/var/www/qoqi.dev/

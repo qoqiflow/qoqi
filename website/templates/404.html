@@ -1,0 +1,13 @@
+{{define "404.html"}}{{template "head" .}}
+<body>
+{{template "header" (dict)}}
+<main class="lost">
+  <p class="eyebrow">404</p>
+  <h1>Nothing here.</h1>
+  <p>This page was moved, or never was. The documentation starts at its overview.</p>
+  <p class="cta"><a class="btn primary" href="/docs/">The documentation</a><a class="btn" href="/">Home</a></p>
+</main>
+{{template "footer"}}
+</body>
+</html>
+{{end}}

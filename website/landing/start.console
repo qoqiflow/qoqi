@@ -1,0 +1,7 @@
+$ qoqi serve &
+$ qoqi deploy approvals.qi
+$ qoqi start Expense expense:1 '{"id": "1", "author": "lin"}'
+$ qoqi send expense:1 answers '{"approved": true, "why": ""}'
+$ qoqi result expense:1
+Approved("grace")
+$ qoqi ui

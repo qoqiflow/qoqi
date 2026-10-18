@@ -1,0 +1,210 @@
+{{define "landing.html"}}{{template "head" .}}
+<body class="home">
+{{template "header" (dict)}}
+<main>
+  <section class="hero">
+    <div class="hero-glow" aria-hidden="true"></div>
+    <div class="hero-in">
+      <a class="pill" href="https://github.com/qoqiflow/qoqi/releases"><span class="pill-dot"></span>v0.1.0 · early, and open source</a>
+      <h1>Durable workflows,<br>as plain programs.</h1>
+      <p class="lede">Write the process from top to bottom: wait three days, ask a manager, charge a card, retry, give up. Qoqi Flow keeps it alive through crashes, restarts and new versions of its own code, and never runs a finished step twice.</p>
+      <div class="install" data-copy-root>
+        <span class="prompt">$</span>
+        <code data-copy-text>curl -fsSL https://qoqi.dev/install.sh | sh</code>
+        <button type="button" class="copy" data-copy aria-label="Copy">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+      </div>
+      <p class="cta">
+        <a class="btn primary" href="/docs/getting-started/quickstart">Get started</a>
+        <a class="btn" href="/docs/">Read the docs</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="run" aria-label="Flows, as they run">
+    <div class="tabs" role="tablist">
+      {{range $i, $r := .Runs}}<button type="button" role="tab" id="tab-{{$r.ID}}" aria-controls="run-{{$r.ID}}" aria-selected="{{if eq $i 0}}true{{else}}false{{end}}" data-tab="{{$r.ID}}">{{$r.Label}}</button>{{end}}
+    </div>
+    {{range $i, $r := .Runs}}
+    <div class="run-frame" id="run-{{$r.ID}}" role="tabpanel" aria-labelledby="tab-{{$r.ID}}" data-run="{{$r.ID}}"{{if ne $i 0}} hidden{{end}}>
+      <div class="run-code">
+        <div class="bar">
+          <span class="file">{{$r.File}}</span>
+          <span class="state" data-run-state>running</span>
+        </div>
+        <pre class="chroma" data-run-code><code>{{$r.Code}}</code></pre>
+      </div>
+      <div class="run-log">
+        <div class="bar">
+          <span class="file">{{$r.Instance}}</span>
+          <span class="clock" data-run-clock>{{(index $r.Events 0).Clock}}</span>
+        </div>
+        <ol class="events">
+          {{range $r.Events}}<li class="{{.Kind}}" data-line="{{.Line}}" data-kind="{{.Kind}}" data-clock="{{.Clock}}"><i></i><span class="what">{{.What}}</span><code>{{.Code}}</code>{{with .Res}}<span class="res">{{.}}</span>{{end}}</li>
+          {{end}}
+        </ol>
+        <p class="run-note">{{$r.Note}}</p>
+      </div>
+    </div>
+    {{end}}
+  </section>
+
+  <section class="why">
+    <div class="sec-head">
+      <p class="eyebrow">Why</p>
+      <h2>A process that waits is usually taken apart by hand.</h2>
+      <p>For a payment, a person, a webhook, a date. Nobody can read it from top to bottom any more, and the bugs live in the gaps. Qoqi Flow keeps it a program.</p>
+    </div>
+    <div class="versus">
+      <div class="vs-col">
+        <p class="vs-label">Taken apart</p>
+        <ul class="vs-list">
+          <li><span>the line it is at</span><b>a <code>status</code> column</b></li>
+          <li><span>its variables</span><b>a JSON field</b></li>
+          <li><span>its sleep</span><b>a delayed job</b></li>
+          <li><span>its retries</span><b>a counter, and a cron</b></li>
+          <li><span>its crash recovery</span><b>a sweeper</b></li>
+        </ul>
+      </div>
+      <div class="vs-col one">
+        <p class="vs-label">With Qoqi Flow</p>
+        <ul class="vs-list">
+          <li><span>the line it is at</span><b>the line it is at</b></li>
+          <li><span>its variables</span><b>its variables</b></li>
+          <li><span>its sleep</span><b><code>wait time.after(3.days())</code></b></li>
+          <li><span>its retries</span><b>a <code>for</code> loop</b></li>
+          <li><span>its crash recovery</span><b>nothing to write</b></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="sec-head">
+      <p class="eyebrow">What it does</p>
+      <h2>A language and a runtime, made for flows.</h2>
+    </div>
+    <div class="grid">
+      <a class="cell" href="/docs/concepts/steps">
+        <span class="tag">compile time</span>
+        <h3>Checked when it compiles</h3>
+        <p>A flow reaches the world only through a <code>step fn</code>. The compiler points at the call that reaches the network, a file or a database outside a step, with the path of calls that leads there.</p>
+      </a>
+      <a class="cell" href="/docs/concepts/flows">
+        <span class="tag">recovery</span>
+        <h3>Frozen, not replayed</h3>
+        <p>An instance is taken up from what was saved, not by running its history again. The code need not be deterministic, and a new version never re-runs an old history.</p>
+      </a>
+      <a class="cell" href="/docs/concepts/steps">
+        <span class="tag">exactly once</span>
+        <h3>Steps run once</h3>
+        <p>What a step returned is written before the flow goes on. One that may have half run is run again under the same key; one declared <code>Settled&lt;T&gt;</code> is never run twice.</p>
+      </a>
+      <a class="cell" href="/docs/concepts/versioning">
+        <span class="tag">versions</span>
+        <h3>New code under running instances</h3>
+        <p><code>stage</code> marks where an instance may move to new code, and <code>flow.lock</code> records its shape. A change without a <code>migrate fn</code> is flagged, and refused by the daemon.</p>
+      </a>
+      <a class="cell" href="/docs/guides/testing-flows">
+        <span class="tag">testing</span>
+        <h3>Tests that crash on purpose</h3>
+        <p>A trial runs on a clock of its own, so three days pass in a moment. <code>everyCrash</code> stops the process after each write, and requires the same ending every time.</p>
+      </a>
+      <a class="cell" href="/docs/guides/application-steps">
+        <span class="tag">Go · PHP · TypeScript</span>
+        <h3>Steps in your application</h3>
+        <p>A step can be carried out by your own service, through a queue. <code>qoqi gen</code> writes the typed interfaces from the flow.</p>
+      </a>
+    </div>
+  </section>
+
+  <section class="split">
+    <div class="split-text">
+      <p class="eyebrow">Testing</p>
+      <h2>Three days pass in a moment. Every crash, tried.</h2>
+      <p>A trial runs a flow on a clock of its own. <code>trial.replace(step, fn)</code> stands a function in for a step, so a test reaches no real service. Then <code>qoqi test</code>.</p>
+      <a class="more" href="/docs/guides/testing-flows">Testing flows <span aria-hidden="true">→</span></a>
+    </div>
+    <div class="window">
+      <div class="bar"><span class="file">approvals_test.qi</span></div>
+      <pre class="chroma"><code>{{index .Code "test.qi"}}</code></pre>
+    </div>
+  </section>
+
+  <section class="split flip">
+    <div class="split-text">
+      <p class="eyebrow">Your application</p>
+      <h2>Steps your service carries out, typed from the flow.</h2>
+      <p>A step declared <code>by</code> a queue has no body in the flow: the daemon hands it to your application, signed with the queue's secret, and keeps what it answers. The declaration says how long it may take, and which step undoes it.</p>
+      <a class="more" href="/docs/guides/application-steps">Steps in your application <span aria-hidden="true">→</span></a>
+    </div>
+    <div class="stack">
+      <div class="window">
+        <div class="bar"><span class="file">shop.qi</span></div>
+        <pre class="chroma"><code>{{index .Code "charge.qi"}}</code></pre>
+      </div>
+      <div class="window">
+        <div class="bar"><span class="file">shell</span></div>
+        <pre class="chroma"><code>{{index .Code "gen.console"}}</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="start">
+    <div class="sec-head">
+      <p class="eyebrow">One binary</p>
+      <h2>Served, started, answered. In a minute.</h2>
+      <p>The compiler, the daemon, an HTTP API, a web console, a test runner, a formatter and a language server, all in <code>qoqi</code>. The store is SQLite, PostgreSQL or MySQL; daemons on several machines share one.</p>
+    </div>
+    <div class="window narrow">
+      <div class="bar"><span class="file">shell</span></div>
+      <pre class="chroma"><code>{{index .Code "start.console"}}</code></pre>
+    </div>
+    <ul class="chips">
+      <li>compiler</li><li>daemon</li><li>HTTP API</li><li>web console</li><li>test runner</li><li>formatter</li><li>language server</li><li>SQLite · PostgreSQL · MySQL</li>
+    </ul>
+  </section>
+
+  <section class="compare">
+    <div class="sec-head">
+      <p class="eyebrow">How it compares</p>
+      <h2>Not a library added to a language.</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Temporal, Restate, Inngest, DBOS, Workflow SDK and others</th><th class="us">Qoqi Flow</th></tr></thead>
+        <tbody>
+          <tr><th>What it is</th><td>A library or service added to an existing language</td><td class="us">A language and runtime made for flows</td></tr>
+          <tr><th>Recovery after a crash</th><td>A history played again; the code must be deterministic</td><td class="us">The state frozen and thawed</td></tr>
+          <tr><th>Reaching the world outside a step</th><td>Found when it runs, or not at all</td><td class="us">Refused when it compiles</td></tr>
+          <tr><th>A new version of the code</th><td>A run is pinned to the version that started it, or patched by hand</td><td class="us">Pinned until the instance reaches a <code>stage</code>, where it moves, checked against <code>flow.lock</code></td></tr>
+          <tr><th>Testing crashes</th><td>Left to you</td><td class="us"><code>everyCrash</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="honest">What they have and Qoqi Flow does not yet: years in production, managed hosting, and SDKs for writing the flows themselves in many languages.</p>
+    {{if compare}}<p class="cta compare-more"><a class="btn" href="/docs/compare/">Qoqi Flow and the others, in detail</a></p>{{end}}
+  </section>
+
+  <section class="end">
+    <div class="end-glow" aria-hidden="true"></div>
+    <img src="/assets/qoqi.svg" width="56" height="56" alt="">
+    <h2>Write the process. Let it wait.</h2>
+    <div class="install" data-copy-root>
+      <span class="prompt">$</span>
+      <code data-copy-text>curl -fsSL https://qoqi.dev/install.sh | sh</code>
+      <button type="button" class="copy" data-copy aria-label="Copy">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+    </div>
+    <p class="cta">
+      <a class="btn primary" href="/docs/getting-started/quickstart">Quickstart</a>
+      <a class="btn" href="https://github.com/qoqiflow/qoqi">Star on GitHub</a>
+    </p>
+  </section>
+</main>
+{{template "footer"}}
+</body>
+</html>
+{{end}}

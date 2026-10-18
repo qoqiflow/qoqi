@@ -1,0 +1,50 @@
+{{define "doc.html"}}{{template "head" .}}
+<body class="docs">
+{{template "header" (dict "Docs" true)}}
+<div class="docs-shell">
+  <aside class="sidebar" data-nav>
+    <nav aria-label="Documentation">
+      <a class="side-home{{if eq .Page.URL "/docs/"}} on{{end}}" href="/docs/">Overview</a>
+      {{range .Nav}}
+      <div class="side-sec">
+        <p class="side-title">{{.Title}}</p>
+        <ul>
+          {{range .Items}}<li class="d{{.Depth}}">{{if .URL}}<a href="{{.URL}}"{{if eq .URL $.Page.URL}} class="on" aria-current="page"{{end}}>{{.Title}}</a>{{else}}<span>{{.Title}}</span>{{end}}</li>
+          {{end}}
+        </ul>
+      </div>
+      {{end}}
+    </nav>
+  </aside>
+  <main class="doc">
+    <article class="prose">
+      {{with .Page.Section}}<p class="eyebrow">{{.}}</p>{{end}}
+      {{.Page.Body}}
+    </article>
+    <div class="doc-foot">
+      <a class="edit" href="{{.Edit}}">Edit this page on GitHub</a>
+    </div>
+    <nav class="pager" aria-label="Pages">
+      {{with .Page.Prev}}<a class="prev" href="{{.URL}}"><span>Previous</span>{{.Title}}</a>{{else}}<span></span>{{end}}
+      {{with .Page.Next}}<a class="next" href="{{.URL}}"><span>Next</span>{{.Title}}</a>{{end}}
+    </nav>
+  </main>
+  {{if .Page.TOC}}
+  <aside class="toc" aria-label="On this page">
+    <p class="side-title">On this page</p>
+    <ul>
+      {{range .Page.TOC}}<li class="h{{.Level}}"><a href="#{{.ID}}">{{.Text}}</a></li>
+      {{end}}
+    </ul>
+  </aside>
+  {{end}}
+</div>
+{{template "footer"}}
+{{if .Page.Mermaid}}<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+const dark = document.documentElement.dataset.theme !== "light";
+mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "neutral" });
+</script>{{end}}
+</body>
+</html>
+{{end}}

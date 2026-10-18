@@ -1,0 +1,38 @@
+impl Flow<Void> for Trial {
+    fn run() {
+        welcome(self.user);
+
+        wait time.after(3.days());
+        if !hasCreatedAProject(self.user) {
+            sendTips(self.user);
+        }
+
+        wait time.after(10.days());   // a deploy meanwhile? it goes on
+        if !isSubscribed(self.user) {
+            offerDiscount(self.user, 20);
+            wait time.after(1.days());
+            endTrial(self.user);
+        }
+    }
+}
+// ----
+import std.flow;
+import std.flow.{Flow};
+import std.time;
+
+struct Trial {
+    user: String;
+}
+
+step fn welcome(user: String) {}
+step fn hasCreatedAProject(user: String) -> Bool {
+    return false;
+}
+step fn sendTips(user: String) {}
+step fn isSubscribed(user: String) -> Bool {
+    return false;
+}
+step fn offerDiscount(user: String, percent: Int) {}
+step fn endTrial(user: String) {}
+
+fn main() {}

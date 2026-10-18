@@ -1,0 +1,3 @@
+$ qoqi gen go  shop.qi --package steps > steps/steps_gen.go
+$ qoqi gen php shop.qi --namespace 'App\Flow' --out src/Flow
+$ qoqi gen ts  shop.qi > steps.ts

@@ -1,0 +1,66 @@
+impl Flow<Result<String, Problem>> for Checkout {
+    fn run() -> Result<String, Problem> {
+        let hold = reserve(self.cart);         // undone if it fails
+        let payment = charge(self.cart)?;      // once, crash or not
+        let parcel = ship(self.cart, hold)?;   // fails? refund, release
+
+        receipt(self.cart, payment, parcel);
+        return Ok(parcel);
+    }
+}
+
+// Run again after a crash, with the same key: charged once
+step fn charge(cart: Cart) -> Result<String, Problem> {
+    let payment = bank.charge(cart.card, cart.cents, flow.key());
+    flow.undo(refund, payment);
+    return Ok(payment);
+}
+// ----
+import std.flow;
+import std.flow.{Flow};
+
+struct Cart {
+    customer: String;
+    card: String;
+    cents: Int;
+}
+
+enum Problem {
+    Declined(String),
+    NoParcel(String),
+}
+
+struct Checkout {
+    cart: Cart;
+}
+
+struct Bank {}
+
+impl Bank {
+    fn charge(card: String, cents: Int, key: String) -> String {
+        return "pay-${key}";
+    }
+}
+
+const bank = Bank {};
+
+step fn reserve(cart: Cart) -> String {
+    flow.undo(release, "hold-1");
+    return "hold-1";
+}
+
+step fn release(hold: String) -> Result<Void, Problem> {
+    return Ok(null);
+}
+
+step fn refund(payment: String) -> Result<Void, Problem> {
+    return Ok(null);
+}
+
+step fn ship(cart: Cart, hold: String) -> Result<String, Problem> {
+    return Ok("parcel-7781");
+}
+
+step fn receipt(cart: Cart, payment: String, parcel: String) {}
+
+fn main() {}

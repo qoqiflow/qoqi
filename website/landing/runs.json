@@ -1,0 +1,278 @@
+[
+  {
+    "id": "trial",
+    "label": "Free trial",
+    "file": "trial.qi",
+    "instance": "trial:ada",
+    "note": "Two weeks, written as two weeks. A new version was deployed while it waited: this trial went on from its line, on the code it started with; the trials started after run the new one.",
+    "events": [
+      {
+        "line": 3,
+        "kind": "ok",
+        "what": "step",
+        "code": "welcome(\"ada\")",
+        "res": "sent",
+        "clock": "day 0"
+      },
+      {
+        "line": 5,
+        "kind": "ice",
+        "what": "wait",
+        "code": "3 days",
+        "res": "frozen in the store",
+        "clock": "day 0"
+      },
+      {
+        "line": 6,
+        "kind": "ok",
+        "what": "step",
+        "code": "hasCreatedAProject(\"ada\")",
+        "res": "false",
+        "clock": "day 3"
+      },
+      {
+        "line": 7,
+        "kind": "ok",
+        "what": "step",
+        "code": "sendTips(\"ada\")",
+        "res": "sent",
+        "clock": "day 3"
+      },
+      {
+        "line": 10,
+        "kind": "ice",
+        "what": "wait",
+        "code": "10 days",
+        "res": "frozen in the store",
+        "clock": "day 3"
+      },
+      {
+        "line": 10,
+        "kind": "deploy",
+        "what": "deploy",
+        "code": "trial.qi, version 2",
+        "res": "it stays at its line",
+        "clock": "day 8"
+      },
+      {
+        "line": 11,
+        "kind": "ok",
+        "what": "step",
+        "code": "isSubscribed(\"ada\")",
+        "res": "true",
+        "clock": "day 13"
+      },
+      {
+        "line": 16,
+        "kind": "done",
+        "what": "end",
+        "code": "subscribed",
+        "res": "done",
+        "clock": "day 13"
+      }
+    ]
+  },
+  {
+    "id": "payment",
+    "label": "Payment",
+    "file": "checkout.qi",
+    "instance": "checkout:42",
+    "note": "The process died in the middle of the charge. The step ran again under the same key, so the bank charged once; had the parcel failed, the payment would be refunded and the goods released, the last first.",
+    "events": [
+      {
+        "line": 3,
+        "kind": "ok",
+        "what": "step",
+        "code": "reserve(cart)",
+        "res": "hold-1, its undo noted",
+        "clock": "+0.00s"
+      },
+      {
+        "line": 14,
+        "kind": "crash",
+        "what": "crash",
+        "code": "during bank.charge(...)",
+        "res": "did the bank charge?",
+        "clock": "+0.41s"
+      },
+      {
+        "line": 4,
+        "kind": "ok",
+        "what": "step",
+        "code": "charge(cart)",
+        "res": "run again, same key: charged once",
+        "clock": "+3.02s"
+      },
+      {
+        "line": 5,
+        "kind": "ok",
+        "what": "step",
+        "code": "ship(cart, \"hold-1\")",
+        "res": "\"parcel-7781\"",
+        "clock": "+3.30s"
+      },
+      {
+        "line": 7,
+        "kind": "ok",
+        "what": "step",
+        "code": "receipt(cart, …)",
+        "res": "sent",
+        "clock": "+3.41s"
+      },
+      {
+        "line": 8,
+        "kind": "done",
+        "what": "return",
+        "code": "Ok(\"parcel-7781\")",
+        "res": "done",
+        "clock": "+3.41s"
+      }
+    ]
+  },
+  {
+    "id": "agent",
+    "label": "AI agent",
+    "file": "support.qi",
+    "instance": "ticket:4412",
+    "note": "Each answer of the model and each tool call is kept: after the restart, nothing was asked twice and nothing was paid twice. The agent waited three hours for a person, costing nothing.",
+    "events": [
+      {
+        "line": 6,
+        "kind": "ok",
+        "what": "step",
+        "code": "complete(messages)",
+        "res": "wants refund(#4412, 89 €)",
+        "clock": "09:02"
+      },
+      {
+        "line": 12,
+        "kind": "ok",
+        "what": "step",
+        "code": "askReviewer(\"sam\", …)",
+        "res": "sent",
+        "clock": "09:02"
+      },
+      {
+        "line": 13,
+        "kind": "ice",
+        "what": "wait",
+        "code": "approvals.receive()",
+        "res": "frozen in the store",
+        "clock": "09:02"
+      },
+      {
+        "line": 13,
+        "kind": "crash",
+        "what": "deploy",
+        "code": "every worker restarts",
+        "res": "",
+        "clock": "10:40"
+      },
+      {
+        "line": 13,
+        "kind": "ok",
+        "what": "message",
+        "code": "approvals: true",
+        "res": "thawed, at this line",
+        "clock": "12:05"
+      },
+      {
+        "line": 18,
+        "kind": "ok",
+        "what": "step",
+        "code": "callTool(refund)",
+        "res": "refunded 89 €",
+        "clock": "12:05"
+      },
+      {
+        "line": 6,
+        "kind": "ok",
+        "what": "step",
+        "code": "complete(messages)",
+        "res": "\"Your refund is on its way.\"",
+        "clock": "12:05"
+      },
+      {
+        "line": 8,
+        "kind": "done",
+        "what": "return",
+        "code": "\"Your refund is on its way.\"",
+        "res": "done",
+        "clock": "12:05"
+      }
+    ]
+  },
+  {
+    "id": "approval",
+    "label": "Approval",
+    "file": "approvals.qi",
+    "instance": "expense:1",
+    "note": "Nobody answered in two days, so it asked one level up. For three days it was a row in the store, not a process: the calls in progress and their variables, taken up at the line they were at.",
+    "events": [
+      {
+        "line": 3,
+        "kind": "ok",
+        "what": "step",
+        "code": "managerOf(\"lin\")",
+        "res": "\"grace\"",
+        "clock": "day 0"
+      },
+      {
+        "line": 6,
+        "kind": "ok",
+        "what": "step",
+        "code": "ask(\"grace\", \"1\")",
+        "res": "sent",
+        "clock": "day 0"
+      },
+      {
+        "line": 9,
+        "kind": "ice",
+        "what": "wait",
+        "code": "an answer, or 2 days",
+        "res": "frozen in the store",
+        "clock": "day 0"
+      },
+      {
+        "line": 11,
+        "kind": "ok",
+        "what": "timer",
+        "code": "2 days",
+        "res": "no answer",
+        "clock": "day 2"
+      },
+      {
+        "line": 20,
+        "kind": "ok",
+        "what": "step",
+        "code": "managerOf(\"grace\")",
+        "res": "\"ada\"",
+        "clock": "day 2"
+      },
+      {
+        "line": 6,
+        "kind": "ok",
+        "what": "step",
+        "code": "ask(\"ada\", \"1\")",
+        "res": "sent",
+        "clock": "day 2"
+      },
+      {
+        "line": 10,
+        "kind": "ok",
+        "what": "message",
+        "code": "answers: approved",
+        "res": "thawed on node-2",
+        "clock": "day 3"
+      },
+      {
+        "line": 15,
+        "kind": "done",
+        "what": "return",
+        "code": "Approved(\"ada\")",
+        "res": "done",
+        "clock": "day 3"
+      }
+    ]
+  }
+]

@@ -1,0 +1,59 @@
+impl Flow<String> for Agent {
+    fn run() -> String {
+        let messages = [Message.user(self.question)];
+
+        for _ in 0..20 {
+            let reply = complete(messages);   // kept: never asked twice
+            if reply.tool == null {
+                return reply.text;
+            }
+
+            if reply.tool == "refund" {       // money: a person says yes
+                askReviewer(self.reviewer, reply.text);
+                let approved = wait self.approvals.receive();
+                if !approved {
+                    return "refused by ${self.reviewer}";
+                }
+            }
+            messages.push(callTool(reply));   // each tool call, once
+        }
+        return "gave up after 20 turns";
+    }
+}
+// ----
+import std.flow;
+import std.flow.{Flow, Inbox};
+
+struct Agent {
+    question: String;
+    reviewer: String;
+    approvals: Inbox<Bool> = flow.inbox<Bool>(1);
+}
+
+struct Message {
+    role: String;
+    text: String;
+}
+
+impl Message {
+    static fn user(text: String) -> Message {
+        return Message { role: "user", text: text };
+    }
+}
+
+struct Reply {
+    text: String;
+    tool: String?;
+}
+
+step fn complete(messages: [Message]) -> Reply {
+    return Reply { text: "done", tool: null };
+}
+
+step fn askReviewer(reviewer: String, text: String) {}
+
+step fn callTool(reply: Reply) -> Message {
+    return Message { role: "tool", text: "ok" };
+}
+
+fn main() {}

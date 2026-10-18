@@ -1,0 +1,53 @@
+impl Flow<Decision> for Expense {
+    fn run() -> Decision {
+        let approver = managerOf(self.author);
+
+        for _ in 0..3 {
+            ask(approver, self.id);
+
+            // It may stop here for days, and pick up where it was
+            let answer = wait match {
+                case let a = self.answers.receive(): a;
+                case time.after(2.days()): null;
+            };
+            if answer != null {
+                if answer.approved {
+                    return Decision.Approved(approver);
+                }
+                return Decision.Refused(answer.why);
+            }
+
+            approver = managerOf(approver);   // no answer: one level up
+        }
+        return Decision.Unanswered;
+    }
+}
+// ----
+import std.flow;
+import std.flow.{Flow, Inbox};
+import std.time;
+
+struct Expense {
+    id: String;
+    author: String;
+    answers: Inbox<Answer> = flow.inbox<Answer>(1);
+}
+
+struct Answer {
+    approved: Bool;
+    why: String;
+}
+
+enum Decision {
+    Approved(String),
+    Refused(String),
+    Unanswered,
+}
+
+step fn ask(approver: String, id: String) {}
+
+step fn managerOf(name: String) -> String {
+    return "grace";
+}
+
+fn main() {}

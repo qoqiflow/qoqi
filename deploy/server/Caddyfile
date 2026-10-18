@@ -1,0 +1,35 @@
+# qoqi.dev: the site, built by `make site` and sent by `make site-deploy`.
+# Caddy takes and renews the certificates itself.
+
+qoqi.dev {
+	root * /var/www/qoqi.dev
+	encode zstd gzip
+	try_files {path} {path}/ {path}.html
+	file_server
+	handle_errors {
+		rewrite * /404.html
+		file_server
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=604800"
+
+	# curl -fsSL https://qoqi.dev/install.sh | sh
+	@install path /install.sh
+	header @install Content-Type "text/plain; charset=utf-8"
+}
+
+www.qoqi.dev {
+	redir https://qoqi.dev{uri} permanent
+}
+
+# The demo: a qoqi serve of its own, behind the proxy (qoqi-demo.service)
+demo.qoqi.dev {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:7070
+}

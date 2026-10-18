@@ -1,0 +1,9 @@
+// The same scenario again, with the process stopped after
+// each of its writes: it has to end the same every time
+fn testAnAnswerSurvivesCrashes() {
+    flow.test(Expense { id: "3", author: "lin" }).everyCrash(fn(trial: flow.Trial<Decision>) {
+        trial.go();
+        trial.advance(2.days());       // two days, in a moment
+        trial.send("answers", Answer { approved: true, why: "" });
+    });
+}
