@@ -24,7 +24,7 @@ export const templates: Template[] = [
     text: (flow) => `// ${flow}: a flow the daemon runs, through restarts and new versions.
 import std.flow.{Flow};
 
-struct ${flow} {
+pub struct ${flow} {
     customer: String;
 }
 
@@ -38,7 +38,7 @@ impl Flow<String> for ${flow} {
 
 // A step: the only way a flow reaches the world. What it returns is kept
 // under its key, and it is not done again.
-step fn greet(name: String) -> String {
+pub step fn greet(name: String) -> String {
     return "hello \${name}";
 }
 
@@ -53,7 +53,7 @@ fn main() {}
 import std.flow;
 import std.flow.{Flow, Inbox};
 
-struct ${flow} {
+pub struct ${flow} {
     owner: String;
     notes: Inbox<String> = flow.inbox<String>(8);
 }
@@ -77,7 +77,7 @@ impl Flow<String> for ${flow} {
     }
 }
 
-step fn record(note: String) -> Int {
+pub step fn record(note: String) -> Int {
     println("noted: \${note}");
 
     return 1;
@@ -92,7 +92,7 @@ fn main() {}
     hint: 'Only the imports of a flow: write it from there.',
     text: (flow) => `import std.flow.{Flow};
 
-struct ${flow} {
+pub struct ${flow} {
 }
 
 impl Flow<String> for ${flow} {

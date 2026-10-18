@@ -164,6 +164,9 @@ func (d *Daemon) Deploy(pkg *Package, dry bool) (*Report, error) {
 	report.Moving = alive(func(inst *flowrt.Instance) bool { return inst.Version != "" && inst.Version != version })
 
 	queues, err := queuesOf(pkg)
+	if queues != nil {
+		queues.Log = func(format string, args ...any) { fmt.Fprintf(d.Log, "qoqi: "+pkg.Name+": "+format+"\n", args...) }
+	}
 	if err != nil {
 		return nil, &Refused{Program: pkg.Name, Why: []string{err.Error()}}
 	}

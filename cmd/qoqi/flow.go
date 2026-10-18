@@ -703,6 +703,20 @@ func flowShow(id string) {
 		}
 		row("step", step+" → "+flowd.Qoqi(kept.Result))
 	}
+	for _, sending := range detail.Sending {
+		// A step on its way to its queue: its last attempt, and why it is
+		// not answered yet
+		line := fmt.Sprintf("%s to %s, attempt %d", sending.Step, sending.Queue, sending.Attempt)
+		if sending.Again != "" {
+			if at, err := time.Parse(time.RFC3339Nano, sending.Again); err == nil && at.After(time.Now()) {
+				line += fmt.Sprintf(", again in %s", time.Until(at).Round(time.Second))
+			}
+		}
+		row("sending", line)
+		if sending.Said != "" {
+			row("", sending.Said)
+		}
+	}
 	for i := len(detail.Undos) - 1; i >= 0; i-- {
 		u := detail.Undos[i]
 		argument, _ := json.Marshal(u.Argument)

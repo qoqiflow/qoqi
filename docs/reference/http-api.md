@@ -170,6 +170,14 @@ The editor's programs: those deployed, and the drafts written in the console, ke
 
 `check` compiles a draft, with `{"files": {...}}` over what is kept: `{"ok", "flows", "problems": [{"severity", "message", "file", "line", "column", ...}]}`. `deploy` does the same, then deploys it, or says what it would do with `?dry=1`: `422` when it does not compile, `409` when the daemon refuses it, with `why`. Deployed, the draft is done with. `format` writes `{"text"}` as `qoqi fmt` does.
 
+### `POST /api/workspace/{program}/test`
+
+The tests of a draft, `name_test.qi` files, run by the daemon as `qoqi test` runs them, with `{"files": {...}}` over what is kept, `"file"` for one file, `"filter"` for the tests whose names hold it: `{"ok", "passed", "failed", "files": [{"file", "tests": [{"name", "ok", "message", "file", "line"}], "problems", "failure", "output", "ms"}]}`. One run at a time, a minute at most; nothing is deployed, nothing written in the store.
+
+### `POST /api/workspace/{program}/try`, `GET|DELETE /api/sandboxes/{id}`, `POST /api/sandboxes/{id}/{advance|send|cancel|replace}`
+
+A flow of a draft tried: an instance run in memory with a clock that moves only when asked, as `flow.test` does. `try` takes `{"flow", "fields", "replace": {"step": value}, "files"}`; then `advance {"ms"}`, `send {"inbox", "message"}`, `cancel {"reason"}`, `replace {"step", "value"}` (`null` for the step to run as it is again). Each answers the trial: the instance as `GET /api/instances/{id}` shows one, its clock, how many times each step ran, what happened. A step not answered for runs for real. A trial is its user's; it is forgotten after half an hour unused.
+
 ### `GET /api/stats?days=365&tz=60&flow=`
 
 What happened, day by day, cut at midnight `tz` minutes from UTC: instances started, done, failed and stopped and steps run each day; each flow, with how long its instances took (median, 95th); the steps that run the most; the starts by day of the week and hour. Kept from the time the daemon has the console's tables.

@@ -488,3 +488,38 @@ func TestQueuesSurviveAStopAtEveryWrite(t *testing.T) {
 		}
 	}
 }
+
+// An address that is no application of the library, a page that answers
+// 200 to anything: three answers that are none of a step's, and the
+// instance stops, saying so, rather than send its step again for ever.
+// The log says the queue fails, and is paused.
+func TestAnAddressThatIsNoApplicationStopsItsStep(t *testing.T) {
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "This URL has no default content configured.")
+	}))
+	defer page.Close()
+	store := flowrt.NewMemory()
+	rt := flowrt.New(compiledWithQueues(t, shop, "warehouse", "billing", "bank"), store, &bytes.Buffer{})
+	q := flowrt.NewHTTPQueues(map[string]flowrt.Queue{"warehouse": {URL: page.URL, Secret: shopSecret}})
+	q.Backoff, q.Longest = time.Millisecond, 5*time.Millisecond
+	var said []string
+	var mu sync.Mutex
+	q.Log = func(format string, args ...any) {
+		mu.Lock()
+		said = append(said, fmt.Sprintf(format, args...))
+		mu.Unlock()
+	}
+	rt.Queues = q
+	inst := runFlow(t, rt, store, "o", "Order", shopOrder(false))
+	if inst.Status != flowrt.Stopped || !strings.Contains(inst.Stopped, "3 times in a row with none of the answers a step has") || !strings.Contains(inst.Stopped, "Qoqi library") || !strings.Contains(inst.Stopped, "This URL has no default content") {
+		t.Fatalf("expected it stopped, saying why, got %s %q", inst.Status, inst.Stopped)
+	}
+	if n := len(store.Attempts(inst.ID + "/" + inst.Birth + "/0:0:reserve#1")); n != 3 {
+		t.Errorf("expected three attempts, got %d", n)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(said) == 0 || !strings.Contains(said[0], "the queue warehouse fails") {
+		t.Errorf("the log: %q", said)
+	}
+}

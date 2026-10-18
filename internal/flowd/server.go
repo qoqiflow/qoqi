@@ -57,7 +57,9 @@ type Daemon struct {
 	accountsMu sync.Mutex // one change of the users at a time
 	logins     throttle
 	steps      stepCounts
-	drafting   sync.Mutex // one change of the drafts at a time
+	drafting   sync.Mutex    // one change of the drafts at a time
+	testing    chan struct{} // one run of tests at a time
+	sandboxes  sandboxes     // the trials of drafts, in memory
 
 	deploying sync.Mutex                   // one deploy at a time
 	pmu       sync.RWMutex                 // Programs, Flows and Schema, which a deploy changes
@@ -89,7 +91,7 @@ func New(rt *flowrt.Runtime, flows []string) *Daemon {
 // NewOf makes a daemon for several programs. A flow belongs to one of
 // them: two that have a flow of one name are refused.
 func NewOf(programs []Program) (*Daemon, error) {
-	d := &Daemon{Programs: programs, Token: NewToken(), Log: io.Discard, hub: newHub(), wake: make(chan struct{}, 1), stopped: make(chan struct{})}
+	d := &Daemon{Programs: programs, Token: NewToken(), Log: io.Discard, hub: newHub(), wake: make(chan struct{}, 1), stopped: make(chan struct{}), testing: make(chan struct{}, 1)}
 	owner := map[string]string{}
 	for _, p := range programs {
 		d.observe(p.Runtime)
@@ -191,7 +193,6 @@ func NewToken() string {
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }
-
 
 // Run wakes what is due until ctx is done: at once when told (a start),
 // otherwise every tick.
@@ -295,6 +296,12 @@ func (d *Daemon) Handler(hosts ...string) http.Handler {
 	mux.HandleFunc("DELETE /api/workspace/{program}/files/{file...}", d.removeFile)
 	mux.HandleFunc("POST /api/workspace/{program}/check", d.check)
 	mux.HandleFunc("POST /api/workspace/{program}/deploy", d.deployDraft)
+	mux.HandleFunc("POST /api/workspace/{program}/test", d.test)
+	mux.HandleFunc("POST /api/workspace/{program}/try", d.try)
+	mux.HandleFunc("GET /api/sandboxes", d.listTrials)
+	mux.HandleFunc("GET /api/sandboxes/{id}", d.showTrial)
+	mux.HandleFunc("DELETE /api/sandboxes/{id}", d.closeTrial)
+	mux.HandleFunc("POST /api/sandboxes/{id}/{act}", d.actTrial)
 	mux.HandleFunc("POST /api/format", d.format)
 	mux.HandleFunc("GET /api/stats", d.stats)
 	public := http.NewServeMux()
@@ -541,6 +548,20 @@ type Detail struct {
 	// Unanswered are the steps that left and whose answer is not kept:
 	// what a person may answer by hand, for a stopped instance
 	Unanswered []string `json:"unanswered,omitempty"`
+	// Sending are the steps by a queue on their way, their answer not
+	// kept: their last attempt, and what became of it
+	Sending []Sending `json:"sending,omitempty"`
+}
+
+// Sending is a step by a queue on its way.
+type Sending struct {
+	Key     string `json:"key"`
+	Step    string `json:"step"`
+	Queue   string `json:"queue"`
+	Attempt int    `json:"attempt"` // the last
+	State   string `json:"state"`
+	Said    string `json:"said,omitempty"`  // what the queue answered the last that may have arrived
+	Again   string `json:"again,omitempty"` // when it is sent again
 }
 
 func (d *Daemon) detailOf(rt *flowrt.Runtime, inst *flowrt.Instance) Detail {
@@ -556,6 +577,40 @@ func (d *Daemon) detailOf(rt *flowrt.Runtime, inst *flowrt.Instance) Detail {
 	if lister, ok := rt.Store.(flowrt.Lister); ok {
 		if kept := lister.Results(flowrt.Prefix(inst)); kept != nil {
 			detail.Kept = kept
+		}
+	}
+	if inst.Status != flowrt.Done && inst.Status != flowrt.Failed {
+		kept := map[string]bool{}
+		for _, k := range detail.Kept {
+			kept[k.Key] = true
+		}
+		var keys []string
+		for key := range inst.Tries {
+			keys = append(keys, key)
+		}
+		for key := range inst.Working {
+			if !slices.Contains(keys, key) {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			attempts := rt.Store.Attempts(key)
+			if kept[key] || len(attempts) == 0 {
+				continue
+			}
+			last := attempts[len(attempts)-1]
+			s := Sending{Key: key, Step: last.Step, Queue: last.Queue, Attempt: last.Attempt, State: string(last.State), Said: last.Said}
+			// What the queue said of the last attempt that may have arrived
+			for i := len(attempts) - 1; s.Said == "" && i >= 0; i-- {
+				s.Said = attempts[i].Said
+			}
+			if at, ok := inst.Retried[key]; ok {
+				s.Again = time.UnixMilli(at).UTC().Format(time.RFC3339Nano)
+			} else if inst.WakeAt > 0 && inst.Status == flowrt.Waiting {
+				s.Again = time.UnixMilli(inst.WakeAt).UTC().Format(time.RFC3339Nano)
+			}
+			detail.Sending = append(detail.Sending, s)
 		}
 	}
 	if inst.Status == flowrt.Stopped {
@@ -883,7 +938,6 @@ func answer(w http.ResponseWriter, status int, value any) {
 func fail(w http.ResponseWriter, status int, code, message string) {
 	answer(w, status, map[string]string{"error": code, "message": message})
 }
-
 
 // The pages: the console, built from console/ in the repository (npm run
 // build there writes it here), served as it is. A path that is not a file

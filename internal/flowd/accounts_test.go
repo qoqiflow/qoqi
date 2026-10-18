@@ -338,3 +338,108 @@ func TestAVersionIsDeployedAgain(t *testing.T) {
 		t.Fatalf("no such deploy: %d", status)
 	}
 }
+
+// The tests of a draft run on the daemon, its flows tried in memory:
+// nothing is deployed, nothing is written in the store.
+func TestTheTestsOfADraftRun(t *testing.T) {
+	d, server := kept(t)
+	tests := `import std.flow;
+import std.test;
+import greet;
+import greet.{Greet};
+
+fn testItGreets() {
+    let trial = flow.test(Greet { name: "ada" });
+    trial.go();
+    test.equal("${trial.result()}", "hello ada");
+}
+
+fn testAStepReplaced() {
+    let trial = flow.test(Greet { name: "ada" });
+    trial.replace(greet.hello, fn(name: String) -> String {
+        println("replaced for ${name}");
+        return "hi";
+    });
+    trial.go();
+    test.equal("${trial.result()}", "hello");
+}
+`
+	shown := strings.NewReplacer("struct Greet", "pub struct Greet", "step fn hello", "pub step fn hello").Replace(greeter)
+	body, _ := json.Marshal(map[string]any{"files": map[string]string{"greet.qi": shown, "greet_test.qi": tests}})
+	status, said := call(t, d, server, "POST", "/api/workspace/greet/test", string(body))
+	var run flowd.TestRun
+	json.Unmarshal([]byte(said), &run)
+	if status != 200 || run.OK || run.Passed != 1 || run.Failed != 1 || len(run.Files) != 1 {
+		t.Fatalf("run: %d %s", status, said)
+	}
+	f := run.Files[0]
+	if f.Tests[0].Name == "" || !f.Tests[0].OK || f.Tests[1].OK || f.Tests[1].Message == "" || f.Tests[1].File != "greet_test.qi" || f.Tests[1].Line == 0 {
+		t.Fatalf("tests: %+v", f.Tests)
+	}
+	if !strings.Contains(f.Output, "replaced for ada") {
+		t.Fatalf("what the tests printed: %q", f.Output)
+	}
+	// A mistake is said where it is
+	body, _ = json.Marshal(map[string]any{"files": map[string]string{"greet.qi": shown, "greet_test.qi": strings.Replace(tests, "trial.go();", "trial.goo();", 1)}})
+	_, said = call(t, d, server, "POST", "/api/workspace/greet/test", string(body))
+	json.Unmarshal([]byte(said), &run)
+	if run.OK || len(run.Files[0].Problems) == 0 || run.Files[0].Problems[0].File != "greet_test.qi" {
+		t.Fatalf("a mistake: %s", said)
+	}
+	// Nothing was deployed
+	if _, said := call(t, d, server, "GET", "/api/deployments", ""); strings.Contains(said, "greet") {
+		t.Fatalf("deployed: %s", said)
+	}
+}
+
+// A flow is tried from a draft: started in memory, its steps answered for
+// in their place, sent to, its clock moved; nothing reaches the store.
+func TestAFlowIsTriedFromADraft(t *testing.T) {
+	d, server := kept(t)
+	body, _ := json.Marshal(map[string]any{
+		"files": map[string]string{"greet.qi": greeter}, "fields": map[string]string{"name": "ada"},
+		"replace": map[string]any{"hello": "hi from the trial"},
+	})
+	status, said := call(t, d, server, "POST", "/api/workspace/greet/try", string(body))
+	var trial flowd.SandboxView
+	json.Unmarshal([]byte(said), &trial)
+	if status != http.StatusCreated || trial.Flow != "Greet" || trial.Instance.Status != "done" || string(trial.Instance.Result) != `"hi from the trial"` {
+		t.Fatalf("try: %d %s", status, said)
+	}
+
+	// A flow that waits: sent to, and its clock moved
+	notes := tally(1)
+	body, _ = json.Marshal(map[string]any{"files": map[string]string{"tally.qi": notes}, "fields": map[string]string{"owner": "ada"}})
+	status, said = call(t, d, server, "POST", "/api/workspace/tally/try", string(body))
+	json.Unmarshal([]byte(said), &trial)
+	if status != http.StatusCreated || trial.Instance.Status != "waiting" {
+		t.Fatalf("try a waiting flow: %d %s", status, said)
+	}
+	at := "/api/sandboxes/" + trial.ID
+	for _, note := range []string{"a", "b"} {
+		if status, said := call(t, d, server, "POST", at+"/send", `{"inbox": "notes", "message": "`+note+`"}`); status != 200 {
+			t.Fatalf("send: %d %s", status, said)
+		}
+	}
+	if status, said := call(t, d, server, "POST", at+"/advance", `{"ms": 3600000}`); status != 200 || !strings.Contains(said, `"elapsed": 3600000`) {
+		t.Fatalf("advance: %d %s", status, said)
+	}
+	status, said = call(t, d, server, "POST", at+"/send", `{"inbox": "notes", "message": "stop"}`)
+	json.Unmarshal([]byte(said), &trial)
+	if status != 200 || trial.Instance.Status != "done" || string(trial.Instance.Result) != `"ada 2"` || trial.Calls["record"] != 2 {
+		t.Fatalf("after stop: %d %s", status, said)
+	}
+	if len(trial.Instance.Output) == 0 || !strings.Contains(trial.Instance.Output[0].Text, "v1 a") {
+		t.Fatalf("what it printed: %+v", trial.Instance.Output)
+	}
+	if status, _ := call(t, d, server, "DELETE", at, ""); status != http.StatusNoContent {
+		t.Fatalf("close: %d", status)
+	}
+	if status, _ := call(t, d, server, "GET", at, ""); status != http.StatusNotFound {
+		t.Fatalf("closed, still there: %d", status)
+	}
+	// Nothing was deployed, nothing started for real
+	if _, said := call(t, d, server, "GET", "/api/instances", ""); strings.Contains(said, "try") {
+		t.Fatalf("an instance in the store: %s", said)
+	}
+}

@@ -15,6 +15,8 @@ import type {
   ResumePlan,
   Source,
   Stats,
+  TestRun,
+  Trial,
   User,
   View,
   WorkspaceProgram,
@@ -127,6 +129,13 @@ export const api = {
     call<Checked>('POST', workspaceOf(program) + '/check', { files }).then((r) => r.data),
   deployDraft: (program: string, files: Record<string, string>, dry: boolean) =>
     call<DraftDeploy>('POST', workspaceOf(program) + '/deploy' + (dry ? '?dry=1' : ''), { files }, [409, 422]),
+  testDraft: (program: string, files: Record<string, string>, file = '') =>
+    call<TestRun>('POST', workspaceOf(program) + '/test', { files, file }).then((r) => r.data),
+  tryDraft: (program: string, files: Record<string, string>, flow: string, fields: unknown, replace: Record<string, unknown>) =>
+    call<Trial>('POST', workspaceOf(program) + '/try', { files, flow, fields, replace }).then((r) => r.data),
+  trialAct: (id: string, act: 'advance' | 'send' | 'cancel' | 'replace', body: Record<string, unknown>) =>
+    call<Trial>('POST', '/api/sandboxes/' + encodeURIComponent(id) + '/' + act, body).then((r) => r.data),
+  closeTrial: (id: string) => call('DELETE', '/api/sandboxes/' + encodeURIComponent(id)),
   format: (text: string) => call<{ text: string }>('POST', '/api/format', { text }).then((r) => r.data.text),
 
   // What happened

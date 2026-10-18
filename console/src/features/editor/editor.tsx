@@ -8,8 +8,10 @@ import {
   FileCode2,
   FileJson,
   FilePlus2,
+  FlaskConical,
   Info,
   Loader2,
+  PlayCircle,
   Rocket,
   Sparkles,
   Trash2,
@@ -37,10 +39,13 @@ import { useAuth } from '@/auth/auth';
 import { api, ApiError } from '@/lib/api';
 import { useWorkspace } from '@/lib/queries';
 import { relative, useNow } from '@/lib/time';
-import type { Checked, DraftDeploy, Problem, WorkspaceProgram } from '@/lib/types';
+import type { Checked, DraftDeploy, Problem, TestRun, WorkspaceProgram } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { CodeEditor, type CodeEditorHandle } from './code-editor';
 import { flowNameOf, templates } from './templates';
+import { firstTest } from './first-test';
+import { TestsPanel } from './tests-panel';
+import { TryPanel } from './try-panel';
 
 // The editor: the programs on the left, those deployed and those being
 // written; the files of the one open, its code, and what the compiler
@@ -231,6 +236,10 @@ function Workbench({ program }: { program: string }) {
   const [removing, setRemoving] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
   const [drafted, setDrafted] = useState(false); // saved here since it was opened
+  const [bottom, setBottom] = useState<'problems' | 'tests'>('problems');
+  const [testRun, setTestRun] = useState<TestRun | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [trying, setTrying] = useState(false);
   const editor = useRef<CodeEditorHandle>(null);
   const entry = `${program}.qi`;
 
@@ -303,6 +312,24 @@ function Workbench({ program }: { program: string }) {
     }
   }, [buffers, file]);
 
+  const runTests = useCallback(async () => {
+    setBottom('tests');
+    setTesting(true);
+    try {
+      setTestRun(await api.testDraft(program, buffers));
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setTesting(false);
+    }
+  }, [program, buffers]);
+
+  const goto = (f: string, line: number, column: number) => {
+    setFile(f);
+    // The file shown first, then the place in it
+    setTimeout(() => editor.current?.goto(line, column), 0);
+  };
+
   const problems = checked?.problems ?? [];
   const errors = problems.filter((p) => p.severity === 'error').length;
   const warnings = problems.length - errors;
@@ -339,6 +366,12 @@ function Workbench({ program }: { program: string }) {
             </TooltipTrigger>
             <TooltipContent>⇧⌥F</TooltipContent>
           </Tooltip>
+          <Button size="sm" variant="ghost" onClick={runTests} disabled={testing}>
+            {testing ? <Loader2 className="animate-spin" /> : <FlaskConical />} Test
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setTrying(true)} disabled={!checked?.ok}>
+            <PlayCircle /> Try
+          </Button>
           {isDraft && opened.data?.deployed && (
             <Button size="sm" variant="ghost" onClick={() => setDiscarding(true)}>
               <Undo2 /> Discard draft
@@ -427,15 +460,36 @@ function Workbench({ program }: { program: string }) {
             checked={checked}
             errors={errors}
             warnings={warnings}
-            onPick={(p) => {
-              setFile(p.file);
-              // The file shown first, then the place in it
-              setTimeout(() => editor.current?.goto(p.line, p.column), 0);
-            }}
+            onPick={(p) => goto(p.file, p.line, p.column)}
+            tab={bottom}
+            onTab={setBottom}
+            testsState={
+              testRun &&
+              !testing && (
+                <span className={cn('font-medium normal-case', testRun.ok ? 'text-success' : 'text-destructive')}>
+                  {testRun.passed} passed{testRun.failed > 0 && `, ${testRun.failed} failed`}
+                </span>
+              )
+            }
+            tests={
+              <TestsPanel
+                run={testRun}
+                running={testing}
+                hasTests={files.some((f) => f.endsWith('_test.qi'))}
+                onRun={runTests}
+                onNew={() => {
+                  const f = `${program}_test.qi`;
+                  setBuffers((b) => ({ ...b, [f]: b[f] ?? firstTest(program, checked?.flows[0] ?? flowNameOf(program), checked?.schema?.flows[0]) }));
+                  setFile(f);
+                }}
+                onPick={(f, line) => goto(f, line, 1)}
+              />
+            }
           />
         </div>
       </div>
 
+      <TryPanel open={trying} onOpenChange={setTrying} program={program} flows={checked?.flows ?? []} schema={checked?.schema} files={buffers} />
       <DeployDialog
         open={deploying}
         onClose={() => setDeploying(false)}
@@ -570,6 +624,10 @@ function Problems({
   errors,
   warnings,
   onPick,
+  tab,
+  onTab,
+  tests,
+  testsState,
 }: {
   problems: Problem[];
   checking: boolean;
@@ -577,17 +635,31 @@ function Problems({
   errors: number;
   warnings: number;
   onPick: (p: Problem) => void;
+  tab: 'problems' | 'tests';
+  onTab: (tab: 'problems' | 'tests') => void;
+  tests: React.ReactNode;
+  testsState: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(true);
+  const open = true;
   return (
     <div className="border-t bg-card/40">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-3 px-3 py-1.5 text-xs">
-        <span className="font-semibold tracking-wide text-muted-foreground uppercase">Problems</span>
-        {checking ? (
+      <div className="flex w-full items-center gap-3 px-3 py-1.5 text-xs">
+        {(['problems', 'tests'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => onTab(t)}
+            className={cn('font-semibold tracking-wide uppercase', tab === t ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}
+          >
+            {t}
+          </button>
+        ))}
+        {tab === 'tests' && testsState}
+        {tab === 'problems' && checking ? (
           <span className="inline-flex items-center gap-1 text-muted-foreground">
             <Loader2 className="size-3 animate-spin" /> checking
           </span>
-        ) : checked?.ok ? (
+        ) : tab === 'problems' && checked?.ok ? (
           <span className="inline-flex items-center gap-1 text-success">
             <Check className="size-3.5" /> compiles · {checked.flows.join(', ')}
           </span>
@@ -600,8 +672,9 @@ function Problems({
             <AlertTriangle className="size-3.5 text-warning" /> {warnings}
           </span>
         </span>
-      </button>
-      {open && problems.length > 0 && (
+      </div>
+      {tab === 'tests' && tests}
+      {tab === 'problems' && open && problems.length > 0 && (
         <ul className="max-h-40 overflow-y-auto border-t py-1">
           {problems.map((p, i) => (
             <li key={i}>

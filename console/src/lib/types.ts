@@ -71,6 +71,18 @@ export interface Detail extends View {
   retries?: Record<string, string>;
   output: Line[];
   unanswered?: string[]; // the steps that left, their answer not kept: a person may answer them
+  sending?: Sending[]; // the steps by a queue on their way
+}
+
+/** A step on its way to its queue: its last attempt, and what became of it. */
+export interface Sending {
+  key: string;
+  step: string;
+  queue: string;
+  attempt: number;
+  state: string;
+  said?: string;
+  again?: string;
 }
 
 export interface FlowCounts {
@@ -302,6 +314,7 @@ export interface Checked {
   ok: boolean;
   flows: string[];
   problems: Problem[];
+  schema?: Program; // what the draft is, when it compiles
 }
 
 /** What a deploy did, or would do. */
@@ -357,4 +370,43 @@ export interface Stats {
   flows: FlowStats[];
   steps: StepRuns[];
   hours: number[][];
+}
+
+export interface TestCase {
+  name: string;
+  ok: boolean;
+  message?: string;
+  file?: string; // where it failed
+  line?: number;
+}
+
+export interface TestFile {
+  file: string;
+  tests: TestCase[];
+  passed: number;
+  failed: number;
+  problems?: Problem[]; // it does not compile
+  failure?: string; // the run itself ended badly
+  output?: string;
+  ms: number;
+}
+
+export interface TestRun {
+  ok: boolean;
+  files: TestFile[];
+  passed: number;
+  failed: number;
+}
+
+/** A flow tried from a draft: in memory, its clock moved by hand. */
+export interface Trial {
+  id: string;
+  program: string;
+  flow: string;
+  clock: string;
+  elapsed: number;
+  instance: Detail;
+  calls: Record<string, number>;
+  replaced: Record<string, Data>;
+  said: string[];
 }

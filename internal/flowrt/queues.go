@@ -58,6 +58,10 @@ type HTTPQueues struct {
 	// read: a step of a shape it does not list waits for the next
 	ManifestAge time.Duration
 
+	// Log, when set, is told when a queue starts to fail, is paused, and
+	// answers again: what a person reads in the daemon's log
+	Log func(format string, args ...any)
+
 	mu        sync.Mutex
 	health    map[string]*health
 	manifests map[string]*manifest
@@ -242,6 +246,9 @@ func (q *HTTPQueues) probe(queue Queue, name string) (bool, *manifest) {
 func (q *HTTPQueues) answered(name string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if h := q.health[name]; h != nil && q.Log != nil {
+		q.Log("the queue %s answers again, after %d failures", name, h.failures)
+	}
 	delete(q.health, name)
 }
 
@@ -268,8 +275,17 @@ func (q *HTTPQueues) failed(name, why string, pause bool) {
 		wait = q.Longest
 	}
 	h.next, h.why = q.Now()+wait.Milliseconds(), why
+	paused := h.paused
 	if pause || h.failures >= pauseAfter {
 		h.paused = true
+	}
+	if q.Log != nil {
+		switch {
+		case h.paused && !paused:
+			q.Log("the queue %s is paused after %d failures, and asked now and then whether it is back: %s", name, h.failures, why)
+		case h.failures == 1:
+			q.Log("the queue %s fails, tried again in %s: %s", name, wait, why)
+		}
 	}
 }
 
@@ -390,8 +406,14 @@ func (q *HTTPQueues) send(queue Queue, address *url.URL, name string, body []byt
 		}
 		return got, true, resp.StatusCode
 	}
-	return q.uncertain("the queue %s answered none of value, retry, failed: %s", name, snippet(data)), true, resp.StatusCode
+	return q.uncertain("the queue %s %s: %s", name, notAnAnswer, snippet(data)), true, resp.StatusCode
 }
+
+// notAnAnswer is what an attempt answered with none of the answers a step
+// has is said to have answered: what Deliver counts, to stop sending a
+// step to an address that is no application of the library.
+const notAnAnswer = "answered none of value, retry, failed"
+
 
 // readAnswer reads what an application answers a step, on the response
 // to it or later: ok is false for what is none of the answers.
@@ -442,10 +464,13 @@ type attempting struct {
 }
 
 func (a *attempting) Deliver(d vm.Delivery) vm.Answer {
-	// A step that keeps failing alone, its queue answering the others,
+	// A step that keeps failing, sent again and again without an answer,
 	// is a poison: it stops its instance, for a person to look at
 	if n, said := a.uncertainInARow(d.Key); n >= a.r.Poison {
-		return vm.Answer{Outcome: vm.Halt, Reason: fmt.Sprintf("%s may have arrived %d times in a row, its queue answering others; the last: %s", d.Step, n, said)}
+		return vm.Answer{Outcome: vm.Halt, Reason: fmt.Sprintf("%s may have arrived %d times in a row, never answered; the last: %s", d.Step, n, said)}
+	}
+	if n, said := a.garbledInARow(d.Key); a.r.Garbled > 0 && n >= a.r.Garbled {
+		return vm.Answer{Outcome: vm.Halt, Reason: fmt.Sprintf("%s was answered %d times in a row with none of the answers a step has, which sending it again will not change: is the queue %s served by an application with the Qoqi library? The last: %s", d.Step, n, d.Queue, said)}
 	}
 
 	// It leaves once its queue is ready for it and has room: until then
@@ -558,6 +583,20 @@ func (a *attempting) uncertainInARow(key string) (int, string) {
 	attempts := a.r.Store.Attempts(key)
 	n, said := 0, ""
 	for i := len(attempts) - 1; i >= 0 && attempts[i].State == GivenUp && attempts[i].Said != ""; i-- {
+		if n == 0 {
+			said = attempts[i].Said
+		}
+		n++
+	}
+	return n, said
+}
+
+// garbledInARow is how many of the last attempts of a step were answered
+// with none of the answers a step has, and what the last one said.
+func (a *attempting) garbledInARow(key string) (int, string) {
+	attempts := a.r.Store.Attempts(key)
+	n, said := 0, ""
+	for i := len(attempts) - 1; i >= 0 && attempts[i].State == GivenUp && strings.Contains(attempts[i].Said, notAnAnswer); i-- {
 		if n == 0 {
 			said = attempts[i].Said
 		}

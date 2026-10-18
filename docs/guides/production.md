@@ -60,7 +60,7 @@ See [stopped instances](../concepts/failures.md#stopped-instances).
 
 ## The console
 
-The console is at the daemon's address; `qoqi ui` opens it in a browser. It shows each instance as code, at the line it is at, with its variables and what its steps returned; starts instances from a form made from the flow's types; sends messages, cancels, resumes. Its editor writes programs, checks them as they are typed and deploys them; its activity pages show a year of what the flows did, day by day. It is served by the daemon at its own address, built into `qoqi`.
+The console is at the daemon's address; `qoqi ui` opens it in a browser. It shows each instance as code, at the line it is at, with its variables and what its steps returned; starts instances from a form made from the flow's types; sends messages, cancels, resumes. Its editor writes programs, checks them as they are typed, runs their tests, tries their flows in memory with a clock moved by hand, and deploys them; its activity pages show a year of what the flows did, day by day. It is served by the daemon at its own address, built into `qoqi`.
 
 It starts with one user, `admin`, password `admin`, changed at the first sign in before anything else can be done: sign in at once on a daemon reachable by others. People sign in with a name and a password; each can do everything. See [`qoqi users`](../reference/cli.md#qoqi-users).
 

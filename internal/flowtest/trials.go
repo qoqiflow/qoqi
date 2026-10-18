@@ -57,6 +57,14 @@ func register(host *vm.VM, t *trial) int64 {
 	return last
 }
 
+// Release forgets the trials of a machine done with: a process that runs
+// tests again and again, as the daemon does for its console, keeps none.
+func Release(host *vm.VM) {
+	mu.Lock()
+	defer mu.Unlock()
+	delete(trials, host)
+}
+
 func find(host *vm.VM, args []vm.Value, i int) (*trial, error) {
 	id, err := vm.ArgInt(args, i)
 	if err != nil {

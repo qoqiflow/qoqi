@@ -191,6 +191,7 @@ function InstanceView({ detail, flow, program }: { detail: Detail; flow?: FlowIn
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
         <div className="grid min-w-0 content-start gap-6">
+          {(detail.sending?.length ?? 0) > 0 && <Sending detail={detail} now={now} />}
           <Where detail={detail} flow={flow} program={program} now={now} />
           <Tabs defaultValue="steps">
             <TabsList>
@@ -242,6 +243,34 @@ function Panel({ title, note, children, icon }: { title: string; note?: string; 
         {note && <span className="ml-auto text-xs font-normal text-muted-foreground">{note}</span>}
       </h2>
       <div className="p-4">{children}</div>
+    </section>
+  );
+}
+
+/** The steps on their way to their queues: their last attempt, and why it is not answered yet. */
+function Sending({ detail, now }: { detail: Detail; now: number }) {
+  return (
+    <section className="grid gap-2 rounded-xl border border-warning/30 bg-warning/6 p-4" aria-label="Steps on their way">
+      <h2 className="flex items-center gap-2 text-sm font-semibold">
+        <Clock className="size-4 text-warning" /> On its way to the application
+      </h2>
+      <ul className="grid gap-3">
+        {detail.sending!.map((s) => {
+          const again = s.again ? Date.parse(s.again) : 0;
+          return (
+            <li key={s.key} className="grid gap-1">
+              <span className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <span className="font-mono font-medium text-sky-700 dark:text-sky-300">{s.step}</span>
+                <span className="text-muted-foreground">
+                  to the queue <span className="font-mono text-foreground">{s.queue}</span>, attempt {s.attempt}
+                  {again > now && `, sent again in ${Math.ceil((again - now) / 1000)} s`}
+                </span>
+              </span>
+              {s.said && <span className="font-mono text-xs break-words text-muted-foreground">{s.said}</span>}
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }

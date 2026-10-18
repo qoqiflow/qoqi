@@ -171,9 +171,13 @@ type Runtime struct {
 	Boundary Boundary
 
 	// Poison is how many attempts in a row of a step by a queue may have
-	// arrived, its queue answering others, before its instance stops
+	// arrived, never answered, before its instance stops
 	Poison int
-	gate   sync.Mutex // a step takes room on its queue one at a time
+	// Garbled is how many answers in a row of a step may be none of the
+	// answers a step has, before its instance stops: an address that is
+	// no application of the library answers so every time
+	Garbled int
+	gate    sync.Mutex // a step takes room on its queue one at a time
 
 	// Ran, when set, is told of every step that leaves: its name, its
 	// key, and whether it is one never run twice
@@ -551,7 +555,7 @@ const Unknown = `{"$type": "std.flow.Settled.Unknown", "$variant": true}`
 
 // New makes a runtime for a compiled program.
 func New(chunk *vm.Chunk, store Store, out io.Writer) *Runtime {
-	return &Runtime{Chunk: chunk, Store: store, Out: out, Now: func() int64 { return time.Now().UnixMilli() }, MaxTries: 100, Poison: 20}
+	return &Runtime{Chunk: chunk, Store: store, Out: out, Now: func() int64 { return time.Now().UnixMilli() }, MaxTries: 100, Poison: 20, Garbled: 3}
 }
 
 // Start makes an instance of a flow, due at once. A name that is taken

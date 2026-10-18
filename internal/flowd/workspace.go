@@ -2,6 +2,7 @@ package flowd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +21,6 @@ import (
 	"github.com/qoqiflow/qoqi/internal/flows"
 	"github.com/qoqiflow/qoqi/internal/formatter"
 	"github.com/qoqiflow/qoqi/internal/project"
-	"github.com/qoqiflow/qoqi/internal/runner"
 	"github.com/qoqiflow/qoqi/internal/vm"
 )
 
@@ -334,6 +334,9 @@ type Checked struct {
 	OK       bool      `json:"ok"`
 	Flows    []string  `json:"flows"`
 	Problems []Problem `json:"problems"`
+	// Schema is what the program is, when it compiles: its flows and the
+	// types of their fields, for the forms of the editor
+	Schema *Schema `json:"schema,omitempty"`
 }
 
 // compileDraft compiles the files of a program, as they are given: the
@@ -346,38 +349,15 @@ func (d *Daemon) compileDraft(name string, files map[string]string) (*compiler.R
 		checked.Problems = append(checked.Problems, Problem{Severity: "error", Message: "a program has a file " + entry + ": its flows start there", File: entry, Line: 1, Column: 1})
 		return nil, nil, checked, nil
 	}
-	var cfg project.Config
-	if text := strings.TrimSpace(files[projectFile]); text != "" {
-		if err := json.Unmarshal([]byte(text), &cfg); err != nil {
-			checked.Problems = append(checked.Problems, Problem{Severity: "error", Message: "qoqi.json is not JSON: " + err.Error(), File: projectFile, Line: 1, Column: 1})
-			return nil, nil, checked, nil
-		}
+	opts, cfg, problem := d.draftOptions(name, files)
+	if problem != nil {
+		checked.Problems = append(checked.Problems, *problem)
+		return nil, nil, checked, nil
 	}
-	// The files are named in the program's own folder: name/entry.qi
 	root := name
-	read := func(p string) (string, error) {
-		rel := strings.TrimPrefix(path.Clean(strings.ReplaceAll(p, "\\", "/")), root+"/")
-		if text, ok := files[rel]; ok && strings.HasSuffix(rel, ".qi") {
-			return text, nil
-		}
-		return "", fmt.Errorf("%s is not a file of %s", rel, name)
-	}
-	opts := compiler.Options{Read: read, Root: root, Unused: true, Queues: cfg.QueueNames(), Lock: d.lastLock(name)}
-	if opts.Lock == nil {
-		opts.Lock = &flowrt.Lock{} // never one beside the daemon
-	}
 	errs := qerrors.NewHandler()
 	result := compiler.CompileOptions(src, root+"/"+entry, opts, errs)
-	for _, diag := range errs.Diagnostics {
-		p := Problem{
-			Severity: strings.ToLower(diag.Severity.String()), Code: diag.Code, Message: diag.Message,
-			File: strings.TrimPrefix(diag.Pos.File, root+"/"), Line: diag.Pos.Line, Column: diag.Pos.Col, Suggestion: diag.Suggestion,
-		}
-		if len(diag.Highlights) > 0 {
-			p.EndColumn = diag.Highlights[0].EndCol
-		}
-		checked.Problems = append(checked.Problems, p)
-	}
+	checked.Problems = append(checked.Problems, problemsOf(errs, root)...)
 	if errs.HasErrors() || result == nil || result.Chunk == nil {
 		return result, nil, checked, nil
 	}
@@ -401,29 +381,81 @@ func (d *Daemon) compileDraft(name string, files map[string]string) (*compiler.R
 	if len(cfg.Queues) > 0 {
 		pkg.Queues = cfg.Queues
 	}
+	checked.Schema = pkg.Schema
 	return result, pkg, checked, nil
+}
+
+// draftOptions are how the files of a draft are compiled: named in the
+// program's own folder, name/entry.qi, each read from the draft and from
+// nowhere else, with the queues of its qoqi.json.
+func (d *Daemon) draftOptions(name string, files map[string]string) (compiler.Options, project.Config, *Problem) {
+	var cfg project.Config
+	if text := strings.TrimSpace(files[projectFile]); text != "" {
+		if err := json.Unmarshal([]byte(text), &cfg); err != nil {
+			return compiler.Options{}, cfg, &Problem{Severity: "error", Message: "qoqi.json is not JSON: " + err.Error(), File: projectFile, Line: 1, Column: 1}
+		}
+	}
+	root := name
+	read := func(p string) (string, error) {
+		rel := strings.TrimPrefix(path.Clean(strings.ReplaceAll(p, "\\", "/")), root+"/")
+		if text, ok := files[rel]; ok && strings.HasSuffix(rel, ".qi") {
+			return text, nil
+		}
+		return "", fmt.Errorf("%s is not a file of %s", rel, name)
+	}
+	opts := compiler.Options{Read: read, Root: root, Unused: true, Queues: cfg.QueueNames(), Lock: d.lastLock(name)}
+	if opts.Lock == nil {
+		opts.Lock = &flowrt.Lock{} // never one beside the daemon
+	}
+	return opts, cfg, nil
+}
+
+// problemsOf are the diagnostics of a compilation, named in the program.
+func problemsOf(errs *qerrors.Handler, root string) []Problem {
+	var out []Problem
+	for _, diag := range errs.Diagnostics {
+		p := Problem{
+			Severity: strings.ToLower(diag.Severity.String()), Code: diag.Code, Message: diag.Message,
+			File: strings.TrimPrefix(diag.Pos.File, root+"/"), Line: diag.Pos.Line, Column: diag.Pos.Col, Suggestion: diag.Suggestion,
+		}
+		if len(diag.Highlights) > 0 {
+			p.EndColumn = diag.Highlights[0].EndCol
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// draftAsked is the body of a request on a draft: the files the editor
+// has, over those kept, and what a run of its tests is to run.
+type draftAsked struct {
+	Files  map[string]string `json:"files"`
+	File   string            `json:"file"`
+	Filter string            `json:"filter"`
 }
 
 // filesOf are the files of a program to compile: those the request
 // gives, as the editor has them, over those of the draft.
 func (d *Daemon) filesOf(name string, r *http.Request) (map[string]string, error) {
-	var body struct {
-		Files map[string]string `json:"files"`
-		Dry   bool              `json:"dry"`
-	}
+	files, _, err := d.filesAndAsked(name, r)
+	return files, err
+}
+
+func (d *Daemon) filesAndAsked(name string, r *http.Request) (map[string]string, draftAsked, error) {
+	var body draftAsked
 	data, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, 16*maxFile))
 	if err != nil {
-		return nil, err
+		return nil, body, err
 	}
 	if len(bytes.TrimSpace(data)) > 0 {
 		if err := json.Unmarshal(data, &body); err != nil {
-			return nil, errors.New("the body is JSON: {\"files\": {\"name.qi\": ...}}")
+			return nil, body, errors.New("the body is JSON: {\"files\": {\"name.qi\": ...}}")
 		}
 	}
 	files := map[string]string{}
 	opened, err := d.open(name)
 	if err != nil {
-		return nil, err
+		return nil, body, err
 	}
 	if opened != nil {
 		for _, f := range opened.Files {
@@ -432,11 +464,11 @@ func (d *Daemon) filesOf(name string, r *http.Request) (map[string]string, error
 	}
 	for f, text := range body.Files {
 		if err := checkFileName(f); err != nil {
-			return nil, err
+			return nil, body, err
 		}
 		files[f] = text
 	}
-	return files, nil
+	return files, body, nil
 }
 
 // check compiles a draft, and says what the compiler said of it.
@@ -540,10 +572,12 @@ func Format(text string) (string, error) {
 		return "", formatErr
 	}
 	var out bytes.Buffer
-	machine := runner.Machine(runner.Limits{}, []string{"-"}, formatter.File, func(int) {})
+	machine := quietMachine(&out, formatter.File)
+	machine.SetArgs([]string{"-"})
 	machine.SetInput(strings.NewReader(text))
-	machine.SetOutput(&out)
-	value, err := machine.Exec(formatChunk)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	value, err := machine.ExecContext(ctx, formatChunk)
 	if err != nil {
 		return "", err
 	}
