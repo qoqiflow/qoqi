@@ -414,7 +414,6 @@ func (q *HTTPQueues) send(queue Queue, address *url.URL, name string, body []byt
 // step to an address that is no application of the library.
 const notAnAnswer = "answered none of value, retry, failed"
 
-
 // readAnswer reads what an application answers a step, on the response
 // to it or later: ok is false for what is none of the answers.
 func readAnswer(data []byte) (vm.Answer, bool) {
