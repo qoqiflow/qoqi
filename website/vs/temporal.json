@@ -23,19 +23,19 @@
     {
       "title": "Wait for an answer, or seven days",
       "text": "The same wait, in Temporal's Go SDK and in Qoqi.",
-      "them": "temporal/wait.go",
+      "them": "temporal/wait.golang",
       "us": "shared/wait.qi"
     },
     {
       "title": "Plain code, because nothing replays",
       "text": "Temporal has a replacement for the clock, for sleep, for randomness, for goroutines. Qoqi needs none.",
-      "them": "temporal/rules.go",
+      "them": "temporal/rules.golang",
       "us": "shared/plain.qi"
     },
     {
       "title": "Shipping a change under running workflows",
       "text": "Temporal branches on a version marker, kept for as long as old executions live. A Qoqi instance moves to new code at a stage, its state checked against flow.lock.",
-      "them": "temporal/version.go",
+      "them": "temporal/version.golang",
       "us": "shared/stage.qi"
     }
   ],

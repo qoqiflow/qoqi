@@ -297,6 +297,11 @@ func build(root, out string) (int, error) {
 		"website/static/fonts/GeistMono-Variable.woff2": "assets/fonts/GeistMono-Variable.woff2",
 		"website/static/fonts/OFL.txt":                  "assets/fonts/OFL.txt",
 	}
+	for _, media := range []string{"console.mp4", "console.jpg"} {
+		if _, err := os.Stat(filepath.Join(root, "website/static", media)); err == nil {
+			copies["website/static/"+media] = "assets/" + media
+		}
+	}
 	for from, to := range copies {
 		if err := copyFile(filepath.Join(root, from), filepath.Join(out, to)); err != nil {
 			return 0, err
@@ -736,7 +741,15 @@ func landingData(root string) (map[string]any, error) {
 		}
 	}
 
+	// The video of the console, when there is one: website/static/console.mp4
+	// (see website/demo/record.sh), and its first frame as a still
+	video := ""
+	if _, err := os.Stat("static/console.mp4"); err == nil {
+		video = "/assets/console.mp4"
+	}
+
 	return map[string]any{
+		"Video":       video,
 		"Title":       "Qoqi Flow: durable workflows as plain programs",
 		"Description": "Write the process from top to bottom: wait three days, ask a manager, charge a card, retry, give up. Qoqi Flow keeps it alive through crashes, restarts and new versions of its own code.",
 		"Code":        code,
@@ -854,7 +867,7 @@ func comparisons() ([]versus, error) {
 				if err != nil {
 					return nil, fmt.Errorf("%s: %w", f, err)
 				}
-				lang := map[string]string{".go": "go", ".py": "python", ".ts": "typescript", ".qi": "qoqi", ".console": "console"}[filepath.Ext(side.file)]
+				lang := map[string]string{".golang": "go", ".py": "python", ".ts": "typescript", ".qi": "qoqi", ".console": "console"}[filepath.Ext(side.file)]
 				if *side.html, err = highlight(lang, string(src)); err != nil {
 					return nil, err
 				}

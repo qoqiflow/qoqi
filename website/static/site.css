@@ -627,3 +627,12 @@ h1, h2, h3, h4 { line-height: 1.15; letter-spacing: -0.025em; font-weight: 600; 
   .pair { grid-template-columns: minmax(0, 1fr); }
   .vs-code, .vs-table, .vs-faq { margin-top: 88px; }
 }
+
+/* The video of the console */
+.film { max-width: 1200px; margin: 144px auto 0; }
+.film-frame {
+  border: 1px solid var(--line-2); border-radius: 16px; overflow: hidden; background: var(--code-bg);
+  box-shadow: 0 0 0 1px rgba(127, 149, 255, 0.12), 0 30px 80px rgba(61, 90, 254, 0.18);
+}
+.film-frame video { display: block; width: 100%; height: auto; }
+@media (max-width: 980px) { .film { margin-top: 104px; } }
