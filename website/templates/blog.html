@@ -1,0 +1,16 @@
+{{define "blog.html"}}{{template "head" .}}
+<body class="post">
+{{template "header" (dict)}}
+<main class="post-main">
+  <div class="prose post-body">
+    <h1>Blog</h1>
+    <ul class="posts">
+      {{range .Posts}}<li><a href="{{.URL}}"><span class="date">{{.Date.Format "January 2, 2006"}}</span><strong>{{.Title}}</strong></a></li>
+      {{end}}
+    </ul>
+  </div>
+</main>
+{{template "footer"}}
+</body>
+</html>
+{{end}}

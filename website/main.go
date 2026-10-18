@@ -77,6 +77,7 @@ type page struct {
 	Prev    *page
 	Next    *page
 	Mermaid bool
+	Date    time.Time // of a post of the blog
 
 	doc    ast.Node
 	source []byte
@@ -236,6 +237,25 @@ func build(root, out string) (int, error) {
 	if others, err := comparisons(); err == nil {
 		hasCompare = len(others) > 0
 	}
+	posts, err := blog(md, byPath)
+	if err != nil {
+		return 0, err
+	}
+	for _, pg := range posts {
+		if err := render(tmpl, "post.html", filepath.Join(out, fileOf(pg.URL)), map[string]any{
+			"Page": pg, "Title": pg.Title + " · Qoqi Flow", "Description": describe(pg), "URL": site + pg.URL,
+		}); err != nil {
+			return 0, err
+		}
+	}
+	if len(posts) > 0 {
+		if err := render(tmpl, "blog.html", filepath.Join(out, "blog", "index.html"), map[string]any{
+			"Posts": posts, "Title": "Blog · Qoqi Flow", "Description": "Writing about Qoqi Flow: how it works, and why.", "URL": site + "/blog/",
+		}); err != nil {
+			return 0, err
+		}
+	}
+
 	landing, err := landingData(root)
 	if err != nil {
 		return 0, err
@@ -275,7 +295,7 @@ func build(root, out string) (int, error) {
 	if err := writeJSON(filepath.Join(out, "search.json"), index); err != nil {
 		return 0, err
 	}
-	if err := sitemap(filepath.Join(out, "sitemap.xml"), pages, others); err != nil {
+	if err := sitemap(filepath.Join(out, "sitemap.xml"), append(pages, posts...), others); err != nil {
 		return 0, err
 	}
 	if err := os.WriteFile(filepath.Join(out, "robots.txt"), []byte("User-agent: *\nAllow: /\nSitemap: "+site+"/sitemap.xml\n"), 0o644); err != nil {
@@ -544,7 +564,7 @@ func relink(root string, pg *page, byPath map[string]*page) []string {
 			return ast.WalkContinue, nil
 		}
 		d := string(*dest)
-		if d == "" || strings.Contains(d, "://") || strings.HasPrefix(d, "mailto:") {
+		if d == "" || strings.Contains(d, "://") || strings.HasPrefix(d, "mailto:") || strings.HasPrefix(d, "/") {
 			return ast.WalkContinue, nil
 		}
 		target, fragment, _ := strings.Cut(d, "#")
@@ -891,6 +911,45 @@ func comparisonHub() (vsHub, error) {
 		return h, fmt.Errorf("vs/index.json: %w", err)
 	}
 	return h, nil
+}
+
+// The blog: website/blog/2026-10-18-a-title.md is /blog/a-title, dated
+// by its name, newest first.
+func blog(md goldmark.Markdown, byPath map[string]*page) ([]*page, error) {
+	files, err := filepath.Glob("blog/*.md")
+	if err != nil {
+		return nil, err
+	}
+	var posts []*page
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimSuffix(filepath.Base(f), ".md")
+		if len(name) < 12 || name[10] != '-' {
+			return nil, fmt.Errorf("%s: a post is named date-slug.md", f)
+		}
+		date, err := time.Parse("2006-01-02", name[:10])
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", f, err)
+		}
+		source, mermaid := prepare(raw)
+		pg := &page{Src: "website/" + filepath.ToSlash(f), URL: "/blog/" + name[11:], source: source, Mermaid: mermaid, ids: map[string]bool{}, Date: date}
+		pg.doc = md.Parser().Parse(text.NewReader(source), parser.WithContext(parser.NewContext(parser.WithIDs(newIDs()))))
+		pg.Title, pg.TOC = headings(pg)
+		if broken := relink("..", pg, byPath); len(broken) > 0 {
+			return nil, fmt.Errorf("links that lead nowhere:\n  %s", strings.Join(broken, "\n  "))
+		}
+		var buf bytes.Buffer
+		if err := md.Renderer().Render(&buf, pg.source, pg.doc); err != nil {
+			return nil, err
+		}
+		pg.Body = template.HTML(buf.String())
+		posts = append(posts, pg)
+	}
+	sort.Slice(posts, func(i, j int) bool { return posts[i].Date.After(posts[j].Date) })
+	return posts, nil
 }
 
 func writeJSON(file string, v any) error {

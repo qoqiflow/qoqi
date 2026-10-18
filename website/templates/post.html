@@ -1,0 +1,23 @@
+{{define "post.html"}}{{template "head" .}}
+<body class="post">
+{{template "header" (dict)}}
+<main class="post-main">
+  <article class="prose post-body">
+    <p class="eyebrow"><a href="/blog/">Blog</a> · {{.Page.Date.Format "January 2, 2006"}}</p>
+    {{.Page.Body}}
+  </article>
+  <section class="post-end">
+    <div class="install" data-copy-root>
+      <span class="prompt">$</span>
+      <code data-copy-text>curl -fsSL https://qoqi.dev/install.sh | sh</code>
+      <button type="button" class="copy" data-copy aria-label="Copy">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+    </div>
+    <p class="cta"><a class="btn primary" href="/docs/getting-started/quickstart">Quickstart</a><a class="btn" href="https://github.com/qoqiflow/qoqi">GitHub</a></p>
+  </section>
+</main>
+{{template "footer"}}
+</body>
+</html>
+{{end}}

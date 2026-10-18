@@ -636,3 +636,16 @@ h1, h2, h3, h4 { line-height: 1.15; letter-spacing: -0.025em; font-weight: 600; 
 }
 .film-frame video { display: block; width: 100%; height: auto; }
 @media (max-width: 980px) { .film { margin-top: 104px; } }
+
+/* --- The blog --- */
+.post-main { padding: 72px 24px 0; }
+.post-body { max-width: 720px; margin: 0 auto; font-size: 17px; }
+.post-body h1 { font-size: clamp(34px, 5vw, 50px); letter-spacing: -0.04em; margin-bottom: 28px; }
+.post-body p, .post-body li { line-height: 1.75; }
+.post-body > .eyebrow a { color: var(--ink-3); }
+.post-end { max-width: 720px; margin: 72px auto 120px; padding-top: 40px; border-top: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; }
+.posts { list-style: none; padding: 0 !important; }
+.posts li a { display: block; padding: 18px 0; border-bottom: 1px solid var(--line); color: var(--ink); }
+.posts li a:hover { text-decoration: none; color: var(--accent); }
+.posts .date { display: block; font: 12.5px var(--mono); color: var(--ink-3); margin-bottom: 4px; }
+@media (max-width: 640px) { .post-main { padding: 48px 16px 0; } .post-body { font-size: 16px; } }

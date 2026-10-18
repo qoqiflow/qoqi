@@ -4,6 +4,7 @@
 
 *   [Installation](getting-started/installation.md)
 *   [Quickstart](getting-started/quickstart.md): a flow that waits for a person, served, started, answered and tested
+*   [Questions](faq.md): why a language, what is frozen, upgrades, production
 
 ## Concepts
 
