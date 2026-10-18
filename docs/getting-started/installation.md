@@ -2,6 +2,17 @@
 
 Qoqi Flow is one binary, `qoqi`: the compiler, the daemon and its console, the test runner, the formatter and the language server.
 
+## From a release
+
+The installer downloads the binary for your system (Linux or macOS, x86_64 or arm64), checks it against its checksum and puts it in `~/.local/bin`:
+
+```console
+$ curl -fsSL https://qoqi.dev/install.sh | sh
+$ qoqi version
+```
+
+`QOQI_VERSION=v0.1.0` picks a release, `QOQI_INSTALL=/usr/local/bin` the folder. The binaries, Windows' too, are also on [the releases](https://github.com/qoqiflow/qoqi/releases).
+
 ## From the source
 
 You need Go 1.25 or later. Node is not needed: the console is prebuilt in the repository.
@@ -15,16 +26,6 @@ qoqi dev darwin/arm64
 ```
 
 Put `./qoqi` somewhere on your `PATH`, or run `go install ./cmd/qoqi`.
-
-## From a release
-
-Once releases are published, the installer downloads the binary for your system, checks it against its checksum and puts it in `~/.local/bin`:
-
-```console
-$ curl -fsSL https://raw.githubusercontent.com/qoqiflow/qoqi/main/install.sh | sh
-```
-
-`QOQI_VERSION=v0.1.0` picks a release, `QOQI_INSTALL=/usr/local/bin` the folder.
 
 ## The editor
 

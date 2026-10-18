@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs qoqi from the releases on GitHub:
 #
-#     curl -fsSL https://raw.githubusercontent.com/qoqiflow/qoqi/main/install.sh | sh
+#     curl -fsSL https://qoqi.dev/install.sh | sh
 #
 # QOQI_VERSION picks a release (default: the latest), QOQI_INSTALL the
 # folder the binary goes in (default: ~/.local/bin).

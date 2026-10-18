@@ -76,7 +76,7 @@ $ qoqi result expense:1
 Approved("grace")
 ```
 
-> **Status: early.** The language, the runtime and the daemon work end to end, with tests. There is no release yet, and the interfaces may still change.
+> **Status: early.** The language, the runtime and the daemon work end to end, with tests. The interfaces may still change. The documentation is also at [qoqi.dev](https://qoqi.dev).
 
 ## Why
 
@@ -96,12 +96,10 @@ Qoqi Flow keeps it a program. While a flow waits, its whole state of execution i
 
 ## Getting started
 
-Build from source (Go 1.25 or later):
+Install it (Linux or macOS), or [build it from the source](docs/getting-started/installation.md#from-the-source):
 
 ```console
-$ git clone https://github.com/qoqiflow/qoqi
-$ cd qoqi
-$ go build -o qoqi ./cmd/qoqi
+$ curl -fsSL https://qoqi.dev/install.sh | sh
 ```
 
 Write a flow, `reminder.qi`:
