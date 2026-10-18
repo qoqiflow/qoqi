@@ -19,6 +19,11 @@
 *   [Steps in your application](guides/application-steps.md): queues, `qoqi gen`, the SDKs for Go, PHP and TypeScript
 *   [Running in production](guides/production.md): stores, several daemons, the console, security
 
+## Comparisons
+
+*   [Qoqi Flow and the others](compare/README.md): a language whose state is frozen, beside libraries whose history is replayed; a table, and when to choose another tool
+*   [Temporal](compare/temporal.md), [DBOS](compare/dbos.md), [Restate](compare/restate.md), [Inngest](compare/inngest.md), [Workflow SDK](compare/workflow-sdk.md)
+
 ## Reference
 
 *   [Command line](reference/cli.md)
