@@ -262,6 +262,46 @@ func TestStepsTheApplicationCarriesOut(t *testing.T) {
 	}
 }
 
+// What a step returns need not be a struct: a list, a number, nothing.
+func TestAnswersThatAreNoObject(t *testing.T) {
+	const lookup = `
+import std.flow.{Flow};
+
+struct Lookup { phone: String; }
+impl Flow<String> for Lookup {
+    fn run() -> String {
+        let codes = find(self.phone);
+        let count = countOf(self.phone);
+        let name = nameOf(self.phone);
+        return "${codes.join(",")} ${count} ${name ?? "nobody"}";
+    }
+}
+step fn find(phone: String) -> [String] by app;
+step fn countOf(phone: String) -> Int by app;
+step fn nameOf(phone: String) -> String? by app;
+fn main() {}
+`
+	app := &application{t: t, answer: func(d delivery, n int) (int, string) {
+		switch d.Step {
+		case "find":
+			return 200, `{"value": ["A1", "B2"]}`
+		case "countOf":
+			return 200, `{"value": 2}`
+		}
+		return 200, `{"value": null}`
+	}}
+	server := httptest.NewServer(app.handler("app"))
+	t.Cleanup(server.Close)
+	store := flowrt.NewMemory()
+	rt := flowrt.New(compiledWithQueues(t, lookup, "app"), store, &bytes.Buffer{})
+	rt.Queues = flowrt.NewHTTPQueues(map[string]flowrt.Queue{"app": {URL: server.URL + "/steps", Secret: shopSecret}})
+
+	inst := runFlow(t, rt, store, "l", "Lookup", `{"phone": "690"}`)
+	if inst.Status != flowrt.Done || !strings.Contains(string(inst.Result), "A1,B2 2 nobody") {
+		t.Fatalf("expected done with the answers, got %s %s %q", inst.Status, inst.Result, inst.Stopped)
+	}
+}
+
 // What follows each answer of the application, or none.
 func TestWhatAnAnswerSays(t *testing.T) {
 	for _, c := range []struct {

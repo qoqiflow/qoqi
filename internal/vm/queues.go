@@ -166,8 +166,15 @@ func fits(name string, a Answer, undo string) error {
 	if a.Value == nil {
 		return fmt.Errorf("the application gave %s no value", name)
 	}
-	if err := json.Unmarshal(a.Value, &tag); err != nil {
-		return fmt.Errorf("what the application answered for %s is not JSON: %v", name, err)
+	if !json.Valid(a.Value) {
+		return fmt.Errorf("what the application answered for %s is not JSON", name)
+	}
+	// Only an object has a $type: an array, a text, a number or null is a
+	// value as well
+	if strings.HasPrefix(strings.TrimSpace(string(a.Value)), "{") {
+		if err := json.Unmarshal(a.Value, &tag); err != nil {
+			return fmt.Errorf("what the application answered for %s is not JSON: %v", name, err)
+		}
 	}
 	failed := tag.Type == "std.result.Result.Err"
 	switch {
