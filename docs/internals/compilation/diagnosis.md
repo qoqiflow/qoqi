@@ -81,6 +81,7 @@ that detects the problem.
 | `E1001` | Undefined identifier, type or trait. Suggests the closest known name |
 | `E1002` | Name already declared in the same scope (includes redeclaring a builtin) |
 | `E1003` | A pattern after `is` names a value where nothing runs only when the test held: under `!`, on a side of `\|\|`, in a test that is just a value. The suggestion is `_` |
+| `E1005` | A name alone as the pattern of a case (`case limit:`) resolves to something other than a top-level constant: a variable, a parameter, a local `const`, a function, or nothing. The suggestion is a condition on a pattern that takes every value, `case Int if value == limit:` |
 
 ### E2xxx — Type checking (`internal/types`)
 
@@ -173,7 +174,7 @@ within them.
 
 | Code | Meaning |
 |------|---------|
-| `E7001` | Language feature that parses but cannot be compiled yet (match patterns other than literals, types and enum variants) |
+| `E7001` | Language feature that parses but cannot be compiled yet (match patterns other than literals, constants, ranges, types, structs and enum variants) |
 
 | `E7002` | `extern fn` naming a function the runtime does not provide |
 

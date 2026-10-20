@@ -16,6 +16,7 @@ const (
 	ErrRedeclaration = "E1002" // Redeclaration of a name in the same scope
 	ErrUnusableName  = "E1003" // A pattern names a value where nothing could use the name
 	ErrUnused        = "E1004" // A variable, a parameter or a name of a pattern nothing uses (a warning)
+	ErrNotAConstant  = "E1005" // A name a case compares with that is not a constant
 )
 
 type Resolver struct {
@@ -545,13 +546,11 @@ func (r *Resolver) visitPattern(pattern ast.Node) {
 		}
 
 	case *ast.Ident:
-		// Special case: underscore is a wildcard, not a binding
-		if p.Name == "_" {
-			return
-		}
-		// This is a variable binding pattern - declare a new variable
-		// instead of looking it up
-		r.declare(p.Name, SymbolVar, p)
+		// A name by itself is what a case compares with, as if its value
+		// were written there: a constant, `case HAND_OVER:`. Inside the
+		// pattern of a variant or a struct a name is a variable to bind,
+		// a BindingPattern
+		r.visitConstPattern(p)
 
 	case *ast.Literal:
 		// Literal patterns don't bind variables, just match values
@@ -581,6 +580,54 @@ func (r *Resolver) visitPattern(pattern ast.Node) {
 	default:
 		// Unknown pattern type - ignore
 	}
+}
+
+// visitConstPattern resolves the name a case is written with, which has
+// to be a top-level constant: the case compares the value with it. A
+// variable, a parameter or a function changes, or is not a value to
+// compare with, and the value of a case is known when the program is
+// compiled.
+func (r *Resolver) visitConstPattern(p *ast.Ident) {
+	if p.Name == "_" {
+		r.errs.ReportErrorWithSuggestion(ErrNotAConstant,
+			"'_' alone cannot be the pattern of a case",
+			"A case for every other value is written default:", p.Token(), r.sourceLines)
+		return
+	}
+	sym := r.current.Lookup(p.Name)
+	if sym != nil {
+		if _, ok := sym.Decl.(*ast.ConstDecl); ok {
+			r.table.Defs[p] = sym
+			sym.Used = true
+			return
+		}
+	}
+	what := "nothing of that name is declared"
+	if sym != nil {
+		// Named, if wrongly: not also said to be unused
+		sym.Used = true
+		switch decl := sym.Decl.(type) {
+		case *ast.Param:
+			what = "it is a parameter"
+		case *ast.LetStmt:
+			what = "it is a variable"
+			if decl.IsConst {
+				what = "it is a local constant"
+			}
+		case *ast.FnDecl:
+			what = "it is a function"
+		default:
+			what = "it is not a constant"
+		}
+	}
+	name := p.Tok.Literal
+	if name == "" {
+		name = p.Name
+	}
+	r.errs.ReportErrorWithSuggestion(ErrNotAConstant,
+		fmt.Sprintf("'%s' cannot be a pattern: %s; a pattern names a constant or a literal", name, what),
+		fmt.Sprintf("To compare with a variable, add a condition to a pattern that takes any value: case Int if value == %s:", name),
+		p.Token(), r.sourceLines)
 }
 
 // visitCondition resolves what an `if` or a `while` tests, or a chain of

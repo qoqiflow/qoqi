@@ -769,6 +769,12 @@ func (c *Checker) markBoolExhaustive(s *ast.MatchStmt) {
 			continue
 		}
 		for _, pattern := range matchCase.Patterns() {
+			if decl := c.patternConst(pattern); decl != nil {
+				// case YES: where const YES = true;
+				if lit := c.constLiteral(decl); lit != nil {
+					pattern = lit
+				}
+			}
 			if lit, ok := pattern.(*ast.Literal); ok && lit.Kind == "bool" {
 				rows = append(rows, []ast.Node{lit})
 			}

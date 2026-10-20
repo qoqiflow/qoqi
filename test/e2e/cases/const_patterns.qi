@@ -1,0 +1,66 @@
+// A case may name a constant, of the file or of a module, and compares
+// the value with it as if its literal were written there.
+
+import std.task;
+import signals.names;
+import signals.names.{HAND_OVER, MAX_TRIES};
+
+const GREETING = "hello";
+const ANSWER = 42;
+const MINUS = -1;
+const SAME = ANSWER;
+const ON = true;
+const OFF = false;
+
+fn route(call: String, tries: Int) -> String {
+    match call {
+        case HAND_OVER: { return "hand over"; }
+        case names.STOP if tries >= MAX_TRIES: { return "stop, tried enough"; }
+        case names.STOP | "halt": { return "stop"; }
+        case GREETING: { return "greet"; }
+        default: { return "unknown"; }
+    }
+}
+
+fn number(n: Int) -> String {
+    return match n {
+        case SAME: "the answer";
+        case MINUS | 0: "nothing";
+        case MAX_TRIES: "enough";
+        default: "a number";
+    };
+}
+
+fn light(on: Bool) -> String {
+    // Both values are taken: the match needs no default
+    return match on {
+        case ON: "on";
+        case OFF: "off";
+    };
+}
+
+fn main() -> Int {
+    println(route("hand_over", 0));
+    println(route("stop", 1));
+    println(route("stop", 3));
+    println(route("halt", 0));
+    println(route("hello", 0));
+    println(route("bye", 0));
+    println(number(42), number(-1), number(0), number(3), number(7));
+    println(light(true), light(false));
+
+    // In a wait match, as in a match
+    let calls = task.channel<String>(4);
+    wait calls.send(GREETING);
+    wait calls.send(HAND_OVER);
+    calls.close();
+    let open = true;
+    while open {
+        wait match {
+            case calls.receive() is HAND_OVER: { println("waited: hand over"); }
+            case calls.receive() is null: { open = false; }
+            case let other = calls.receive(): { println("waited: ${other ?? ""}"); }
+        }
+    }
+    return 0;
+}

@@ -1,0 +1,6 @@
+// The names of the calls an assistant makes, shared by the modules that
+// look at them.
+
+pub const HAND_OVER = "hand_over";
+pub const STOP = "stop";
+pub const MAX_TRIES = 3;

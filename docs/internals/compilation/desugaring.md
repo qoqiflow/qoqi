@@ -286,10 +286,14 @@ match result {
 - Preserve source location information for error reporting
 
 **Patterns accepted today**: literals (including negative numbers such as
-`case -1:`), types (above) and `default:`. A `default:` case has no pattern
-and becomes the final `else`. A name that is not a type (`case limit:`) and
-destructuring patterns are rejected by the compiler driver with `E7001`
-(see [pipeline.md](pipeline.md)).
+`case -1:`), constants, types (above) and `default:`. A `default:` case has
+no pattern and becomes the final `else`. A constant, `case HAND_OVER:`, is
+an identifier the resolver found to be a top-level constant; it is compared
+like a literal, `value == HAND_OVER`, and the constant is then replaced by
+its value as everywhere else. A name that is not a type, a variant or a
+constant (`case limit:`, a variable) is rejected by the resolver with
+`E1005`; other expressions by the compiler driver with `E7001` (see
+[pipeline.md](pipeline.md)).
 
 #### Patterns on enum variants
 

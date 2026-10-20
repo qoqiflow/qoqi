@@ -1249,3 +1249,45 @@ func TestUnusedWarnings(t *testing.T) {
 		t.Errorf("expected nothing without Unused, got %v", errs.Diagnostics)
 	}
 }
+
+// A case may name a constant of another module, imported by name or
+// reached through the module's name.
+func TestMatchOnConstantsOfModules(t *testing.T) {
+	fs := sources{
+		"signals.qi": `
+pub const HAND_OVER = "hand_over";
+pub const STOP = "stop";
+pub const RETRIES = 3;
+const SECRET = "secret";
+`,
+		"main.qi": `
+import signals;
+import signals.{HAND_OVER, RETRIES};
+
+fn handle(name: String, tries: Int) -> String {
+	match name {
+		case HAND_OVER: { return "hand over"; }
+		case signals.STOP if tries < RETRIES: { return "stop"; }
+		case signals.STOP | "halt": { return "stop late"; }
+		default: { return "other"; }
+	}
+}
+
+fn main() -> Int {
+	println(handle("hand_over", 0), handle("stop", 1), handle("stop", 5), handle("halt", 0), handle("x", 0));
+	match 3 {
+		case signals.RETRIES: { println("retries"); }
+		default: { println("other"); }
+	}
+	return 0;
+}
+`,
+	}
+	expectModulesOutput(t, fs, "hand over stop stop late stop late other\nretries\n")
+
+	fs["main.qi"] = "import signals;\nfn main() -> Int {\n\tmatch \"a\" { case signals.SECRET: { return 1; } default: { return 0; } }\n}\n"
+	expectModulesError(t, fs, "E8003", "main.qi", "constant 'SECRET' of module 'signals' is private")
+
+	fs["main.qi"] = "import signals;\nfn main() -> Int {\n\tlet s = \"a\";\n\tif s is signals.STOP { return 1; }\n\treturn 0;\n}\n"
+	expectModulesError(t, fs, "E8005", "main.qi", "'is' takes a type or the pattern of a variant, and 'signals.STOP' is neither")
+}

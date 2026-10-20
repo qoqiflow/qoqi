@@ -615,11 +615,18 @@ func (r *rewriter) pattern(pattern ast.Node) ast.Node {
 		if member, ok := p.Target.(*ast.MemberExpr); ok && !p.HasArgs {
 			if target, ok := r.moduleOf(member.Expr); ok {
 				tok := memberToken(member)
-				if it, _ := target.lookup(member.Name, make(map[*module]bool)); it != nil && it.isType {
+				it, _ := target.lookup(member.Name, make(map[*module]bool))
+				if it != nil && it.isType {
 					if it = r.find(r.m, target, member.Name, tok); it == nil {
 						return p
 					}
 					return &ast.Type{BaseNode: ast.BaseNode{Pos: tok.Pos, Tok: tok}, Kind: ast.TypeBasic, Name: it.qualified}
+				}
+				if it != nil {
+					// `case other.STOP:` a constant of the module, compared
+					// with as one of this module is; the resolver says
+					// when the name is not a constant
+					return r.expr(member)
 				}
 			}
 		}
@@ -695,6 +702,11 @@ func (r *rewriter) patternTest(e *ast.PatternTestExpr) ast.Expr {
 		return &ast.TypeTestExpr{BaseNode: e.BaseNode, Expr: e.Expr, Type: pattern}
 	case *ast.VariantPattern:
 		e.Pattern = pattern
+	case ast.Expr:
+		// value is other.LIMIT: a value of another module, which a case
+		// compares with but `is` does not
+		r.report(pattern.Token(), ErrNotAValue, "Compare values with ==",
+			"'is' takes a type or the pattern of a variant, and '%s' is neither", pattern.Token().Literal)
 	}
 	return e
 }

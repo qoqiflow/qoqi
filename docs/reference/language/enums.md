@@ -177,7 +177,7 @@ A case that can never run, because a case above already takes its variant whole,
 
 ### Other things a `match` can test
 
-The patterns of an enum mix with the [other kinds](tour.md#control-flow): a type (`case Shape:` takes any `Shape`, `case Int:`) and a literal. When the value is an `Any` or a trait, a variant pattern tests for the enum as well:
+The patterns of an enum mix with the [other kinds](tour.md#control-flow): a type (`case Shape:` takes any `Shape`, `case Int:`), a literal, and a constant. When the value is an `Any` or a trait, a variant pattern tests for the enum as well:
 
 ```rust
 fn describe(value: Any) -> String {
@@ -189,6 +189,40 @@ fn describe(value: Any) -> String {
     }
 }
 ```
+
+### Constants
+
+A case may name a constant instead of writing its value: one declared with `const` at the top level of the file, imported by name, or reached through its module. It compares the value with the constant's, as if that were written there:
+
+```rust
+import signals;
+import signals.{HAND_OVER};
+
+const GREETING = "hello";
+
+fn route(call: String, tries: Int) -> String {
+    match call {
+        case HAND_OVER: { return "hand over"; }
+        case signals.STOP if tries >= 3: { return "stop, tried enough"; }
+        case signals.STOP | "halt": { return "stop"; }
+        case GREETING: { return "greet"; }
+        default: { return "unknown"; }
+    }
+}
+```
+
+It works wherever a literal does: in several patterns, with a condition, in a `wait match` (`case calls.receive() is HAND_OVER:`). The constant is a `String`, an `Int`, a `Float` or a `Bool`, whatever operators and other constants its value is worked out with (`E2029` otherwise). A match on a `Bool` with a constant written `true` and one written `false` is complete. Two cases with the same value are not reported, as two equal literals are not: the first one runs.
+
+A name alone as the pattern of a case is never a new variable: it is a type, a variant, or a constant, however it is written. Anything else is `E1005`, a variable or a parameter included, since a case compares with a value known when the program is compiled. A variable is compared in a condition, on a pattern that takes every value:
+
+```rust
+match n {
+    case Int if n == limit: { ... }     // not case limit:
+    default: { ... }
+}
+```
+
+Inside the pattern of a variant or of a struct, a name is still a new variable: `case Some(limit):` names what the `Some` holds.
 
 ### A match that gives a value
 
@@ -453,6 +487,7 @@ What tuples add is reading a value by its position, `pair.0`, and being printed 
 | `E2030` | An enum used wrongly: unknown variant, wrong number of values, a type argument nothing determines, the enum itself as a value | `Shape.Square(1.0)` |
 | `E2023` (warning) | A case that is never reached, or a test with `is` that always holds | a second `case Shape.Circle(r):`; `pair is (a, b)` |
 | `E1003` | A name in a pattern after `is` where nothing could use it | `!(shape is Shape.Circle(r))` |
+| `E1005` | A name alone as a pattern that is not a top-level constant, a type or a variant | `let limit = 3; ... case limit:` |
 
 ## What Is Not There
 

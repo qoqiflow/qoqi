@@ -1,0 +1,11 @@
+// A name in a pattern is a top-level constant. A variable changes while
+// the program runs, and is compared in a condition instead.
+
+fn main() -> Int {
+    let limit = 3;
+    match 3 {
+        case limit: { println("three"); }
+        default: { println("other"); }
+    }
+    return 0;
+}

@@ -39,8 +39,11 @@ func checkBlockSupported(block *ast.BlockStmt, unsupported func(ast.Node, string
 				switch pattern.(type) {
 				case *ast.Literal, *ast.UnaryExpr, *ast.Type, *ast.VariantPattern, *ast.StructPattern, *ast.RangeExpr:
 					// Value patterns, ranges, type patterns, enum variants and structs
+				case *ast.Ident:
+					// A constant, compared with as its value is; the
+					// resolver says when the name is not one
 				default:
-					unsupported(c, "this kind of match pattern is", "Match on literal values, on ranges of numbers, on types or on the variants of an enum")
+					unsupported(c, "this kind of match pattern is", "Match on literal values, constants, ranges of numbers, types or the variants of an enum")
 				}
 			}
 		}

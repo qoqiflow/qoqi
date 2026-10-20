@@ -1,6 +1,8 @@
 package inspect
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -108,6 +110,50 @@ func TestPatternTestsInTheEditor(t *testing.T) {
 		got := Check("main.qi", strings.Replace(patternTests, c.old, c.new, 1))
 		if len(got) == 0 || got[0].Code != c.code {
 			t.Errorf("%q: expected %s, got %+v", c.new, c.code, got)
+		}
+	}
+}
+
+// A constant a case names is described, and leads to its declaration,
+// whether it is of the file, imported by name or reached through its
+// module.
+func TestConstantsInPatterns(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "main.qi")
+	signals := filepath.Join(dir, "signals.qi")
+	os.WriteFile(signals, []byte("pub const STOP = \"stop\";\npub const HAND_OVER = \"hand_over\";\n"), 0o644)
+	src := `import signals;
+import signals.{HAND_OVER};
+
+const GREETING = "hello";
+
+fn main() -> Int {
+    match "x" {
+        case GREETING | HAND_OVER: { return 1; }
+        case signals.STOP: { return 2; }
+        default: { return 0; }
+    }
+}
+`
+	os.WriteFile(main, []byte(src), 0o644)
+	lines := strings.Split(src, "\n")
+	for _, c := range []struct {
+		line      int
+		at        string
+		signature string
+		file      string
+		declared  int
+	}{
+		{8, "GREETING", "const GREETING: String", main, 4},
+		{8, "HAND_OVER", "const signals.HAND_OVER: String", signals, 2},
+		{9, "STOP", "const signals.STOP: String", signals, 1},
+	} {
+		column := strings.Index(lines[c.line-1], c.at) + 1
+		d := Describe(main, src, c.line, column)
+		if d == nil {
+			t.Errorf("%d %q: expected %q, got nothing", c.line, c.at, c.signature)
+		} else if d.Signature != c.signature || d.File != c.file || d.Line != c.declared {
+			t.Errorf("%d %q: got %q declared in %s:%d, want %q in %s:%d", c.line, c.at, d.Signature, d.File, d.Line, c.signature, c.file, c.declared)
 		}
 	}
 }

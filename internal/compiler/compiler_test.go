@@ -1119,6 +1119,66 @@ func TestMatch(t *testing.T) {
 	`, "zero minus one other\nis b\n")
 }
 
+// A case may name a top-level constant, and compares the value with it
+// as if its literal were written there.
+func TestMatchOnConstants(t *testing.T) {
+	decls := `
+		const HAND_OVER = "hand_over";
+		const STOP: String = "stop";
+		const ANSWER = 42;
+		const MINUS = -1;
+		const SAME = ANSWER;
+		const SUM = 1 + 2;
+		const HALF: Float = 1;
+		const YES = true;
+		const NO = false;
+
+		fn word(s: String) -> String {
+			match s {
+				case HAND_OVER: { return "hand over"; }
+				case STOP | "halt": { return "stop"; }
+				default: { return "other"; }
+			}
+		}
+
+		fn number(n: Int) -> String {
+			return match n {
+				case ANSWER if n > 100: "never";
+				case SAME: "answer";
+				case MINUS: "minus one";
+				case SUM: "three";
+				case 0 | MINUS: "zero";
+				default: "other";
+			};
+		}
+
+		fn half(x: Float) -> String {
+			match x {
+				case HALF: { return "one"; }
+				default: { return "other"; }
+			}
+		}
+
+		fn yes(b: Bool) -> String {
+			// Complete: a match that gives a value needs no default
+			return match b {
+				case YES: "yes";
+				case NO: "no";
+			};
+		}
+	`
+	expectOutput(t, decls, `
+		println(word("hand_over"), word("stop"), word("halt"), word("x"));
+		println(number(42), number(-1), number(3), number(0));
+		println(half(1.0), half(0.5));
+		println(yes(true), yes(false));
+		let limit = 2;
+		match 2 {
+			case Int if limit == 2: { println("guard"); }
+		}
+	`, "hand over stop stop other\nanswer minus one three zero\none other\nyes no\nguard\n")
+}
+
 func TestGarbageCollectionKeepsLiveValues(t *testing.T) {
 	// Allocates far more than the heap holds, so the collector must run and
 	// must not free anything still reachable.
@@ -1290,7 +1350,15 @@ func TestCompileErrors(t *testing.T) {
 		{"missing module", "import nowhere; fn main() -> Int { return 0; }", "E8001", "module 'nowhere' not found"},
 		{"uninferred generic", "fn none<T>() -> [T] { return []; }\nfn size<U>(items: [U]) -> Int { return 0; }\nfn main() -> Int { return size(none()); }", "E3001", "Cannot infer type arguments"},
 		{"type pattern that can never match", "fn main() -> Int { match 1 { case String: { return 1; } default: { return 0; } } }", "E2021", "Int can never be String"},
-		{"unsupported pattern", "fn main() -> Int { let limit = 1; match 1 { case limit: { return 1; } default: { return 0; } } }", "E7001", "this kind of match pattern is not supported yet"},
+		{"variable as a pattern", "fn main() -> Int { let limit = 1; match 1 { case limit: { return 1; } default: { return 0; } } }", "E1005", "'limit' cannot be a pattern: it is a variable; a pattern names a constant or a literal"},
+		{"parameter as a pattern", "fn f(limit: Int) -> Int { match 1 { case limit: { return 1; } default: { return 0; } } }\nfn main() -> Int { return f(1); }", "E1005", "'limit' cannot be a pattern: it is a parameter"},
+		{"local constant as a pattern", "fn main() -> Int { const LIMIT = 1; match 1 { case LIMIT: { return 1; } default: { return 0; } } }", "E1005", "'LIMIT' cannot be a pattern: it is a local constant"},
+		{"undeclared name as a pattern", "fn main() -> Int { match 1 { case LIMIT: { return 1; } default: { return 0; } } }", "E1005", "'LIMIT' cannot be a pattern: nothing of that name is declared"},
+		{"function as a pattern", "fn limit() -> Int { return 1; }\nfn main() -> Int { match 1 { case 2 | limit: { return 1; } default: { return 0; } } }", "E1005", "'limit' cannot be a pattern: it is a function"},
+		{"constant of the wrong type as a pattern", "const STOP = \"stop\";\nfn main() -> Int { match 1 { case STOP: { return 1; } default: { return 0; } } }", "E2001", "pattern of type String can never match a value of type Int"},
+		{"array constant as a pattern", "const XS = [1];\nfn main() -> Int { match [1] { case XS: { return 1; } default: { return 0; } } }", "E2029", "a constant in a pattern is a String, an Int, a Float or a Bool"},
+		{"underscore alone as a pattern", "fn main() -> Int { match 1 { case _: { return 1; } } }", "E1005", "'_' alone cannot be the pattern of a case"},
+		{"unsupported pattern", "fn main() -> Int { match 2 { case 1 + 1: { return 1; } default: { return 0; } } }", "E7001", "this kind of match pattern is not supported yet"},
 	}
 
 	for _, tt := range tests {

@@ -106,78 +106,68 @@ func TestResolveTypeSuggestion(t *testing.T) {
 	}
 }
 
-func TestPatternMatchingVariableBinding(t *testing.T) {
-	// match x { case y: y + 1 }
-	// y should be bound as a new variable in the match case scope
+func TestPatternNameIsAConstant(t *testing.T) {
+	// const Y = 1; ... match x { case Y: Y + 1 }
+	// A name alone as the pattern is looked up: it is the constant, not a
+	// new variable
 
 	xIdent := &ast.Ident{
-		BaseNode: ast.BaseNode{Tok: token.Token{Pos: token.Position{Line: 1, Col: 7}, EndPos: token.Position{Line: 1, Col: 8}}},
+		BaseNode: ast.BaseNode{Tok: token.Token{Pos: token.Position{Line: 2, Col: 7}, EndPos: token.Position{Line: 2, Col: 8}}},
 		Name:     "x",
 	}
-
-	// Pattern: identifier y (should bind y)
 	patternY := &ast.Ident{
-		BaseNode: ast.BaseNode{Tok: token.Token{Pos: token.Position{Line: 1, Col: 16}, EndPos: token.Position{Line: 1, Col: 17}}},
-		Name:     "y",
+		BaseNode: ast.BaseNode{Tok: token.Token{Literal: "Y", Pos: token.Position{Line: 2, Col: 16}, EndPos: token.Position{Line: 2, Col: 17}}},
+		Name:     "Y",
 	}
-
-	// Body: y + 1 (should resolve y to the bound variable)
 	bodyYRef := &ast.Ident{
-		BaseNode: ast.BaseNode{Tok: token.Token{Pos: token.Position{Line: 1, Col: 19}, EndPos: token.Position{Line: 1, Col: 20}}},
-		Name:     "y",
+		BaseNode: ast.BaseNode{Tok: token.Token{Pos: token.Position{Line: 2, Col: 19}, EndPos: token.Position{Line: 2, Col: 20}}},
+		Name:     "Y",
 	}
-
 	matchStmt := &ast.MatchStmt{
 		Cond: xIdent,
 		Cases: []*ast.MatchCase{
 			{
 				Pattern: patternY,
-				Body: &ast.BinaryExpr{
-					Left:  bodyYRef,
-					Op:    "+",
-					Right: &ast.Literal{Value: "1", Kind: "int"},
-				},
+				Body:    &ast.BinaryExpr{Left: bodyYRef, Op: "+", Right: &ast.Literal{Value: "1", Kind: "int"}},
 			},
 		},
 	}
-
-	// Declare x in outer scope
+	constY := &ast.ConstDecl{Name: "Y", Value: &ast.Literal{Value: "1", Kind: "int"}}
 	xDecl := &ast.LetStmt{
-		BaseNode: ast.BaseNode{Tok: token.Token{Pos: token.Position{Line: 1, Col: 1}, EndPos: token.Position{Line: 1, Col: 11}}},
+		BaseNode: ast.BaseNode{Tok: token.Token{Pos: token.Position{Line: 2, Col: 1}, EndPos: token.Position{Line: 2, Col: 11}}},
 		Name:     "x",
 		Value:    &ast.Literal{Value: "5", Kind: "int"},
 	}
-
 	prog := &ast.Program{
 		Decls: []ast.Decl{
-			&ast.FnDecl{
-				Name: "main",
-				Body: &ast.BlockStmt{
-					Stmts: []ast.Stmt{xDecl, matchStmt},
-				},
-			},
+			constY,
+			&ast.FnDecl{Name: "main", Body: &ast.BlockStmt{Stmts: []ast.Stmt{xDecl, matchStmt}}},
 		},
 	}
 
 	errs := errors.NewHandler()
-	resolver := NewResolver(errs)
-	table := resolver.Resolve(prog)
-
+	table := NewResolver(errs).Resolve(prog)
 	if errs.HasErrors() {
 		t.Errorf("Expected no errors, but got: %v", errs.Diagnostics)
 	}
+	for _, ref := range []*ast.Ident{patternY, bodyYRef} {
+		if sym := table.Defs[ref]; sym == nil || sym.Decl != constY {
+			t.Errorf("Expected %s at column %d to be the constant", ref.Name, ref.Tok.Pos.Col)
+		}
+	}
 
-	// Verify that y in the body resolves to the pattern-bound variable
-	if sym := table.Defs[bodyYRef]; sym == nil {
-		t.Error("Expected y in body to be resolved")
-	} else if sym.Decl != patternY {
-		t.Error("Expected y in body to resolve to the pattern binding")
+	// The variable x is not a constant: the case cannot compare with it
+	matchStmt.Cases[0].Pattern = &ast.Ident{BaseNode: ast.BaseNode{Tok: token.Token{Literal: "x", Pos: token.Position{Line: 2, Col: 16}}}, Name: "x"}
+	errs = errors.NewHandler()
+	NewResolver(errs).Resolve(prog)
+	if len(errs.Diagnostics) == 0 || errs.Diagnostics[0].Code != ErrNotAConstant || !strings.Contains(errs.Diagnostics[0].Message, "'x' cannot be a pattern: it is a variable") {
+		t.Errorf("Expected E1005 for a variable as a pattern, got: %v", errs.Diagnostics)
 	}
 }
 
 func TestPatternMatchingWildcard(t *testing.T) {
 	// match x { case _: 1 }
-	// _ is a wildcard and should not bind a variable
+	// _ alone is not a pattern of a case: default is
 
 	xIdent := &ast.Ident{
 		BaseNode: ast.BaseNode{Tok: token.Token{Pos: token.Position{Line: 1, Col: 7}, EndPos: token.Position{Line: 1, Col: 8}}},
@@ -221,9 +211,8 @@ func TestPatternMatchingWildcard(t *testing.T) {
 	resolver := NewResolver(errs)
 	resolver.Resolve(prog)
 
-	// Should have no errors - wildcard doesn't try to redeclare _
-	if errs.HasErrors() {
-		t.Errorf("Expected no errors for wildcard pattern, but got: %v", errs.Diagnostics)
+	if len(errs.Diagnostics) != 1 || errs.Diagnostics[0].Code != ErrNotAConstant || !strings.Contains(errs.Diagnostics[0].Suggestion, "default:") {
+		t.Errorf("Expected one E1005 that suggests default:, but got: %v", errs.Diagnostics)
 	}
 }
 

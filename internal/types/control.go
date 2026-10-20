@@ -75,6 +75,12 @@ func (c *Checker) checkMatch(s *ast.MatchStmt, asValue bool, expected Type) Type
 				c.checkRangePattern(pattern, condType)
 			case ast.Expr:
 				patternType := c.checkExpr(pattern)
+				if c.patternConst(pattern) != nil && !isUnknown(patternType) && !isScalar(patternType) {
+					c.errorfWithSuggestion(pattern.Token(), ErrInvalidPattern,
+						"Compare it in a condition: case "+describeTypePattern(condType)+" if value == "+pattern.Token().Literal+":",
+						"a constant in a pattern is a String, an Int, a Float or a Bool, and this one is %s", describe(patternType))
+					continue
+				}
 				if condType != nil && patternType != nil && !c.comparable(condType, patternType) {
 					c.errorf(pattern.Token(), ErrTypeMismatch, "pattern of type %s can never match a value of type %s", patternType, condType)
 				}
@@ -186,6 +192,54 @@ func (c *Checker) checkMatch(s *ast.MatchStmt, asValue bool, expected Type) Type
 		return optional(result)
 	}
 	return result
+}
+
+// patternConst returns the top-level constant a pattern names, `case
+// HAND_OVER:`, and nil for any other pattern. The case compares the value
+// with the constant's, as if it were written there.
+func (c *Checker) patternConst(pattern ast.Node) *ast.ConstDecl {
+	ident, ok := pattern.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	sym := c.table.Defs[ident]
+	if sym == nil {
+		return nil
+	}
+	decl, _ := sym.Decl.(*ast.ConstDecl)
+	return decl
+}
+
+// constLiteral is the literal a constant stands for when its value is
+// one, followed through constants that are other constants
+// (`const ON = YES;`): what the check that a match is complete compares.
+// nil for a value worked out with operators.
+func (c *Checker) constLiteral(decl *ast.ConstDecl) *ast.Literal {
+	for depth := 0; decl != nil && depth < 100; depth++ {
+		switch value := decl.Value.(type) {
+		case *ast.Literal:
+			return value
+		case *ast.Ident:
+			decl = c.patternConst(value)
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// isScalar reports whether a type is one a constant in a pattern can be.
+func isScalar(t Type) bool {
+	return t != nil && (t.Equals(Int) || t.Equals(Float) || t.Equals(String) || t.Equals(Bool))
+}
+
+// describeTypePattern writes the type pattern that takes every value of a
+// type, for a suggestion: Int, or `_` when there is none to write.
+func describeTypePattern(t Type) string {
+	if t == nil || isUnknown(t) {
+		return "_"
+	}
+	return t.String()
 }
 
 // isNullPattern reports whether a case is `case null:` alone, without a
