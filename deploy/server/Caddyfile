@@ -33,3 +33,6 @@ demo.qoqi.dev {
 	encode zstd gzip
 	reverse_proxy 127.0.0.1:7070
 }
+
+# Sites of this machine kept on it alone, outside this repository
+import /etc/caddy/sites/*.caddy
