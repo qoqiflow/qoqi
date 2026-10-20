@@ -332,7 +332,8 @@ export class Daemon {
 
 /**
  * A database a Keeper keeps answers in: what node:sqlite's DatabaseSync
- * and better-sqlite3 give.
+ * and better-sqlite3 give. Its queries quote the key column with double
+ * quotes, as SQLite does, and Postgres: key is a reserved word elsewhere.
  */
 export interface Database {
   exec(sql: string): unknown;
@@ -370,11 +371,11 @@ export class Keeper {
 
   /** Makes the table of answers, if it is not there. */
   setup(): void {
-    this.db.exec(`CREATE TABLE IF NOT EXISTS ${this.table} (key TEXT PRIMARY KEY, state TEXT NOT NULL, answer TEXT NOT NULL, beat INTEGER NOT NULL)`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS ${this.table} ("key" TEXT PRIMARY KEY, state TEXT NOT NULL, answer TEXT NOT NULL, beat INTEGER NOT NULL)`);
   }
 
   #row(key: string): Row | undefined {
-    return this.db.prepare(`SELECT state, answer, beat FROM ${this.table} WHERE key = ?`).get(key) as Row | undefined;
+    return this.db.prepare(`SELECT state, answer, beat FROM ${this.table} WHERE "key" = ?`).get(key) as Row | undefined;
   }
 
   #kept(key: string): Answer | undefined {
@@ -400,7 +401,7 @@ export class Keeper {
         return this.#kept(task.key) ?? said;
       }
       try {
-        this.db.prepare(`INSERT INTO ${this.table} (key, state, answer, beat) VALUES (?, 'answered', ?, ?)`).run(task.key, JSON.stringify(said), Date.now());
+        this.db.prepare(`INSERT INTO ${this.table} ("key", state, answer, beat) VALUES (?, 'answered', ?, ?)`).run(task.key, JSON.stringify(said), Date.now());
         this.db.exec("COMMIT");
       } catch (e) {
         this.db.exec("ROLLBACK");
@@ -420,20 +421,20 @@ export class Keeper {
     if (row !== undefined && !task.reclaim) return answer.unknown();
     if (row !== undefined) {
       // A person said the dead claim did nothing: it is dropped
-      this.db.prepare(`DELETE FROM ${this.table} WHERE key = ? AND state = 'started'`).run(task.key);
+      this.db.prepare(`DELETE FROM ${this.table} WHERE "key" = ? AND state = 'started'`).run(task.key);
     }
     try {
-      this.db.prepare(`INSERT INTO ${this.table} (key, state, answer, beat) VALUES (?, 'started', '', ?)`).run(task.key, task.until);
+      this.db.prepare(`INSERT INTO ${this.table} ("key", state, answer, beat) VALUES (?, 'started', '', ?)`).run(task.key, task.until);
     } catch {
       // The loser of a race for the claim does not act
       return answer.underWay();
     }
     const said = await step(task);
     if (!("value" in said)) {
-      this.db.prepare(`DELETE FROM ${this.table} WHERE key = ? AND state = 'started'`).run(task.key);
+      this.db.prepare(`DELETE FROM ${this.table} WHERE "key" = ? AND state = 'started'`).run(task.key);
       return said;
     }
-    this.db.prepare(`UPDATE ${this.table} SET state = 'answered', answer = ? WHERE key = ?`).run(JSON.stringify(said), task.key);
+    this.db.prepare(`UPDATE ${this.table} SET state = 'answered', answer = ? WHERE "key" = ?`).run(JSON.stringify(said), task.key);
     return said;
   }
 
@@ -448,6 +449,6 @@ export class Keeper {
 
   /** Drops what is under a key: a person said what happened. */
   forget(key: string): void {
-    this.db.prepare(`DELETE FROM ${this.table} WHERE key = ?`).run(key);
+    this.db.prepare(`DELETE FROM ${this.table} WHERE "key" = ?`).run(key);
   }
 }

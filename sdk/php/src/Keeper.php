@@ -23,10 +23,16 @@ final class Keeper
     private const ANSWERED = 'answered';
     private const CLAIMED = 'started';
 
+    /** The key column, quoted for the database. */
+    private readonly string $key;
+
     public function __construct(
         private readonly \PDO $db,
         private readonly string $table = 'flow_steps',
     ) {
+        // key is a reserved word of MySQL: the column is quoted as each
+        // database quotes a name
+        $this->key = $db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? '`key`' : '"key"';
     }
 
     /**
@@ -35,7 +41,7 @@ final class Keeper
     public function setup(): void
     {
         $this->db->exec("CREATE TABLE IF NOT EXISTS {$this->table} (
-            key VARCHAR(255) PRIMARY KEY,
+            {$this->key} VARCHAR(255) PRIMARY KEY,
             state VARCHAR(16) NOT NULL,
             answer TEXT NOT NULL,
             beat BIGINT NOT NULL
@@ -61,7 +67,7 @@ final class Keeper
             return $this->kept($task->key) ?? $answer;
         }
         try {
-            $this->db->prepare("INSERT INTO {$this->table} (key, state, answer, beat) VALUES (?, ?, ?, ?)")
+            $this->db->prepare("INSERT INTO {$this->table} ({$this->key}, state, answer, beat) VALUES (?, ?, ?, ?)")
                 ->execute([$task->key, self::ANSWERED, Queue::json($answer->body), self::now()]);
             $this->db->commit();
         } catch (\PDOException $e) {
@@ -92,11 +98,11 @@ final class Keeper
         }
         if ($row !== null) {
             // A person said the dead claim did nothing: it is dropped
-            $this->db->prepare("DELETE FROM {$this->table} WHERE key = ? AND state = ?")
+            $this->db->prepare("DELETE FROM {$this->table} WHERE {$this->key} = ? AND state = ?")
                 ->execute([$task->key, self::CLAIMED]);
         }
         try {
-            $this->db->prepare("INSERT INTO {$this->table} (key, state, answer, beat) VALUES (?, ?, '', ?)")
+            $this->db->prepare("INSERT INTO {$this->table} ({$this->key}, state, answer, beat) VALUES (?, ?, '', ?)")
                 ->execute([$task->key, self::CLAIMED, $task->until]);
         } catch (\PDOException) {
             // The loser of a race for the claim does not act
@@ -104,12 +110,12 @@ final class Keeper
         }
         $answer = $step($task);
         if (!$answer->isValue()) {
-            $this->db->prepare("DELETE FROM {$this->table} WHERE key = ? AND state = ?")
+            $this->db->prepare("DELETE FROM {$this->table} WHERE {$this->key} = ? AND state = ?")
                 ->execute([$task->key, self::CLAIMED]);
 
             return $answer;
         }
-        $this->db->prepare("UPDATE {$this->table} SET state = ?, answer = ? WHERE key = ?")
+        $this->db->prepare("UPDATE {$this->table} SET state = ?, answer = ? WHERE {$this->key} = ?")
             ->execute([self::ANSWERED, Queue::json($answer->body), $task->key]);
 
         return $answer;
@@ -136,7 +142,7 @@ final class Keeper
      */
     public function forget(string $key): void
     {
-        $this->db->prepare("DELETE FROM {$this->table} WHERE key = ?")->execute([$key]);
+        $this->db->prepare("DELETE FROM {$this->table} WHERE {$this->key} = ?")->execute([$key]);
     }
 
     /**
@@ -162,7 +168,7 @@ final class Keeper
      */
     private function row(string $key): ?array
     {
-        $statement = $this->db->prepare("SELECT state, answer, beat FROM {$this->table} WHERE key = ?");
+        $statement = $this->db->prepare("SELECT state, answer, beat FROM {$this->table} WHERE {$this->key} = ?");
         $statement->execute([$key]);
         $row = $statement->fetch(\PDO::FETCH_ASSOC);
         if (!is_array($row)) {

@@ -35,6 +35,10 @@ type Keeper struct {
 	// Numbered says the database writes its parameters $1, $2, as
 	// Postgres does; otherwise ?, as SQLite and MySQL do
 	Numbered bool
+	// MySQL says the database quotes its names with backticks, as MySQL
+	// and MariaDB do; key is a reserved word there. It need not be said
+	// of a database opened with a MySQL driver, which is told by its type
+	MySQL bool
 }
 
 // What is under a key.
@@ -50,9 +54,24 @@ func (k *Keeper) table() string {
 	return k.Table
 }
 
-// q writes a query's parameters as the database does.
+// mysql says whether the database quotes its names with backticks: as
+// the Keeper says, or as its driver's type tells, such as go-sql-driver's
+// *mysql.MySQLDriver.
+func (k *Keeper) mysql() bool {
+	if k.MySQL {
+		return true
+	}
+	return k.DB != nil && strings.Contains(strings.ToLower(fmt.Sprintf("%T", k.DB.Driver())), "mysql")
+}
+
+// q writes a query's names and parameters as the database does. The
+// queries quote the key column with double quotes, as SQLite and Postgres
+// do; MySQL, where key is a reserved word, quotes it with backticks.
 func (k *Keeper) q(query string) string {
 	query = strings.ReplaceAll(query, "flow_steps", k.table())
+	if k.mysql() {
+		query = strings.ReplaceAll(query, `"key"`, "`key`")
+	}
 	if !k.Numbered {
 		return query
 	}
@@ -72,7 +91,7 @@ func (k *Keeper) q(query string) string {
 // Setup makes the table of answers, if it is not there.
 func (k *Keeper) Setup(ctx context.Context) error {
 	_, err := k.DB.ExecContext(ctx, k.q(`CREATE TABLE IF NOT EXISTS flow_steps (
-		key    VARCHAR(255) PRIMARY KEY,
+		"key"  VARCHAR(255) PRIMARY KEY,
 		state  VARCHAR(16) NOT NULL,
 		answer TEXT NOT NULL,
 		beat   BIGINT NOT NULL
@@ -92,7 +111,7 @@ func (k *Keeper) read(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, key string) (*row, error) {
 	var r row
-	err := q.QueryRowContext(ctx, k.q(`SELECT state, answer, beat FROM flow_steps WHERE key = ?`), key).Scan(&r.state, &r.answer, &r.beat)
+	err := q.QueryRowContext(ctx, k.q(`SELECT state, answer, beat FROM flow_steps WHERE "key" = ?`), key).Scan(&r.state, &r.answer, &r.beat)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -154,7 +173,7 @@ func (k *Keeper) once(ctx context.Context, step StepFunc, task *Task) Answer {
 	if err != nil {
 		return Failure(err)
 	}
-	if _, err := tx.ExecContext(ctx, k.q(`INSERT INTO flow_steps (key, state, answer, beat) VALUES (?, ?, ?, ?)`),
+	if _, err := tx.ExecContext(ctx, k.q(`INSERT INTO flow_steps ("key", state, answer, beat) VALUES (?, ?, ?, ?)`),
 		task.Key, answered, string(data), time.Now().UnixMilli()); err != nil {
 		// Another delivery of it won the key: its answer stands, and this
 		// one's effect goes with the transaction
@@ -190,11 +209,11 @@ func (k *Keeper) started(ctx context.Context, step StepFunc, task *Task) Answer 
 		return Answer{Unknown: true}
 	case r != nil:
 		// A person said the dead claim did nothing: it is dropped
-		if _, err := k.DB.ExecContext(ctx, k.q(`DELETE FROM flow_steps WHERE key = ? AND state = ?`), task.Key, claimed); err != nil {
+		if _, err := k.DB.ExecContext(ctx, k.q(`DELETE FROM flow_steps WHERE "key" = ? AND state = ?`), task.Key, claimed); err != nil {
 			return Failure(err)
 		}
 	}
-	if _, err := k.DB.ExecContext(ctx, k.q(`INSERT INTO flow_steps (key, state, answer, beat) VALUES (?, ?, ?, ?)`),
+	if _, err := k.DB.ExecContext(ctx, k.q(`INSERT INTO flow_steps ("key", state, answer, beat) VALUES (?, ?, ?, ?)`),
 		task.Key, claimed, "", task.Until); err != nil {
 		// The loser of a race for the claim does not act
 		return Answer{Working: true}
@@ -203,14 +222,14 @@ func (k *Keeper) started(ctx context.Context, step StepFunc, task *Task) Answer 
 
 	if answer.Value == nil {
 		// Not done: the claim goes, and the next attempt acts again
-		k.DB.ExecContext(context.Background(), k.q(`DELETE FROM flow_steps WHERE key = ? AND state = ?`), task.Key, claimed)
+		k.DB.ExecContext(context.Background(), k.q(`DELETE FROM flow_steps WHERE "key" = ? AND state = ?`), task.Key, claimed)
 		return answer
 	}
 	data, err := json.Marshal(answer)
 	if err != nil {
 		return Failure(err)
 	}
-	if _, err := k.DB.ExecContext(context.Background(), k.q(`UPDATE flow_steps SET state = ?, answer = ? WHERE key = ?`),
+	if _, err := k.DB.ExecContext(context.Background(), k.q(`UPDATE flow_steps SET state = ?, answer = ? WHERE "key" = ?`),
 		answered, string(data), task.Key); err != nil {
 		return Failure(err)
 	}
@@ -237,7 +256,7 @@ func (k *Keeper) probe(ctx context.Context, task *Task) Answer {
 // Forget drops what is under a key: a person said what happened, from
 // the application's side.
 func (k *Keeper) Forget(ctx context.Context, key string) error {
-	_, err := k.DB.ExecContext(ctx, k.q(`DELETE FROM flow_steps WHERE key = ?`), key)
+	_, err := k.DB.ExecContext(ctx, k.q(`DELETE FROM flow_steps WHERE "key" = ?`), key)
 	return err
 }
 
