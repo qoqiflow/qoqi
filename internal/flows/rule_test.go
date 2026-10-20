@@ -72,6 +72,14 @@ impl Flow<Void> for Reminder {
     }
 }`, "F0001 6: a flow reaches the network outside a step")
 
+	// Listening, on whatever host, is the network too
+	expectFound(t, reminder+`
+impl Flow<Void> for Reminder {
+    fn run() {
+        http.listen(0, "0.0.0.0");
+    }
+}`, "F0001 6: a flow reaches the network outside a step")
+
 	expectFound(t, reminder+`
 impl Flow<Void> for Reminder {
     fn run() {

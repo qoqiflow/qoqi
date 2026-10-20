@@ -1151,8 +1151,8 @@ http.serve(8080, app.handler()).expect("a free port");
 
 | Function / method | Result |
 |-------------------|--------|
-| `http.serve(port, handler)` | Answers every request, each in a [task](#stdtask) of its own, for as long as the program runs. It returns only if the port cannot be listened on: nothing can close the server it makes |
-| `http.listen(port) -> Result<Server, Error>` | Port 0 lets the system choose: `server.port` |
+| `http.serve(port, handler, host = "127.0.0.1")` | Answers every request, each in a [task](#stdtask) of its own, for as long as the program runs. It returns only if the port cannot be listened on: nothing can close the server it makes |
+| `http.listen(port, host = "127.0.0.1") -> Result<Server, Error>` | Port 0 lets the system choose: `server.port`. `server.host` is the IP listened on |
 | `server.handleAll(handler)` | Answers every request, each in a task of its own, until the server is closed |
 | `server.handle(count, handler)`, `next()`, `reply(response)` | That many requests one after the other, or one at a time by hand. `next()` is `null` once the server is closed |
 | `server.nextWithin(milliseconds) -> Request?` | `next`, giving up after that long: `null` if no request came |
@@ -1184,7 +1184,15 @@ wait serving;       // handleAll has returned
 
 While it closes, a request that comes in, or one still unanswered after ten seconds, is answered 503, `the server is closing`. Once `close` returns, the port is free.
 
-With `serve` and `handleAll` a handler that waits, for another server or for the clock, does not keep the other requests waiting; handlers still run one at a time between their waits ([tasks.md](tasks.md)). `handle` answers one request after the other. The server listens on this machine only (`127.0.0.1`).
+With `serve` and `handleAll` a handler that waits, for another server or for the clock, does not keep the other requests waiting; handlers still run one at a time between their waits ([tasks.md](tasks.md)). `handle` answers one request after the other.
+
+**Where a server listens.** On this machine only, `127.0.0.1`, unless told another host, an IP or a name: `"0.0.0.0"` is every interface of IPv4, `"::"` every interface of IPv6. A webhook receiver that a container or another machine must reach listens on one of these:
+
+```rust
+http.serve(8080, app.handler(), "0.0.0.0").expect("a free port");
+```
+
+A server listening on another address than `127.0.0.1` can be asked by anyone who can reach the machine: check who asks (a token, a signature) before doing what they ask. A host that is not one is an `Error` of kind `BadUrl`, a name no machine has `UnknownHost`, an address that is not this machine's `Other`; the error says `cannot listen on port 8080 of 10.1.2.3: ...`.
 
 
 ---

@@ -472,21 +472,58 @@ func TestNativeHttpClient(t *testing.T) {
 	problem("refused", "GET", address, 2000)
 }
 
-func TestNativeHttpServer(t *testing.T) {
+// A server listens where it is told: 0.0.0.0 is every interface of IPv4,
+// and says so; a host that is not one is refused, without listening
+func TestNativeHttpServerHost(t *testing.T) {
 	s := newSession(t)
-	opened, err := callNative(t, s.machine, "std.http.open", 0)
+	opened, err := callNative(t, s.machine, "std.http.open", 0, "0.0.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	pair := (*ArrayObj)(ptrFromValue(opened))
-	id, port := int(pair.Get(0).AsInt()), int(pair.Get(1).AsInt())
+	parts := strings.Split(FormatValue(opened), `"`)
+	if len(parts) != 7 || parts[5] != "0.0.0.0" {
+		t.Fatalf("expected a number, a port and 0.0.0.0, got %s", FormatValue(opened))
+	}
+	id, _ := strconv.Atoi(parts[1])
+	port, _ := strconv.Atoi(parts[3])
+	if port <= 0 {
+		t.Fatalf("expected a port, got %s", FormatValue(opened))
+	}
+	go http.Get(fmt.Sprintf("http://127.0.0.1:%d/here", port))
+	if got := s.call("std.http.accept", id, 5000); !strings.HasPrefix(got, `["1", "GET", "/here"`) {
+		t.Errorf("expected the request through 0.0.0.0, got %s", got)
+	}
+	s.call("std.http.respondTo", id, 1, 204, []string{}, "")
+	s.call("std.http.shut", id)
+
+	for _, host := range []string{"", "not a host!", "http://x", "a/b", "[::1]"} {
+		s.expect("null", "std.http.open", 0, host)
+		if got := s.call("std.http.problem"); !strings.HasPrefix(got, `["bad url", `) {
+			t.Errorf("%q: expected a bad url, got %s", host, got)
+		}
+	}
+}
+
+func TestNativeHttpServer(t *testing.T) {
+	s := newSession(t)
+	opened, err := callNative(t, s.machine, "std.http.open", 0, "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Its number, its port and the IP it listens on, as text
+	parts := strings.Split(FormatValue(opened), `"`)
+	if len(parts) != 7 || parts[5] != "127.0.0.1" {
+		t.Fatalf("expected a number, a port and 127.0.0.1, got %s", FormatValue(opened))
+	}
+	id, _ := strconv.Atoi(parts[1])
+	port, _ := strconv.Atoi(parts[3])
 	if port <= 0 {
 		t.Fatalf("expected a port, got %s", FormatValue(opened))
 	}
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	// The port is taken now
-	s.expect("null", "std.http.open", port)
+	s.expect("null", "std.http.open", port, "127.0.0.1")
 	s.expect(`["in use", "the port is taken"]`, "std.http.problem")
 
 	// Nobody asked yet

@@ -665,6 +665,59 @@ func TestServerClosesGracefully(t *testing.T) {
 	)
 }
 
+// A server listens on this machine only unless told another host: on
+// 0.0.0.0 it is reached through every interface and says so in
+// server.host, and a host that is not one is an Error, not a crash
+func TestServerHost(t *testing.T) {
+	expectProgram(t, `
+		import std.http;
+		import std.http.{Request, Response, ErrorKind};
+		import std.task;
+
+		fn answerOf(asked: String) -> String {
+			return match http.get(asked) {
+				case Ok(response): "${response.status} [${response.body}]";
+				case Err(error): "no answer: ${error.kind}";
+			};
+		}
+
+		fn main() -> Int {
+			// The default is loopback only
+			let local = http.listen(0).expect("a free port");
+			println(local.host, local.port > 0);
+			local.close();
+
+			// Every interface, port 0 still told
+			let open = http.listen(0, "0.0.0.0").expect("a free port");
+			let serving = task.run(fn() {
+				open.handleAll(fn(request: Request) -> Response { return http.text("from ${request.path}"); });
+			});
+			println(open.host, open.port > 0, answerOf("http://127.0.0.1:${open.port}/any"));
+			open.close();
+			wait serving;
+
+			// A host that is not one, for listen and for serve
+			for host in ["", "not a host!", "http://x"] {
+				match http.listen(0, host) {
+					case Ok(_): { println("listened on [${host}]"); }
+					case Err(error): { println(error.kind, error.describe()); }
+				}
+			}
+			match http.serve(8080, fn(request: Request) -> Response { return http.text("no"); }, "a/b") {
+				case Ok(_): { println("served"); }
+				case Err(error): { println(error.kind, error.url); }
+			}
+			return 0;
+		}`,
+		"127.0.0.1 true",
+		"0.0.0.0 true 200 [from /any]",
+		"BadUrl cannot listen on port 0 of : the host is empty: 127.0.0.1 is this machine only, 0.0.0.0 every interface",
+		`BadUrl cannot listen on port 0 of not a host!: "not a host!" is not a host: an IP such as 0.0.0.0 or a name is`,
+		`BadUrl cannot listen on port 0 of http://x: "http://x" is not a host: an IP such as 0.0.0.0 or a name is`,
+		"BadUrl port 8080 of a/b",
+	)
+}
+
 // A HEAD request is answered by the GET route of its path, without a
 // body; a route of its own for HEAD comes first
 func TestHeadAnsweredByGetRoute(t *testing.T) {

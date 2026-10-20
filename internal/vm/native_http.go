@@ -215,17 +215,39 @@ func init() {
 			return vm.newStringArray(parts)
 		}},
 
-		// Starts listening on a port of this machine; 0 lets the system
-		// choose one. Gives the server's number and its port, or null.
-		native{"open", 1, func(vm *VM, args []Value) (Value, error) {
+		// Starts listening on a port of an address of this machine, an IP
+		// or a name: 127.0.0.1 for this machine only, 0.0.0.0 or :: for
+		// every interface. Port 0 lets the system choose one. Gives the
+		// server's number, its port and the IP it listens on, or null.
+		native{"open", 2, func(vm *VM, args []Value) (Value, error) {
 			port, err := argInt(args, 0)
 			if err != nil {
 				return NewNull(), err
 			}
-			listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+			host, err := argString(args, 1)
+			if err != nil {
+				return NewNull(), err
+			}
+			// An empty host would be every interface to Go: never by mistake
+			if reason := badHost(host); reason != "" {
+				return vm.refused("bad url", reason)
+			}
+			// An IP listens on its own network: 0.0.0.0 is IPv4 and says so,
+			// where Go would take it for every interface of both
+			network := "tcp"
+			if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+				network = "tcp4"
+			} else if ip != nil {
+				network = "tcp6"
+			}
+			listener, err := net.Listen(network, net.JoinHostPort(host, strconv.FormatInt(port, 10)))
 			if err != nil {
 				if strings.Contains(err.Error(), "address already in use") {
 					return vm.refused("in use", "the port is taken")
+				}
+				var notFound *net.DNSError
+				if errors.As(err, &notFound) {
+					return vm.refused("unknown host", fmt.Sprintf("no machine is called %q", host))
 				}
 				var wrapped *net.OpError
 				reason := err.Error()
@@ -234,8 +256,9 @@ func init() {
 				}
 				return vm.refused("other", reason)
 			}
+			address := listener.Addr().(*net.TCPAddr)
 			server := &httpServer{
-				port:     listener.Addr().(*net.TCPAddr).Port,
+				port:     address.Port,
 				waiting:  make(chan *exchange),
 				accepted: map[int64]*exchange{},
 				closed:   make(chan struct{}),
@@ -249,7 +272,7 @@ func init() {
 			}
 			vm.lastServer++
 			vm.servers[vm.lastServer] = server
-			return vm.newIntArray([]int64{vm.lastServer, int64(server.port)})
+			return vm.newStringArray([]string{strconv.FormatInt(vm.lastServer, 10), strconv.Itoa(server.port), address.IP.String()})
 		}},
 		// The next request: its number, its method, path, query, body and
 		// sender, then its headers. Waits for one, at most `timeout`
@@ -375,4 +398,22 @@ func init() {
 		}},
 		problemNative,
 	)
+}
+
+// badHost says why a host cannot be listened on, or "" if it may be: an
+// IP, or a name of letters, digits, dots, hyphens and underscores.
+func badHost(host string) string {
+	if host == "" {
+		return "the host is empty: 127.0.0.1 is this machine only, 0.0.0.0 every interface"
+	}
+	if net.ParseIP(host) != nil {
+		return ""
+	}
+	for _, c := range host {
+		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '-' || c == '_'
+		if !ok {
+			return fmt.Sprintf("%q is not a host: an IP such as 0.0.0.0 or a name is", host)
+		}
+	}
+	return ""
 }

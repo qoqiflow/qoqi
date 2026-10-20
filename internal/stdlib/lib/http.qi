@@ -343,21 +343,38 @@ pub fn redirect(to: String) -> Response {
 pub struct Server {
     priv id: Int;
     port: Int;
+    host: String;        // the IP it listens on: "127.0.0.1", "0.0.0.0", "::"
     priv last: Int = 0;  // the request `next` gave last
 }
 
 // Starts listening on a port of this machine. Port 0 lets the system
 // choose a free one: server.port says which.
-pub fn listen(port: Int) -> Result<Server, Error> {
-    let opened = open(port);
+//
+// The host is the address listened on, an IP or a name. The default,
+// 127.0.0.1, is this machine only. "0.0.0.0" is every interface, "::"
+// every interface of IPv6: the server can then be reached from other
+// machines and from containers, by anyone who can reach this one, so
+// what it answers must be fit for them. A host that is not one is a
+// BadUrl error, a name no machine has an UnknownHost.
+pub fn listen(port: Int, host: String = "127.0.0.1") -> Result<Server, Error> {
+    let opened = open(port, host);
 
     if opened == null {
         let failed = noAnswer("port ${port}");
+
+        if host != "127.0.0.1" {
+            failed.url = "port ${port} of ${host}";
+        }
+
         failed.listening = true;
         return Err(failed);
     }
 
-    return Ok(Server { id: opened[0], port: opened[1] });
+    return Ok(Server {
+        id: opened[0].parseInt() ?? 0,
+        port: opened[1].parseInt() ?? 0,
+        host: opened[2],
+    });
 }
 
 impl Server {
@@ -459,9 +476,13 @@ fn answerOf(request: Request, handler: fn(Request) -> Response) -> Response {
 // not keep the others waiting. It only returns if the port cannot be
 // listened on: nothing else holds the server, so nothing can close it. A
 // server to be stopped is made with listen, answered with handleAll in a
-// task, and closed.
-pub fn serve(port: Int, handler: fn(Request) -> Response) -> Result<Server, Error> {
-    return listen(port).map(fn(server: Server) -> Server {
+// task, and closed. The host is listen's: this machine only by default.
+pub fn serve(
+    port: Int,
+    handler: fn(Request) -> Response,
+    host: String = "127.0.0.1",
+) -> Result<Server, Error> {
+    return listen(port, host).map(fn(server: Server) -> Server {
         server.handleAll(handler);
         return server;
     });
@@ -679,7 +700,7 @@ extern fn exchange(
     timeout: Int,
 ) -> [String]?;
 
-extern fn open(port: Int) -> [Int]?;
+extern fn open(port: Int, host: String) -> [String]?;
 extern fn accept(server: Int, timeout: Int) -> [String]?;
 extern fn respondTo(server: Int, request: Int, status: Int, headers: [String], body: String);
 extern fn shut(server: Int);
