@@ -176,7 +176,7 @@ The tests of a draft, `name_test.qi` files, run by the daemon as `qoqi test` run
 
 ### `POST /api/workspace/{program}/try`, `GET|DELETE /api/sandboxes/{id}`, `POST /api/sandboxes/{id}/{advance|send|cancel|replace}`
 
-A flow of a draft tried: an instance run in memory with a clock that moves only when asked, as `flow.test` does. `try` takes `{"flow", "fields", "replace": {"step": value}, "files"}`; then `advance {"ms"}`, `send {"inbox", "message"}`, `cancel {"reason"}`, `replace {"step", "value"}` (`null` for the step to run as it is again). Each answers the trial: the instance as `GET /api/instances/{id}` shows one, its clock, how many times each step ran, what happened. A step not answered for runs for real. A trial is its user's; it is forgotten after half an hour unused.
+A flow of a draft tried: an instance run in memory with a clock that moves only when asked, as `flow.test` does. `try` takes `{"flow", "fields", "replace": {"step": value}, "files"}`; then `advance {"ms"}` (that many milliseconds pass as in `trial.advance`: each timer due within them fires at its moment, those set on waking too), `send {"inbox", "message"}`, `cancel {"reason"}`, `replace {"step", "value"}` (`null` for the step to run as it is again). Each answers the trial: the instance as `GET /api/instances/{id}` shows one, its clock, how many times each step ran, what happened. A step not answered for runs for real. A trial is its user's; it is forgotten after half an hour unused.
 
 ### `GET /api/stats?days=365&tz=60&flow=`
 

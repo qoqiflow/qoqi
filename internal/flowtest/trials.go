@@ -236,8 +236,7 @@ func init() {
 		if ms < 0 {
 			return vm.NewNull(), fmt.Errorf("a trial's clock goes forward, not by %d", ms)
 		}
-		t.now += ms
-		return vm.NewNull(), t.run()
+		return vm.NewNull(), flowrt.Pass(t.store, &t.now, ms, t.run)
 	})
 	vm.RegisterNative("std.flow.trialCancel", 2, func(host *vm.VM, args []vm.Value) (vm.Value, error) {
 		t, err := find(host, args, 0)

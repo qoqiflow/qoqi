@@ -8,6 +8,7 @@ import (
 
 	"github.com/qoqiflow/qoqi/internal/compiler"
 	lerrors "github.com/qoqiflow/qoqi/internal/errors"
+	"github.com/qoqiflow/qoqi/internal/flowrt"
 	"github.com/qoqiflow/qoqi/internal/memguard"
 	"github.com/qoqiflow/qoqi/internal/vm"
 )
@@ -126,6 +127,88 @@ fn main() {
 	}
 	if !strings.Contains(out, "WORLD check fake-A1") || strings.Contains(out, "WORLD initiate") || strings.Contains(out, "WORLD wire") {
 		t.Errorf("only the steps not replaced reach the world:\n%s", out)
+	}
+}
+
+const escalation = `
+struct Escalation { tries: Int; }
+
+impl Flow<[Int]> for Escalation {
+    fn run() -> [Int] {
+        let start = time.now();
+        let woke: [Int] = [];
+        for i in 0..self.tries {
+            retry(i);
+            wait time.after(2.minutes());
+            woke.push((time.now() - start) / 60000);
+        }
+        wait time.after(10.minutes());
+        woke.push((time.now() - start) / 60000);
+        wait time.after(30.minutes());
+        woke.push((time.now() - start) / 60000);
+        escalate();
+        return woke;
+    }
+}
+
+step fn retry(i: Int) -> Int { return i; }
+step fn escalate() -> Bool { return true; }
+`
+
+// advance lets the span pass: a timer the instance sets on waking fires
+// in the same advance when it is due within it, and the instance sees the
+// clock at the moment each timer was due, minutes 2, 4, 6, 16 and 46 here.
+func TestAnAdvanceFiresTheTimersSetWithinIt(t *testing.T) {
+	out, err := run(t, flows+escalation+`
+fn main() {
+    let trial = flow.test(Escalation { tries: 3 });
+    trial.go();
+    trial.advance(1.hours());
+    println(trial.status(), trial.calls(retry), trial.calls(escalate), trial.result());
+
+    let edge = flow.test(Escalation { tries: 3 });
+    edge.go();
+    edge.advance(45.minutes());
+    println(edge.status(), edge.calls(retry), edge.calls(escalate));
+    edge.advance(1.minutes());
+    println(edge.status(), edge.result());
+}
+`)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	want := "done 3 1 [2, 4, 6, 16, 46]\nwaiting 3 0\ndone [2, 4, 6, 16, 46]"
+	if strings.TrimSpace(out) != want {
+		t.Errorf("want:\n%s\ngot:\n%s", want, out)
+	}
+}
+
+// An instance that sets timers due at once, again and again, stops the
+// advance rather than running it forever.
+func TestAnAdvanceThatNeverSettles(t *testing.T) {
+	most := flowrt.MostWakes
+	flowrt.MostWakes = 2000
+	defer func() { flowrt.MostWakes = most }()
+	out, err := run(t, flows+`
+struct Ticker { n: Int; }
+impl Flow<Int> for Ticker {
+    fn run() -> Int {
+        let n = self.n;
+        while true {
+            wait time.after(1.milliseconds());
+            n += 1;
+        }
+        return n;
+    }
+}
+fn main() {
+    let trial = flow.test(Ticker { n: 0 });
+    trial.go();
+    trial.advance(1.hours());
+}
+`)
+	if err == nil || !strings.Contains(err.Error(), "woke 2000 times") {
+		t.Errorf("expected the advance stopped, got %v\n%s", err, out)
 	}
 }
 

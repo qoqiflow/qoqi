@@ -42,7 +42,7 @@ approvals_test.qi
 | `trial.` | What it does |
 |----------|--------------|
 | `go()` | Runs the instance until it waits for the clock, or ends |
-| `advance(length)` | Moves the trial's clock on, then runs what that wakes: `trial.advance(2.days())` |
+| `advance(length)` | Lets that much time pass: every timer due within it fires, at its moment, those set on waking too: `trial.advance(2.days())` |
 | `send(inbox, message)` | Sends a message on one of the instance's inboxes, as the world would, then runs what it wakes |
 | `cancel(reason)` | Cancels the instance, as a person would: it ends `failed`, once its undos have run |
 | `replace(step, function)` | In this trial, calls of the step go to the function, which takes what the step takes and returns what it returns. A step not replaced runs as it is |
@@ -52,6 +52,14 @@ approvals_test.qi
 | `stopped()` | Why it stopped, if it did |
 
 `go`, `advance`, `send`, `cancel` and `replace` return the trial, so they chain: `flow.test(order).replace(charge, fake).go()`.
+
+### How the clock moves
+
+`advance(length)` lets `length` pass as it would in production. The clock moves to the earliest timer due within it, the instance runs until it waits again, and so on, timer after timer, until none is due before the end; then the clock is set at the end. A timer the flow sets on waking fires in the same `advance` when it falls within it, and `time.now()` in the flow, at each wake, is the moment that timer was due at.
+
+So a flow that retries every 2 minutes three times, then waits 10 minutes, then 30, then escalates, has escalated after one `trial.advance(1.hours())`, minute 46, just as after six `trial.advance(10.minutes())`. `trial.advance(45.minutes())` leaves it waiting for the last timer.
+
+An instance that keeps setting timers due at once (`wait time.after(1.milliseconds())` in a loop) would never let the span end: after 100 000 wakes in one `advance` the test stops, saying so.
 
 ## Every crash
 

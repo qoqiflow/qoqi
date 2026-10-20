@@ -339,8 +339,10 @@ func (d *Daemon) actTrial(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusBadRequest, "advance", "a trial's clock goes forward, by some milliseconds")
 			return
 		}
-		b.now += asked.MS
 		b.say("the clock moved %s", span(asked.MS))
+		if err := flowrt.Pass(b.store, &b.now, asked.MS, b.settle); err != nil {
+			b.say("%v", err)
+		}
 	case "send":
 		message := asked.Message
 		if message, err = b.schema.ConformMessage(b.flow, asked.Inbox, message); err != nil {

@@ -443,3 +443,53 @@ func TestAFlowIsTriedFromADraft(t *testing.T) {
 		t.Fatalf("an instance in the store: %s", said)
 	}
 }
+
+const escalation = `import std.flow;
+import std.flow.{Flow};
+import std.time;
+
+struct Escalation {
+    tries: Int;
+}
+
+impl Flow<String> for Escalation {
+    fn run() -> String {
+        let start = time.now();
+        let woke = "";
+        for i in 0..self.tries {
+            wait time.after(2.minutes());
+            woke = woke + " ${(time.now() - start) / 60000}";
+        }
+        wait time.after(10.minutes());
+        woke = woke + " ${(time.now() - start) / 60000}";
+        wait time.after(30.minutes());
+        println("escalated");
+        return woke + " ${(time.now() - start) / 60000}";
+    }
+}
+
+fn main() {}
+`
+
+// A trial's clock moved on lets the span pass: the timers the flow sets on
+// waking fire in it when they are due within it, each seen at its moment.
+func TestATrialFromADraftLetsTheSpanPass(t *testing.T) {
+	d, server := kept(t)
+	body, _ := json.Marshal(map[string]any{"files": map[string]string{"escalation.qi": escalation}, "fields": map[string]int{"tries": 3}})
+	status, said := call(t, d, server, "POST", "/api/workspace/escalation/try", string(body))
+	var trial flowd.SandboxView
+	json.Unmarshal([]byte(said), &trial)
+	if status != http.StatusCreated || trial.Instance.Status != "waiting" {
+		t.Fatalf("try: %d %s", status, said)
+	}
+	status, said = call(t, d, server, "POST", "/api/sandboxes/"+trial.ID+"/advance", `{"ms": 3600000}`)
+	json.Unmarshal([]byte(said), &trial)
+	if status != 200 || trial.Instance.Status != "done" || string(trial.Instance.Result) != `" 2 4 6 16 46"` || trial.Elapsed != 3600000 {
+		t.Fatalf("advance: %d %s", status, said)
+	}
+	// It escalated at minute 46, fourteen before the clock's end
+	clock, _ := time.Parse(time.RFC3339Nano, trial.Clock)
+	if len(trial.Instance.Output) != 1 || trial.Instance.Output[0].At != clock.Add(-14*time.Minute).Format(time.RFC3339Nano) {
+		t.Fatalf("what it printed, at %s: %+v", trial.Clock, trial.Instance.Output)
+	}
+}

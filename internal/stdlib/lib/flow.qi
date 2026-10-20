@@ -346,7 +346,13 @@ impl<T> Trial<T> {
         return self;
     }
 
-    // Moves the clock on, then runs what that wakes.
+    // Lets that much time pass: moves the clock to the earliest timer due
+    // within it, runs the instance until it waits again, and so on until
+    // no timer is due before the end, where the clock is left. A timer set
+    // on waking fires too when it falls within the span, and time.now() at
+    // each wake is the moment that timer was due at. One advance of an
+    // hour is six of ten minutes. The test stops if the instance wakes more
+    // than 100000 times in one advance: timers due at once, again and again.
     pub fn advance(length: Duration) -> Trial<T> {
         trialAdvance(self.id, length.inMilliseconds());
         return self;

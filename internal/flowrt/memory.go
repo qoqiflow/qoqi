@@ -316,6 +316,54 @@ func (m *Memory) AnyWaiting() bool {
 	return false
 }
 
+// NextWake is the earliest moment an instance waiting for the clock is
+// due at, and false if none is: one waiting only for other instances or
+// for a message waits for no moment.
+func (m *Memory) NextWake() (int64, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next, found := int64(0), false
+	for _, inst := range m.instances {
+		if inst.Status == Waiting && inst.WakeAt < Never && (!found || inst.WakeAt < next) {
+			next, found = inst.WakeAt, true
+		}
+	}
+	return next, found
+}
+
+// MostWakes is how many times instances on a clock of their own may wake
+// while it is moved on once: one that sets timers due at once, again and
+// again, is stopped there rather than run forever. A test may lower it.
+var MostWakes = 100000
+
+// Pass lets a span pass on a clock that only moves when it is told to, as
+// the clock of a trial: it moves the clock to the earliest moment an
+// instance is due at within the span, runs what that wakes until nothing
+// is due, and goes on so until nothing is due within the span, then sets
+// the clock at its end. A timer an instance sets on waking fires in the
+// same span if it is due within it, and the instance sees the clock at
+// the moment it was due at.
+func Pass(store *Memory, now *int64, span int64, run func() error) error {
+	end := *now + span
+	for wakes := 0; ; wakes++ {
+		at, ok := store.NextWake()
+		if !ok || at > end {
+			break
+		}
+		if wakes == MostWakes {
+			return fmt.Errorf("the clock moved on %d ms, and the instances woke %d times in that span without settling: do they set timers due at once, again and again?", span, MostWakes)
+		}
+		if at > *now {
+			*now = at
+		}
+		if err := run(); err != nil {
+			return err
+		}
+	}
+	*now = end
+	return run()
+}
+
 func (m *Memory) PutResult(key string, kept Kept) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
