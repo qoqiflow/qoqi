@@ -1,5 +1,7 @@
 # Durable workflows without replay
 
+> **Before you read.** Qoqi Flow is a prototype: one idea I had, built by one person in a few weeks, with heavy use of AI for both the code and the documentation. I have some background in compilers, but I am not a compiler or VM expert, and this is not presented as the best or a revolutionary solution. It is an experiment in one question: what does a durable workflow engine look like when it owns its language? See [where the project stands](#where-the-project-stands) before relying on any of it.
+
 Every durable workflow engine you have used asks the same thing of your code: be deterministic. Do not read the clock. Do not draw a random number. Do not range over a map. Do not start a goroutine. And when you change the code, make sure every workflow already running still takes the same path through it, or keep the old code around until the last of them is done.
 
 That rule is not a quirk of one product. It is the price of the technique they all use to survive a crash: **replay**. Qoqi Flow does not replay. This post is about what it does instead, what that costs, and why it needs its own language to do it.
@@ -128,7 +130,15 @@ fn testEveryCrash() {
 
 A new language is a real cost, and we know it. Two things soften it. Only the flow is written in Qoqi: a step that needs your code, your database or your models stays in your service, in any language that answers Qoqi's protocol, a signed HTTP POST; `qoqi gen` writes the typed interfaces for Go, PHP and TypeScript. And the language is small and ordinary on purpose: structs, enums, `match`, `Result`, closures, tasks.
 
-The rest, plainly. The whole state is written at each save, at most once per ten milliseconds while steps are under way; writing only what changed is for later. An instance that loops and waits with no `stage` in its loop keeps everything it did since it started, and the compiler warns about it (`W0011`). And Qoqi Flow is at its first release: it works end to end and is tested by crashing it on purpose, but it does not have years of production behind it yet.
+The rest, plainly. The whole state is written at each save, at most once per ten milliseconds while steps are under way; writing only what changed is for later. An instance that loops and waits with no `stage` in its loop keeps everything it did since it started, and the compiler warns about it (`W0011`). 
+## Where the project stands
+
+Qoqi Flow is an early prototype, not production software.
+
+- **What works.** The compiler, the virtual machine and the daemon run end to end. Instances are kept in SQLite, Postgres or MySQL, written in transactions, and their state is plain JSON you can read at any time. Steps can be carried out by applications in Go, PHP and TypeScript through their SDKs. The console runs, edits, tests and deploys flows. It is covered by unit and end-to-end tests, including the ones that crash a flow after every write.
+- **What it is not yet.** It has never run in production. It has not been tested with millions of instances, nor under real load. Its security has not been audited. There is no Python SDK, so it is not usable for most AI-agent stacks today.
+- **What will change.** The language, the format of the saved state, the protocol with applications and the HTTP API may all change between versions, without a migration path.
+- **Who is behind it.** One person, with AI. Expect rough edges, and treat it as something to try and discuss, not to depend on.
 
 ## Try it
 

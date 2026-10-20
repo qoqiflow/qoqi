@@ -76,7 +76,7 @@ $ qoqi result expense:1
 Approved("grace")
 ```
 
-> **Status: early.** The language, the runtime and the daemon work end to end, with tests. The interfaces may still change. The documentation is also at [qoqi.dev](https://qoqi.dev).
+> **Status: early prototype, not for production.** Qoqi Flow is one idea, built by one person in a few weeks, with heavy use of AI for the code and the documentation. The compiler, the runtime and the daemon work end to end and are tested, crash tests included, on SQLite, Postgres and MySQL. It has never run in production, has not been load-tested or security-audited, and has no Python SDK yet. The language, the saved state, the application protocol and the HTTP API may change without a migration path. Try it, discuss it, don't depend on it. The documentation is also at [qoqi.dev](https://qoqi.dev).
 
 ## Why
 
