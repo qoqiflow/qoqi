@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -530,5 +531,65 @@ func TestTakingAProgramAway(t *testing.T) {
 	}
 	if _, body := call(t, again.d, again.server, "GET", "/api/instances/t/result", ""); strings.TrimSpace(body) != `"ada 0"` {
 		t.Errorf("the instance before: %s", body)
+	}
+}
+
+// moduleProgram is a program whose flows are in the modules it imports:
+// main.qi, and the files given, by name.
+func moduleProgram(t *testing.T, modules map[string]string) (*flowd.Package, error) {
+	t.Helper()
+	files := map[string]string{"main.qi": "import tally;\n\nfn main() {}\n"}
+	for name, src := range modules {
+		files[name] = src
+	}
+	read := func(path string) (string, error) {
+		if src, ok := files[filepath.Base(path)]; ok {
+			return src, nil
+		}
+		return "", fmt.Errorf("no file %s", path)
+	}
+	errs := lerrors.NewHandler()
+	result := compiler.CompileWith(files["main.qi"], "main.qi", read, errs)
+	if errs.HasErrors() {
+		t.Fatalf("%v", errs.Diagnostics)
+	}
+	return flowd.PackageOf("main", "main.qi", result.AST, result.Chunk, files)
+}
+
+// A flow declared in a module is the program's: deployed with it, started
+// by its name, sent to, and what its run returns is kept.
+func TestAFlowOfAModuleIsServedByTheProgramThatImportsIt(t *testing.T) {
+	asModule := strings.Replace(tally(1), "\nfn main() {}\n", "", 1)
+	pkg, err := moduleProgram(t, map[string]string{"tally.qi": asModule})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(pkg.Flows, ",") != "tally.Tally" || len(pkg.Schema.Flows) != 1 || pkg.Schema.Flows[0].Name != "tally.Tally" {
+		t.Fatalf("the flows of the program: %v", pkg.Flows)
+	}
+
+	e := newEmptyDaemon(t, map[string]*flowrt.Memory{}, flowrt.NewMemory())
+	status, body := e.deploy(t, false, pkg)
+	if status != http.StatusOK || !strings.Contains(body, `"tally.Tally"`) {
+		t.Fatalf("deploy: %d %s", status, body)
+	}
+	if status, body := call(t, e.d, e.server, "POST", "/api/instances", `{"flow": "Tally", "id": "t", "fields": {"owner": "ada"}}`); status != http.StatusCreated {
+		t.Fatalf("a start by the flow's name: %d %s", status, body)
+	}
+	e.send(t, "t", "one", "k1")
+	e.send(t, "t", "stop", "k2")
+	e.waitFor(t, "the instance to end", func() bool { return e.status(t, "t") == "done" })
+	_, body = call(t, e.d, e.server, "GET", "/api/instances/t", "")
+	var v flowd.Detail
+	json.Unmarshal([]byte(body), &v)
+	if v.Flow != "tally.Tally" || string(v.Result) != `"ada 1"` {
+		t.Errorf("got %s returning %s, want tally.Tally returning \"ada 1\"", v.Flow, v.Result)
+	}
+
+	// Two modules with a flow of one name: a start by the name could not
+	// tell which
+	_, err = moduleProgram(t, map[string]string{"tally.qi": "import other;\n\n" + asModule, "other.qi": asModule})
+	if err == nil || !strings.Contains(err.Error(), "main has two flows Tally") {
+		t.Errorf("two flows Tally: got %v", err)
 	}
 }

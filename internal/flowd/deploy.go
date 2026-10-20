@@ -85,6 +85,9 @@ func (d *Daemon) Deploy(pkg *Package, dry bool) (*Report, error) {
 	if pkg.Name == "" || len(pkg.Flows) == 0 {
 		return nil, &Refused{Program: pkg.Name, Why: []string{"a program deployed has a name and a flow"}}
 	}
+	if err := oneOfEachName(pkg.Name, pkg.Flows); err != nil {
+		return nil, &Refused{Program: pkg.Name, Why: []string{err.Error()}}
+	}
 	version := vm.Fingerprint(chunk)
 	report := &Report{Program: pkg.Name, Version: version}
 
@@ -95,15 +98,15 @@ func (d *Daemon) Deploy(pkg *Package, dry bool) (*Report, error) {
 			served = &programs[i]
 		}
 	}
-	// A flow belongs to one program
+	// A flow belongs to one program, and is started by its name
 	for _, p := range programs {
 		if p.Name == pkg.Name {
 			continue
 		}
 		for _, flow := range p.Flows {
 			for _, mine := range pkg.Flows {
-				if flow == mine {
-					return nil, &Refused{Program: pkg.Name, Why: []string{fmt.Sprintf("%s has a flow %s already: a flow belongs to one program", p.Name, flow)}}
+				if flows.FlowName(flow) == flows.FlowName(mine) {
+					return nil, &Refused{Program: pkg.Name, Why: []string{fmt.Sprintf("%s has a flow %s already: a flow belongs to one program", p.Name, flows.FlowName(flow))}}
 				}
 			}
 		}
@@ -335,10 +338,11 @@ func (d *Daemon) DeployAll(pkgs []*Package, dry bool) ([]*Report, error) {
 	owner := map[string]string{}
 	for _, pkg := range pkgs {
 		for _, flow := range pkg.Flows {
-			if other, taken := owner[flow]; taken && other != pkg.Name {
-				return nil, &Refused{Program: pkg.Name, Why: []string{fmt.Sprintf("%s and %s both have a flow %s: a flow belongs to one program", other, pkg.Name, flow)}}
+			name := flows.FlowName(flow)
+			if other, taken := owner[name]; taken && other != pkg.Name {
+				return nil, &Refused{Program: pkg.Name, Why: []string{fmt.Sprintf("%s and %s both have a flow %s: a flow belongs to one program", other, pkg.Name, name)}}
 			}
-			owner[flow] = pkg.Name
+			owner[name] = pkg.Name
 		}
 	}
 	var reports []*Report
@@ -410,10 +414,14 @@ func PackageOf(name, file string, prog *ast.Program, chunk *vm.Chunk, sources ma
 		files = append(files, f)
 	}
 	sort.Strings(files)
+	served := flows.FlowsOf(prog)
+	if err := oneOfEachName(name, served); err != nil {
+		return nil, err
+	}
 	return &Package{
 		Name:       name,
 		Bytecode:   bytecode,
-		Flows:      flows.FlowsOf(prog),
+		Flows:      served,
 		Migrations: flows.MigrationsOf(prog),
 		Schema:     SchemaOf(file, prog, files),
 		Sources:    sources,

@@ -195,6 +195,9 @@ func (d *Daemon) try(w http.ResponseWriter, r *http.Request) {
 	if asked.Flow == "" && len(pkg.Flows) == 1 {
 		asked.Flow = pkg.Flows[0]
 	}
+	if named := flowNamed(pkg.Flows, asked.Flow); named != "" {
+		asked.Flow = named
+	}
 	known := false
 	for _, f := range pkg.Flows {
 		known = known || f == asked.Flow

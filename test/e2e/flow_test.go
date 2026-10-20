@@ -581,6 +581,62 @@ func TestServingAFolder(t *testing.T) {
 	}
 }
 
+// A project of several files, deployed from its folder: the entry its
+// qoqi.json names, with the modules it imports, which are no programs;
+// a flow of a module is the program's, started by its name.
+func TestServingAProjectOfModules(t *testing.T) {
+	dir := t.TempDir()
+	app := filepath.Join(dir, "app")
+	if err := os.Mkdir(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, src := range map[string]string{
+		"qoqi.json": `{"entry": "main.qi"}`,
+		"main.qi":   "import easy;\nimport words;\n\nfn main() {\n    println(words.hello());\n}\n",
+		"words.qi":  "pub fn hello() -> String {\n    return \"hello\";\n}\n",
+		"easy.qi": `import std.flow.{Flow};
+import words;
+
+struct Easy {
+    who: String;
+}
+
+impl Flow<String> for Easy {
+    fn run() -> String {
+        return greet(self.who);
+    }
+}
+
+step fn greet(who: String) -> String {
+    return "${words.hello()} ${who}";
+}
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(app, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out := &lockedWriter{}
+	cmd := serveIn(t, dir, out)
+	defer func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		cmd.Wait()
+	}()
+	if deployed := deployIn(t, dir, "app", out); !strings.Contains(deployed, "main deployed, version") || strings.Count(deployed, "deployed") != 1 {
+		t.Fatalf("expected the entry deployed, alone:\n%s", deployed)
+	}
+	if got, code := flowCommand(t, dir, "start", "Easy", "e", `{"who": "ada"}`); code != 0 {
+		t.Fatalf("start: %d %s", code, got)
+	}
+	if got, code := flowCommand(t, dir, "result", "e", "--wait", "20s"); code != 0 || strings.TrimSpace(got) != `"hello ada"` {
+		t.Errorf("expected \"hello ada\", got %d %s\n%s", code, got, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(app, "main.flow.lock")); err != nil {
+		t.Errorf("expected the lock next to the entry: %v", err)
+	}
+}
+
 // qoqi send: a message for an instance that waits on its inbox,
 // sent twice under one key, taken once.
 func TestSendingFromTheCommandLine(t *testing.T) {

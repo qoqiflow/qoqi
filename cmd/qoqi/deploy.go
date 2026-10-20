@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/qoqiflow/qoqi/internal/codegen"
 	"github.com/qoqiflow/qoqi/internal/compiler"
 	"github.com/qoqiflow/qoqi/internal/errors"
 	"github.com/qoqiflow/qoqi/internal/flowd"
@@ -26,74 +28,124 @@ type deployable struct {
 	pkg  *flowd.Package
 }
 
-// packagesOf compiles what a path names: a file is one program, a folder
-// every program in it that has flows. What does not compile is said, and
-// nothing is given.
-func packagesOf(path string) ([]deployable, error) {
-	var files []string
-	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		all, _ := filepath.Glob(filepath.Join(path, "*.qi"))
-		sort.Strings(all)
-		for _, file := range all {
-			if !strings.HasSuffix(file, "_test.qi") {
-				files = append(files, file)
-			}
-		}
-	} else {
-		files = []string{sourceFile(path, flowUsage)}
+// programsIn are the files a path names, each a program to compile: a
+// file is one; a folder, its .qi files but the tests, and the entry its
+// qoqi.json names, when the project file is in the folder itself.
+func programsIn(path string) []string {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return []string{sourceFile(path, flowUsage)}
 	}
+	var files []string
+	all, _ := filepath.Glob(filepath.Join(path, "*.qi"))
+	for _, file := range all {
+		if !strings.HasSuffix(file, "_test.qi") {
+			files = append(files, file)
+		}
+	}
+	cfg, err := project.Find(path)
+	if err != nil {
+		fatal(err)
+	}
+	if cfg != nil && cfg.Entry != "" && sameFile(cfg.Dir, path) {
+		if entry, err := cfg.EntryFile(); err == nil && !slices.ContainsFunc(files, func(f string) bool { return sameFile(f, entry) }) {
+			files = append(files, entry)
+		}
+	}
+	sort.Strings(files)
+	return files
+}
+
+// sameFile says whether two paths name one file.
+func sameFile(a, b string) bool {
+	a, errA := filepath.Abs(a)
+	b, errB := filepath.Abs(b)
+	return errA == nil && errB == nil && a == b
+}
+
+// packagesOf compiles what a path names: a file is one program, a folder
+// every program in it that has flows. A file of the folder with no main
+// is a module of the programs that import it, not a program: it is left
+// out when one of them has it. What does not compile is said, and
+// nothing is given. The files the programs were compiled from are given
+// too, for --watch.
+func packagesOf(path string) ([]deployable, []string, error) {
 	var out []deployable
-	for _, file := range files {
-		pkg, err := packageOf(file)
+	var read []string
+	modules := map[string]error{} // what has no main, and what its compile said
+	for _, file := range programsIn(path) {
+		pkg, files, err := packageOf(file)
+		read = append(read, files...)
+		if err == errNoMain {
+			modules[file] = fmt.Errorf("%s has no main: it is a module, deployed with the program that imports it", file)
+			continue
+		}
 		if err != nil {
-			return nil, err
+			return nil, read, err
 		}
 		if pkg != nil {
 			out = append(out, deployable{file: file, pkg: pkg})
 		}
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("%s has no program with a flow: a flow is a struct that implements Flow<T> of std.flow", path)
+	for file, err := range modules {
+		if !slices.ContainsFunc(read, func(f string) bool { return sameFile(f, file) }) {
+			return nil, read, err
+		}
 	}
-	return out, nil
+	if len(out) == 0 {
+		return nil, read, fmt.Errorf("%s has no program with a flow: a flow is a struct that implements Flow<T> of std.flow", path)
+	}
+	return out, read, nil
 }
 
-// packageOf compiles one program into what is deployed of it; nil for a
-// program with no flow.
-func packageOf(file string) (*flowd.Package, error) {
+// errNoMain is a file that compiles, but as a module: it has no main.
+var errNoMain = fmt.Errorf("a module, with no main")
+
+// packageOf compiles one program into what is deployed of it, and gives
+// the files it was compiled from; nil for a program with no flow, and
+// errNoMain for a module.
+func packageOf(file string) (*flowd.Package, []string, error) {
 	errs := errors.NewHandler()
 	result, err := compiler.CompileFileOptions(file, projectOptions(file), errs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if errs.HasErrors() {
 		var said []string
+		onlyMain := true
 		for _, d := range errs.Diagnostics {
 			said = append(said, d.String())
+			if d.Severity == errors.SeverityError && d.Code != codegen.ErrMissingMain {
+				onlyMain = false
+			}
 		}
-		return nil, fmt.Errorf("%s", strings.Join(said, "\n"))
+		if onlyMain {
+			return nil, nil, errNoMain
+		}
+		return nil, nil, fmt.Errorf("%s", strings.Join(said, "\n"))
 	}
+	files := programFiles(result.Chunk)
 	if len(flows.FlowsOf(result.AST)) == 0 {
-		return nil, nil
+		return nil, files, nil
 	}
 	sources := map[string]string{}
-	for _, f := range programFiles(result.Chunk) {
+	for _, f := range files {
 		if data, err := os.ReadFile(f); err == nil {
 			sources[f] = string(data)
 		}
 	}
 	pkg, err := flowd.PackageOf(strings.TrimSuffix(filepath.Base(file), ".qi"), file, result.AST, result.Chunk, sources)
 	if err != nil {
-		return nil, err
+		return nil, files, err
 	}
 	cfg, err := project.Find(filepath.Dir(file))
 	if err != nil {
-		return nil, err
+		return nil, files, err
 	}
 	if cfg != nil && len(cfg.Queues) > 0 {
 		pkg.Queues = cfg.Queues
 	}
-	return pkg, nil
+	return pkg, files, nil
 }
 
 // lockPath is where the lock of a program is kept with its source:
@@ -128,27 +180,33 @@ func said(report *flowd.Report, dry bool) {
 
 // flowDeploy is qoqi deploy: the programs a path names, compiled here,
 // sent to the daemon, and their locks written next to them. With watch,
-// they are deployed again each time one of their files changes: what
-// does not compile, or is refused, is said, and the version before goes
-// on.
+// they are deployed again each time one of their files changes, the
+// modules they import with them: what does not compile, or is refused,
+// is said, and the version before goes on.
 func flowDeploy(path string, dry, watching bool) {
 	if !watching {
-		if err := deployOnce(path, dry); err != nil {
+		if _, err := deployOnce(path, dry); err != nil {
 			fatal(err)
 		}
 		return
 	}
-	if err := deployOnce(path, dry); err != nil {
+	read, err := deployOnce(path, dry)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "qoqi: %v\n", err)
 	}
 	fmt.Fprintf(os.Stderr, "qoqi: watching %s: a change saved is deployed\n", path)
+	// The files of the path, and those its programs were compiled from
+	// the last time they compiled: a file new in the folder is seen, and
+	// so is a module saved elsewhere
+	watched := map[string]bool{}
 	stamps := func() map[string]time.Time {
+		for _, f := range read {
+			watched[f] = true
+		}
 		out := map[string]time.Time{}
-		var files []string
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
-			files, _ = filepath.Glob(filepath.Join(path, "*.qi"))
-		} else {
-			files = []string{sourceFile(path, flowUsage)}
+		files := programsIn(path)
+		for f := range watched {
+			files = append(files, f)
 		}
 		for _, f := range files {
 			if info, err := os.Stat(f); err == nil {
@@ -170,17 +228,25 @@ func flowDeploy(path string, dry, watching bool) {
 			continue
 		}
 		last = now
-		if err := deployOnce(path, dry); err != nil {
+		var err error
+		if read, err = deployOnce(path, dry); err != nil {
 			fmt.Fprintf(os.Stderr, "qoqi: the version before goes on: %v\n", err)
+		}
+		// A module the programs import from now on is watched from now
+		for f, t := range stamps() {
+			if _, ok := last[f]; !ok {
+				last[f] = t
+			}
 		}
 	}
 }
 
-// deployOnce deploys the programs a path names, or says what it would do.
-func deployOnce(path string, dry bool) error {
-	programs, err := packagesOf(path)
+// deployOnce deploys the programs a path names, or says what it would
+// do, and gives the files they were compiled from.
+func deployOnce(path string, dry bool) ([]string, error) {
+	programs, read, err := packagesOf(path)
 	if err != nil {
-		return err
+		return read, err
 	}
 	var pkgs []*flowd.Package
 	for _, p := range programs {
@@ -188,7 +254,7 @@ func deployOnce(path string, dry bool) error {
 	}
 	body, err := json.Marshal(map[string]any{"programs": pkgs, "dry": dry})
 	if err != nil {
-		return err
+		return read, err
 	}
 	status, data := flowRequest("POST", "/api/deploy", body)
 	if status >= 400 {
@@ -196,25 +262,25 @@ func deployOnce(path string, dry bool) error {
 			Message string `json:"message"`
 		}
 		if json.Unmarshal(data, &refusal) == nil && refusal.Message != "" {
-			return fmt.Errorf("%s", refusal.Message)
+			return read, fmt.Errorf("%s", refusal.Message)
 		}
-		return fmt.Errorf("the daemon answered %d", status)
+		return read, fmt.Errorf("the daemon answered %d", status)
 	}
 	var answer struct {
 		Reports []*flowd.Report `json:"reports"`
 	}
 	if err := json.Unmarshal(data, &answer); err != nil {
-		return err
+		return read, err
 	}
 	for i, report := range answer.Reports {
 		said(report, dry)
 		if !dry && i < len(programs) && report.Lock != nil {
 			if err := flowrt.WriteLock(lockPath(programs[i].file), report.Lock); err != nil {
-				return err
+				return read, err
 			}
 		}
 	}
-	return nil
+	return read, nil
 }
 
 // flowVersions is qoqi versions: the deploys kept in the store, the

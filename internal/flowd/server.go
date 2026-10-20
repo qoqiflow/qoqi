@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/qoqiflow/qoqi/internal/flowrt"
+	"github.com/qoqiflow/qoqi/internal/flows"
 	"github.com/qoqiflow/qoqi/internal/vm"
 )
 
@@ -95,15 +96,51 @@ func NewOf(programs []Program) (*Daemon, error) {
 	owner := map[string]string{}
 	for _, p := range programs {
 		d.observe(p.Runtime)
+		if err := oneOfEachName(p.Name, p.Flows); err != nil {
+			return nil, err
+		}
 		for _, flow := range p.Flows {
-			if other, taken := owner[flow]; taken {
-				return nil, fmt.Errorf("%s and %s both have a flow %s: a flow belongs to one program", other, p.Name, flow)
+			if other, taken := owner[flows.FlowName(flow)]; taken {
+				return nil, fmt.Errorf("%s and %s both have a flow %s: a flow belongs to one program", other, p.Name, flows.FlowName(flow))
 			}
-			owner[flow] = p.Name
+			owner[flows.FlowName(flow)] = p.Name
 			d.Flows = append(d.Flows, flow)
 		}
 	}
 	return d, nil
+}
+
+// oneOfEachName says when two flows of a program have one name, in two
+// of its modules: a flow is started by its name.
+func oneOfEachName(program string, names []string) error {
+	seen := map[string]string{}
+	for _, flow := range names {
+		name := flows.FlowName(flow)
+		if other, taken := seen[name]; taken {
+			return fmt.Errorf("%s has two flows %s, %s and %s: a flow is started by its name, so rename one", program, name, other, flow)
+		}
+		seen[name] = flow
+	}
+	return nil
+}
+
+// flowNamed is the flow of those given that a name names: the flow of
+// that name in the program (easy.Easy), or the one a module declares
+// under it (Easy). "" when there is none, or more than one.
+func flowNamed(names []string, name string) string {
+	found := ""
+	for _, flow := range names {
+		if flow == name {
+			return flow
+		}
+		if flows.FlowName(flow) == name {
+			if found != "" {
+				return ""
+			}
+			found = flow
+		}
+	}
+	return found
 }
 
 // snapshot is what the daemon serves now: a deploy changes it.
@@ -418,6 +455,9 @@ func (d *Daemon) listFlows(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) listInstances(w http.ResponseWriter, r *http.Request) {
 	views := []View{}
 	flow, status := r.URL.Query().Get("flow"), flowrt.Status(r.URL.Query().Get("status"))
+	if named := flowNamed(d.flows(), flow); named != "" {
+		flow = named
+	}
 	for _, p := range d.programs() {
 		if flow != "" && d.runtimeOf(flow) != p.Runtime {
 			continue
@@ -443,6 +483,9 @@ func (d *Daemon) start(w http.ResponseWriter, r *http.Request) {
 	if asked.Flow == "" {
 		fail(w, http.StatusBadRequest, "request", "a start names the flow, and the instance if it wants: {\"flow\": \"Order\", \"id\": \"order:7\", \"fields\": {...}}")
 		return
+	}
+	if named := flowNamed(d.flows(), asked.Flow); named != "" {
+		asked.Flow = named
 	}
 	if !d.knows(asked.Flow) {
 		if flows := d.flows(); len(flows) > 0 {
@@ -480,7 +523,7 @@ func (d *Daemon) start(w http.ResponseWriter, r *http.Request) {
 	}
 	if asked.ID == "" {
 		// A name of its own: the flow's, and a few letters drawn
-		asked.ID = strings.ToLower(asked.Flow) + ":" + NewToken()[:8]
+		asked.ID = strings.ToLower(flows.FlowName(asked.Flow)) + ":" + NewToken()[:8]
 	}
 	_, before, existed := d.find(asked.ID)
 	if existed && before.Flow != asked.Flow {

@@ -45,7 +45,9 @@ const flowUsage = `Usage:
   qoqi deploy <program or folder> [--dry] [--watch]
                               A new version to the daemon, served at once: what runs ends
                               its turn, and each instance moves at its next stage; --watch
-                              deploys again each change saved
+                              deploys again each change saved. A folder is each file of it
+                              with a main and flows, and its qoqi.json's entry: a file
+                              without a main is a module of the program that imports it
   qoqi undeploy <program>     Take a program away, once none of its instances is alive
   qoqi versions [program]     The deploys kept, the last first, and what runs on each
   qoqi diff <seq or program> [--from seq]

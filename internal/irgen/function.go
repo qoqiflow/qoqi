@@ -119,6 +119,10 @@ func (g *IRGenerator) compileFunction(fn *ast.FnDecl, name string, isMethod bool
 	fc := g.newFunctionCompiler(fn, name)
 	fc.builder.Func.Step = fn.Step
 	fc.builder.Func.ByQueue = fn.Queue != ""
+	// A step of the application is in the bytecode whether the program
+	// calls it or not: its shape, from its signature, is what the
+	// application is written against (qoqi gen, the flow.lock)
+	fc.builder.Func.Entry = fn.Queue != ""
 	fc.builder.Func.Once = fn.Step && fn.ReturnType != nil && fn.ReturnType.Name == SettledEnum
 	if isMethod {
 		fc.declare("self", fc.builder.AddParam())

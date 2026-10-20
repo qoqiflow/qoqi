@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/qoqiflow/qoqi/internal/ast"
+	"github.com/qoqiflow/qoqi/internal/flows"
 )
 
 // What the daemon knows of the program it runs, for the pages: each flow,
@@ -100,7 +101,8 @@ type Schema struct {
 	Files []string         `json:"files"` // the source files the pages may show
 }
 
-// SchemaOf reads a program's flows from its syntax tree.
+// SchemaOf reads a program's flows from its syntax tree: those it serves,
+// of its entry file and of its modules (flows.FlowsOf), and its steps.
 func SchemaOf(entry string, prog *ast.Program, files []string) *Schema {
 	s := &schema{
 		structs: map[string]*ast.StructDecl{},
@@ -116,10 +118,14 @@ func SchemaOf(entry string, prog *ast.Program, files []string) *Schema {
 			s.enums[d.Name] = d
 		}
 	}
+	served := map[string]bool{}
+	for _, flow := range flows.FlowsOf(prog) {
+		served[flow] = true
+	}
 	for _, decl := range prog.Decls {
 		switch d := decl.(type) {
 		case *ast.ImplDecl:
-			if d.TraitName != "std.flow.Flow" {
+			if d.TraitName != flows.FlowTrait || !served[d.StructName] {
 				continue
 			}
 			flow := &FlowInfo{Name: d.StructName, Returns: &Type{Kind: "void", Text: "Void"}}

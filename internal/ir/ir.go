@@ -80,7 +80,8 @@ type Function struct {
 	Once bool // a step that returns a std.flow.Settled
 
 	// Entry marks a function the program can be started at besides main:
-	// the run of a flow, a migration
+	// the run of a flow, a migration; and a step of the application, kept
+	// in the bytecode for its signature though nothing calls it
 	Entry bool
 
 	// Migrate marks a migration of a flow; ParamNames are the names of its

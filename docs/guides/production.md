@@ -39,7 +39,7 @@ On one machine, one daemon runs from a home: a second one is refused. Each daemo
 ## Deploying
 
 ```console
-$ qoqi deploy shop/              # every program of the folder that has flows
+$ qoqi deploy shop/              # every program of the folder that has flows, with its modules
 $ qoqi deploy shop/ --dry        # what it would do
 $ qoqi versions
 $ qoqi diff shop

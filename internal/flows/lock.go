@@ -26,9 +26,13 @@ func (c *checker) checkLock(prog *ast.Program, roots []*fn, lock *flowlock.Lock)
 	newer := flowlock.Shapes{}
 	places := map[string]map[string]token.Token{} // flow, stage
 	runs := map[string]token.Token{}
+	served := map[string]bool{}
+	for _, flow := range FlowsOf(prog) {
+		served[flow] = true
+	}
 	for _, root := range roots {
-		if strings.Contains(root.owner, ".") {
-			continue // a flow of a module imported is that module's
+		if !served[root.owner] {
+			continue // a flow of a program imported is that program's
 		}
 		shapes, at := map[string]map[string]string{}, map[string]token.Token{}
 		if root.decl.Body != nil {
@@ -86,15 +90,39 @@ func lockName(lock *flowlock.Lock) string {
 }
 
 // FlowsOf are the structs of a program that implement std.flow.Flow, its
-// own: one of a module it imports is that module's to serve.
+// own: those of its entry file and of the modules it imports, each by its
+// name in the program (easy.Easy for a flow Easy of the module easy). A
+// module with a main of its own is a program, whose flows are served when
+// it is deployed: one that imports it, to try its flows, serves none of
+// them. The standard library's are none of the program's.
 func FlowsOf(prog *ast.Program) []string {
-	var flows []string
+	mains := map[string]bool{} // the modules that have a main
 	for _, decl := range prog.Decls {
-		if impl, ok := decl.(*ast.ImplDecl); ok && impl.TraitName == FlowTrait && !strings.Contains(impl.StructName, ".") {
-			flows = append(flows, impl.StructName)
+		if fn, ok := decl.(*ast.FnDecl); ok && strings.HasSuffix(fn.Name, ".main") {
+			mains[strings.TrimSuffix(fn.Name, ".main")] = true
 		}
 	}
+	var flows []string
+	for _, decl := range prog.Decls {
+		impl, ok := decl.(*ast.ImplDecl)
+		if !ok || impl.TraitName != FlowTrait {
+			continue
+		}
+		if dot := strings.LastIndex(impl.StructName, "."); dot >= 0 {
+			module := impl.StructName[:dot]
+			if mains[module] || module == "std" || strings.HasPrefix(module, "std.") {
+				continue
+			}
+		}
+		flows = append(flows, impl.StructName)
+	}
 	return flows
+}
+
+// FlowName is the name a flow is written with in its own module, and
+// started by: Easy for easy.Easy.
+func FlowName(flow string) string {
+	return flow[strings.LastIndex(flow, ".")+1:]
 }
 
 // MigrationsOf are the migrate fns of a program, with the types of their

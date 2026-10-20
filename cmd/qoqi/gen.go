@@ -18,24 +18,13 @@ func flowGen(language, program string, options map[string]string) {
 	result := compileSource(file)
 	schema := flowd.SchemaOf(file, result.AST, nil)
 
-	// The shape of each step, as the daemon sends it: its name and its
-	// signature, read from the bytecode
-	shapes := map[string]string{}
-	for _, step := range schema.Steps {
-		if step.Queue == "" {
-			continue
-		}
-		at := result.Chunk.FindPrototype(step.Name)
-		if at < 0 {
-			continue
-		}
-		name := step.Name[strings.LastIndex(step.Name, ".")+1:]
-		shapes[name] = vm.StepShape(name, result.Chunk.Prototypes[at].Signature)
+	shapes, err := stepShapes(schema, result.Chunk)
+	if err != nil {
+		fatal(err)
 	}
 	o := flowgen.Options{Source: filepath.Base(file), Queue: options["queue"], Namespace: options["namespace"], From: options["from"], Shapes: shapes}
 
 	var out []byte
-	var err error
 	switch language {
 	case "go":
 		out, err = flowgen.Go(schema, options["package"], o)
@@ -60,6 +49,27 @@ func flowGen(language, program string, options map[string]string) {
 		fatal(err)
 	}
 	os.Stdout.Write(out)
+}
+
+// stepShapes are the shapes of the steps of the queues, as the daemon
+// sends them: each name and its signature, read from the bytecode as
+// flowrt.StepsOf reads them. A step of a queue is always compiled, called
+// or not; one the bytecode has not is said, rather than written without
+// its shape.
+func stepShapes(schema *flowd.Schema, chunk *vm.Chunk) (map[string]string, error) {
+	shapes := map[string]string{}
+	for _, step := range schema.Steps {
+		if step.Queue == "" {
+			continue
+		}
+		at := chunk.FindPrototype(step.Name)
+		if at < 0 {
+			return nil, fmt.Errorf("the step %s by %s is not in the bytecode: its shape cannot be written", step.Name, step.Queue)
+		}
+		name := step.Name[strings.LastIndex(step.Name, ".")+1:]
+		shapes[name] = vm.StepShape(name, chunk.Prototypes[at].Signature)
+	}
+	return shapes, nil
 }
 
 // writeFiles writes the files given under a folder, and takes away the

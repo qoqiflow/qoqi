@@ -41,7 +41,8 @@ type rewriter struct {
 // library are left alone; so is the import of a module that implements
 // traits for the types of others, or gives methods to the language's own
 // (std.time gives every number days()), which may be what it is imported
-// for.
+// for; and so is the import of a module that declares a flow, which the
+// program serves by importing it.
 func (r *rewriter) unusedImports() {
 	if strings.HasPrefix(r.m.name, stdlib.Package+".") || r.m.name == stdlib.Package {
 		return
@@ -50,7 +51,7 @@ func (r *rewriter) unusedImports() {
 		if imp.Implicit || imp.Pub {
 			continue
 		}
-		if target := r.loader.modules[imp.Path]; target != nil && implementsForOthers(target) {
+		if target := r.loader.modules[imp.Path]; target != nil && (implementsForOthers(target) || declaresFlow(target)) {
 			continue
 		}
 		if len(imp.Names) == 0 {
@@ -90,6 +91,17 @@ func implementsForOthers(m *module) bool {
 			return true
 		}
 		if impl.TraitName == "" && builtinTypes[impl.StructName] {
+			return true
+		}
+	}
+	return false
+}
+
+// declaresFlow reports whether a module implements std.flow.Flow, as
+// Flow<T> or flow.Flow<T>, for a struct of its own.
+func declaresFlow(m *module) bool {
+	for _, decl := range m.prog.Decls {
+		if impl, ok := decl.(*ast.ImplDecl); ok && (impl.TraitName == "Flow" || strings.HasSuffix(impl.TraitName, ".Flow")) {
 			return true
 		}
 	}

@@ -56,7 +56,11 @@ The first time, the console has one user: `admin`, password `admin`, which is ch
 $ qoqi deploy <program or folder> [--dry] [--watch]
 ```
 
-A new version to the daemon, served at once: what runs ends its turn, and each instance moves at its next [stage](../concepts/versioning.md). The program is compiled here, and sent. `--dry` says what it would do; `--watch` deploys again each time a file is saved, and says what does not compile or is refused while the version before goes on. Writes `flow.lock` next to the program.
+A new version to the daemon, served at once: what runs ends its turn, and each instance moves at its next [stage](../concepts/versioning.md). The program is compiled here, and sent. `--dry` says what it would do; `--watch` deploys again each time a file of the program is saved, the modules it imports with it, and says what does not compile or is refused while the version before goes on. Writes `flow.lock` next to the program.
+
+A program is a file with a `main`, and the modules it imports. Its flows are those of its file and of those modules, each started by its name: `qoqi start Easy` for a flow `Easy` of the module `easy`, which `qoqi ls` and the console show as `easy.Easy`. Two modules of one program with a flow of one name are refused. A module that has a `main` of its own is a program, and its flows are served when it is deployed, not by a program that imports it to try them.
+
+A folder is every program in it that has flows, and the `entry` its `qoqi.json` names: a file of the folder with no `main` is a module of the programs that import it, not a program.
 
 ### `qoqi undeploy`
 
@@ -81,7 +85,7 @@ The deploys kept, the last first, and what runs on each; what a deploy changed o
 $ qoqi start <Flow> <name> [fields as JSON]
 ```
 
-Starts an instance. A name taken gives the instance that has it. Prints the instance as JSON.
+Starts an instance. A name taken gives the instance that has it. Prints the instance as JSON. A flow of a module is named as it is written, `Easy`, or as the program names it, `easy.Easy`.
 
 ### `qoqi ls`, `qoqi show`, `qoqi result`
 
@@ -136,7 +140,7 @@ $ qoqi gen php <program> --namespace 'App\Flow' --out src/Flow [--queue billing]
 $ qoqi gen ts <program> [--from @qoqi/flow] [--queue billing]
 ```
 
-Writes what an application needs to carry out the steps of its queues: their types, an interface for each queue, and the handler that serves it. Go and TypeScript are written to the standard output; PHP to a file per class. See [steps in your application](../guides/application-steps.md).
+Writes what an application needs to carry out the steps of its queues: their types, an interface for each queue, and the handler that serves it. Every step of a queue is written with its shape, called by the program or not. Go and TypeScript are written to the standard output; PHP to a file per class. See [steps in your application](../guides/application-steps.md).
 
 ## Programs
 
