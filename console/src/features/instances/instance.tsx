@@ -190,10 +190,10 @@ function InstanceView({ detail, flow, program }: { detail: Detail; flow?: FlowIn
       {ended && <Ended detail={detail} />}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
-        <div className="grid min-w-0 content-start gap-6">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-6">
           {(detail.sending?.length ?? 0) > 0 && <Sending detail={detail} now={now} />}
           <Where detail={detail} flow={flow} program={program} now={now} />
-          <Tabs defaultValue="steps">
+          <Tabs defaultValue="steps" className="min-w-0">
             <TabsList>
               <TabsTrigger value="steps">Steps · {detail.kept.length}</TabsTrigger>
               <TabsTrigger value="output">Output · {detail.output.length}</TabsTrigger>
@@ -212,7 +212,7 @@ function InstanceView({ detail, flow, program }: { detail: Detail; flow?: FlowIn
             </TabsContent>
           </Tabs>
         </div>
-        <aside className="grid content-start gap-4">
+        <aside className="grid min-w-0 content-start gap-4">
           {!ended && <WaitsFor detail={detail} now={now} />}
           {!ended && program && (flow?.inboxes?.length ?? 0) > 0 && <Inboxes instance={detail} inboxes={flow!.inboxes!} program={program} />}
           <Panel title="Fields" note="what it was started with">

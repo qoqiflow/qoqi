@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { CodeView } from '@/components/code';
 import { useLaunch } from '@/features/instances/launch';
 import { shortFile } from '@/lib/describe';
+import { shortName } from '@/lib/utils';
 import type { Decl, Field, FlowInfo, StepInfo } from '@/lib/types';
 
 // The program the daemon runs, as a reference: a flow and what it is
@@ -30,7 +31,7 @@ export function FlowDetail({ flow }: { flow: FlowInfo }) {
     <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
       <div className="grid content-start gap-4 rounded-xl border bg-card p-5">
         <div className="grid gap-1">
-          <span className="font-semibold">{flow.name}</span>
+          <span className="font-semibold break-all">{flow.name}</span>
           <span className="font-mono text-xs text-muted-foreground">impl Flow&lt;{flow.returns.text}&gt;</span>
         </div>
         {flow.doc && <p className="text-sm text-muted-foreground">{flow.doc}</p>}
@@ -44,7 +45,7 @@ export function FlowDetail({ flow }: { flow: FlowInfo }) {
           </span>
         )}
         <Button onClick={() => launch({ flow: flow.name })}>
-          <Play /> Start {flow.name}
+          <Play /> Start {shortName(flow.name)}
         </Button>
       </div>
       {flow.run && <CodeView file={flow.run.file} from={flow.run.line} to={flow.run.line + 40} notes={[{ line: flow.run.line, kind: 'mark', gutter: '◆', text: 'run' }]} />}

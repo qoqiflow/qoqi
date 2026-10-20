@@ -10,6 +10,7 @@ import { InstanceList } from '@/features/instances/instances';
 import { useLaunch } from '@/features/instances/launch';
 import { emptyCounts, useCounts, useFlowPrograms, useInstances, useProgram } from '@/lib/queries';
 import { statuses } from '@/lib/types';
+import { shortName } from '@/lib/utils';
 import { FieldList, FlowDetail } from './reference';
 
 // One flow: what it is, its instances, what it did over the year, and
@@ -74,7 +75,7 @@ export function FlowPage() {
               </Button>
             )}
             <Button onClick={() => launch({ flow: flow.name })}>
-              <Play /> Start {flow.name}
+              <Play /> Start {shortName(flow.name)}
             </Button>
           </div>
         </div>

@@ -11,7 +11,7 @@ import { StatusBadge } from '@/components/status';
 import { api, ApiError } from '@/lib/api';
 import { useProgram } from '@/lib/queries';
 import type { Data, DryRun, FlowInfo, Program } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { cn, shortName } from '@/lib/utils';
 
 // Starting an instance, from anywhere in the console: choose a flow, fill
 // in a form made from the types of its fields, and see the same start as
@@ -237,7 +237,7 @@ function LaunchForm({
         )}
         <div className="grid gap-1">
           <DialogTitle className="flex items-baseline gap-2">
-            Start {flow.name}
+            Start {shortName(flow.name)}
             <span className="font-mono text-sm font-normal text-muted-foreground">{signature(flow)}</span>
           </DialogTitle>
           <DialogDescription>{flow.doc || 'Fill in its fields: the form is made from their types.'}</DialogDescription>

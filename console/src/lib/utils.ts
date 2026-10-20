@@ -13,3 +13,9 @@ export const formatDate = (dateString: string | null) => {
     day: 'numeric',
   });
 };
+
+/** A flow's name as people say it: the last part of a name its module
+ * gives, Conversation of flows.conversation.Conversation. */
+export function shortName(name: string): string {
+  return name.slice(name.lastIndexOf('.') + 1);
+}

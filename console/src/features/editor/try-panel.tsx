@@ -9,7 +9,7 @@ import { StatusBadge } from '@/components/status';
 import { api } from '@/lib/api';
 import { keyParts } from '@/lib/qoqi';
 import type { Data, Program, Trial } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { cn, shortName } from '@/lib/utils';
 
 // Trying a flow of the draft: the daemon runs an instance of it in memory,
 // with a clock that moves only when it is moved here. Its steps run for
@@ -150,7 +150,7 @@ export function TryPanel({
                 </Button>
               </div>
               <Button onClick={start} disabled={busy || !chosen}>
-                {busy ? <Loader2 className="animate-spin" /> : <Play />} Start {chosen}
+                {busy ? <Loader2 className="animate-spin" /> : <Play />} Start {shortName(chosen)}
               </Button>
             </>
           ) : (

@@ -12,7 +12,7 @@ import { doing } from '@/lib/describe';
 import { emptyCounts, useInstances, useProgram } from '@/lib/queries';
 import { useNow } from '@/lib/time';
 import { statuses, type Status } from '@/lib/types';
-import { cn } from '@/lib/utils';
+import { cn, shortName } from '@/lib/utils';
 
 // Every instance, those that need a look first: stopped, running, asleep,
 // then those that ended. Filtered by flow, by status and by name, in the
@@ -32,7 +32,7 @@ export function InstancesPage() {
           <p className="text-sm text-muted-foreground">Each is one process of a flow: what it is doing now is read from what the store keeps of it.</p>
         </div>
         <Button variant="outline" onClick={() => launch(flow ? { flow } : undefined)}>
-          <Play /> Start {flow || 'a flow'}
+          <Play /> Start {flow ? shortName(flow) : 'a flow'}
         </Button>
       </div>
       <InstanceList />
