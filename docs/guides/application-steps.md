@@ -105,7 +105,7 @@ $keeper->setup();
 WarehouseQueue::make(new Warehouse($pdo), getenv('SHOP_SECRET'))->keepOnce($keeper)->serve();
 ```
 
-The packages are `github.com/qoqiflow/qoqi/pkg/flow` for Go, `@qoqi/flow` on npm (Node 23.6 or later), `qoqi/flow` on Packagist (PHP 8.4 or later).
+The packages are `github.com/qoqiflow/qoqi/pkg/flow` for Go, `@qoqi/flow` on npm (Node 23.6 or later), `qoqi/flow` on Packagist (PHP 8.2 or later).
 
 ## What the application answers
 

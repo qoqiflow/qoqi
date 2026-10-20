@@ -3,7 +3,7 @@
     "description": "Carry out the steps of Qoqi's flows in a PHP application",
     "type": "library",
     "require": {
-        "php": ">=8.4",
+        "php": ">=8.2",
         "ext-json": "*"
     },
     "autoload": {
