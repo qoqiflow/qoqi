@@ -49,7 +49,9 @@ A flow is otherwise ordinary code. `run` calls functions, which call others; the
 
 While an instance waits, its **whole state of execution** is written to the store: the calls in progress, their variables, the place each is at. When the wait ends, minutes or months later, on this machine or another, it is taken up from what was written and goes on from the line it was at.
 
-It is taken up from what was **written**, not by running its history again. The code of a flow does not have to be deterministic: it may read the clock, draw random numbers, and decide on them.
+It is taken up from what was **written**, not by running its history again. The code of a flow does not have to be deterministic: it may read the clock, draw random numbers, and decide on them. What it read is in what was written.
+
+One case runs code again: an instance stopped by a mistake and resumed with a fix goes back to its last stage, and runs what came after in the new code ([failures](failures.md#resuming-with-a-fix)). For that, the clock and the random numbers it read since the stage are written with it too, task by task, and the code run again is given them back in the order it reads them; what it reads past them, or otherwise, is new.
 
 An instance is written at two kinds of moments:
 

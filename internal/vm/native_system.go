@@ -196,9 +196,11 @@ func init() {
 	)
 
 	registerNatives("std.time",
-		// Milliseconds since 1 January 1970
+		// Milliseconds since 1 January 1970. It, and every number std.random
+		// draws, goes through the OnDraw hook: a flow replayed from its
+		// stage is given back what it drew
 		native{"now", 0, func(vm *VM, args []Value) (Value, error) {
-			return NewInt(vm.now()), nil
+			return NewInt(vm.draw(Drawn{Of: "now", Int: vm.now()}).Int), nil
 		}},
 		// Microseconds since the program started, for measuring durations:
 		// unlike now it never jumps when the clock is set
@@ -225,7 +227,7 @@ func init() {
 			if limit <= 0 {
 				return NewNull(), fmt.Errorf("the limit must be at least 1, got %d", limit)
 			}
-			return NewInt(vm.random().Int63n(limit)), nil
+			return NewInt(vm.draw(Drawn{Of: fmt.Sprintf("below %d", limit), Int: vm.random().Int63n(limit)}).Int), nil
 		}},
 		// A whole number from low to high, both included: the numbers
 		// below would give, moved up to low
@@ -241,11 +243,11 @@ func init() {
 			if low > high {
 				return NewNull(), fmt.Errorf("the low end %d is above the high end %d", low, high)
 			}
-			return NewInt(low + vm.random().Int63n(high-low+1)), nil
+			return NewInt(vm.draw(Drawn{Of: fmt.Sprintf("between %d %d", low, high), Int: low + vm.random().Int63n(high-low+1)}).Int), nil
 		}},
 		// A number from 0 up to, not including, 1
 		native{"float", 0, func(vm *VM, args []Value) (Value, error) {
-			return NewNumber(vm.random().Float64()), nil
+			return NewNumber(vm.draw(Drawn{Of: "float", Float: vm.random().Float64()}).Float), nil
 		}},
 		// A version 4 UUID from the system's secure generator: never the
 		// same twice, whatever seed the program gave
@@ -256,7 +258,7 @@ func init() {
 			}
 			b[6] = b[6]&0x0f | 0x40
 			b[8] = b[8]&0x3f | 0x80
-			return vm.newString(fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]))
+			return vm.newString(vm.draw(Drawn{Of: "uuid", Text: fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])}).Text)
 		}},
 		// That many bytes from the secure generator, in hexadecimal
 		native{"token", 1, func(vm *VM, args []Value) (Value, error) {
@@ -271,7 +273,7 @@ func init() {
 			if _, err := cryptorand.Read(b); err != nil {
 				return NewNull(), err
 			}
-			return vm.newString(hex.EncodeToString(b))
+			return vm.newString(vm.draw(Drawn{Of: fmt.Sprintf("token %d", n), Text: hex.EncodeToString(b)}).Text)
 		}},
 	)
 }

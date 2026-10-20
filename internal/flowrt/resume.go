@@ -98,6 +98,16 @@ func (r *Runtime) resumed(id string) (*Instance, []string, error) {
 	}
 	w.Version, w.State, w.Counts, w.Replaying = newest, nil, map[string]int{}, true
 	w.untake = true
+	// What its tasks drew since the stage, they are given back, in order:
+	// what a replay stopped before giving back follows what it drew
+	w.Giving = copyDrawn(w.Drawn)
+	for task, left := range inst.Giving {
+		if w.Giving == nil {
+			w.Giving = map[string][]vm.Drawn{}
+		}
+		w.Giving[task] = append(w.Giving[task], left...)
+	}
+	w.Drawn = nil
 	if at != nil {
 		w.AtStage, w.Pass = at, at.Pass
 		if at.Vars["self"] != nil {

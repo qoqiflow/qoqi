@@ -68,7 +68,7 @@ step fn refund(charge: String) -> Result<Void, Decline> by payments;
 step fn wire(to: String, amount: Int) -> Settled<Result<Wire, Refusal>> within 2.hours() { ... }
 ```
 
-- The one rule: inside a flow, and in every function it calls, nothing reaches outside the program (a file, the network, a database, another program) except through a `step fn`. The compiler refuses it: `F0001`, with the path of calls. The clock (`time.now()`) and random numbers need no step.
+- The one rule: inside a flow, and in every function it calls, nothing reaches outside the program (a file, the network, a database, another program) except through a `step fn`. The compiler refuses it: `F0001`, with the path of calls. The clock (`time.now()`) and random numbers need no step: a resume from a stage gives back, task by task and in order, what was read of them since the stage, so a step given them is asked the same way (`time.ticks()` is not given back).
 - `wait` waits for a task, a channel, `time.after(d)`; `wait match { case ... }` for the first of several. A function with a `wait` in it is called like any other: there is no `async`.
 - `flow.start("name", Instance { ... })` starts a child flow; `flow.undo(step, argument)` registers what to run if the flow fails or is cancelled; `flow.key()` is the step's key, an idempotency key for the world; `flow.store()` is the daemon's transaction, inside a step; `flow.retry(after)` asks for the step to be run again later.
 - `stage name;` marks where a running instance may move to a new version. `flow.lock` next to the program records the shape of each stage; a version that changes one needs `migrate fn name(old fields...) -> Name { ... }` in the flow's `impl`, or the daemon refuses it while an instance is there.

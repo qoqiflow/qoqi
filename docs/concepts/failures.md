@@ -84,4 +84,12 @@ A stopped instance cannot go on from the line it failed at in new code. It goes 
 *   **Asked otherwise**, another argument to the same step, the instance stops with `F0102`: the world answered a question the new code does not ask.
 *   **Something kept that the new code never asks for**: when the instance reaches its next stage with results nobody took, it stops with `F0101`. A person decides.
 
+The clock and the random numbers it read since the stage are kept too, for the same reason. The code after the stage runs again minutes or days later, and a step given `"report of ${time.utc(time.now()).format(...)}"`, or a child started as `flow.detach("recovery:${code}:${random.token(3)}", ...)`, would otherwise be asked otherwise and stop it with `F0102`, or start a second child. So every value a flow draws without a step since its stage is written with the instance: `time.now()`, and what reads it (`time.seconds()`, `time.today()`, `time.since(...)`, `time.after(d)`, `30.days().fromNow()`), and `random.below`, `between`, `float`, `uuid`, `token`, and what draws from them (`chance`, `pick`, `shuffle`). The new code, run from the stage, is given them back:
+
+*   **In the order they were read, task by task.** Each task gets what it read, in the order of its own code, whatever turns the tasks take; tasks are told apart by the order they were started in, as their steps' keys are.
+*   **As long as it reads them the same way.** A value is given back to the same question: the clock where the clock was read, `token(3)` where `token(3)` was drawn. The first one read otherwise, the clock where a token was drawn, ends what that task is given back: from there, and past what was kept, it reads the clock as it is and draws new numbers.
+*   **Until its next stage**, where what was kept is forgotten and the keeping starts again. `time.ticks()` is not kept: it measures how long something takes, and what it gave in another process means nothing.
+
+An instance written before values were kept, by an older daemon, has none to be given back: it is resumed with the clock as it is.
+
 A resume is a dry run first: the daemon runs the instance in memory up to the first step that would leave, and shows it, before `--go` lets it go for real.

@@ -285,10 +285,14 @@ type row struct {
 	Replay   bool             `json:"replaying,omitempty"`
 	Ended    string           `json:"ended,omitempty"`
 	AtStage  *AtStage         `json:"atStage,omitempty"`
+	// Absent from what was written before values drawn were kept: such
+	// an instance is replayed with the time and random numbers new
+	Drawn  map[string][]vm.Drawn `json:"drawn,omitempty"`
+	Giving map[string][]vm.Drawn `json:"giving,omitempty"`
 }
 
 func rowOf(inst *Instance) (string, error) {
-	r := row{Birth: inst.Birth, Fields: inst.Fields, State: inst.State, Counts: inst.Counts, Tries: inst.Tries, Retried: inst.Retried, Working: inst.Working, Result: inst.Result, Stopped: inst.Stopped, Phase: inst.Phase, Undos: inst.Undos, Parent: inst.Parent, Children: inst.Children, Awaits: inst.Awaits, Pass: inst.Pass, AtStage: inst.AtStage, Version: inst.Version, Replay: inst.Replaying, Ended: inst.Ended, Taken: inst.CancelTaken}
+	r := row{Birth: inst.Birth, Fields: inst.Fields, State: inst.State, Counts: inst.Counts, Tries: inst.Tries, Retried: inst.Retried, Working: inst.Working, Result: inst.Result, Stopped: inst.Stopped, Phase: inst.Phase, Undos: inst.Undos, Parent: inst.Parent, Children: inst.Children, Awaits: inst.Awaits, Pass: inst.Pass, AtStage: inst.AtStage, Version: inst.Version, Replay: inst.Replaying, Ended: inst.Ended, Taken: inst.CancelTaken, Drawn: inst.Drawn, Giving: inst.Giving}
 	data, err := json.Marshal(r)
 	return string(data), err
 }
@@ -301,7 +305,7 @@ func instanceOf(id, flow, status string, wakeAt int64, data, cancel string) (*In
 	return &Instance{
 		ID: id, Birth: r.Birth, Flow: flow, Status: Status(status), WakeAt: wakeAt,
 		Fields: r.Fields, State: r.State, Counts: r.Counts, Tries: r.Tries, Retried: r.Retried, Working: r.Working,
-		Result: r.Result, Stopped: r.Stopped, Phase: r.Phase, Undos: r.Undos, Cancel: cancel, Parent: r.Parent, Children: r.Children, Awaits: r.Awaits, Pass: r.Pass, AtStage: r.AtStage, Version: r.Version, Replaying: r.Replay, Ended: r.Ended, CancelTaken: r.Taken,
+		Result: r.Result, Stopped: r.Stopped, Phase: r.Phase, Undos: r.Undos, Cancel: cancel, Parent: r.Parent, Children: r.Children, Awaits: r.Awaits, Pass: r.Pass, AtStage: r.AtStage, Version: r.Version, Replaying: r.Replay, Ended: r.Ended, CancelTaken: r.Taken, Drawn: r.Drawn, Giving: r.Giving,
 	}, nil
 }
 

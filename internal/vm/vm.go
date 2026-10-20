@@ -142,6 +142,7 @@ type VM struct {
 	// clock, when set, is the time now in milliseconds since 1970, in
 	// place of the machine's: a trial of a flow has a clock of its own
 	clock     func() int64
+	onDraw    func(vm *VM, fresh Drawn) Drawn
 	waiting   string
 	waitingMs int64
 	executing int

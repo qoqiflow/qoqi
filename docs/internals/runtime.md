@@ -119,6 +119,7 @@ resume(id):                                                # a person asked; `re
     phase run     ->  state = at_stage, version = the newest, status waiting, a wait already over,
                       the messages taken since at_stage untaken   # UPDATE messages SET taken = NULL
                                                                   # WHERE taken_pass >= at_stage.pass
+                      giving = drawn, the values read since at_stage, by task, to be given back
 
 run(id, ...), as for any instance:
     vm = thaw(state), through each migration between its version and the newest, if any
@@ -127,6 +128,10 @@ run(id, ...), as for any instance:
         a value, the same `asked`   ->  given what was kept; nothing leaves, nothing is waited for
         a value, another `asked`    ->  stopped(vm, F0102)
         nothing                     ->  as always; a dry run (below) ends here, before anything leaves
+    and every time.now() and std.random a task of the flow reads (not in a step) asks giving first:
+        its next value, the same question (now, token 3, ...)  ->  given it
+        another question, or none left    ->  read anew, and that task is given back no more
+        either way it is kept in drawn, written with the instance; a stage where run is alone empties both
     at the next stage, or the end, for any instance:
         attempts of this pass with a value that nothing took  ->  stopped(vm, F0101)
         (nothing is marked: an attempt is untaken when its count
@@ -135,7 +140,7 @@ run(id, ...), as for any instance:
 
 A stopped instance whose stage no longer exists in the newest version is not resumed through a migration to another stage: what was done since the old stage was done on its path, and the new stage's keys would be another path's. It stays `stopped`, with `F0103` and the two stages named, until a person cancels it or pins its version and fixes that. An instance resumed is an instance whose state is its stage's, in the newest version (the JSON says which, so a daemon that dies between `lease` and its first `save` leaves nothing untrue), and the rules above hold for every instance. `qoqi resume` first runs **dry**: the daemon runs the instance in memory without a lease to write under, up to the first step that would leave or the first wait that would wait, and shows what it took by key and what it would do next; `--go` then resumes for real. A person reads what the new code would take and what it would do, and lets it go on or not.
 
-This is the one place an instance is played again. What was done since the stage is found by its key, and what is new runs; what was done and is no longer asked for stops it, with the list ([taking up a stopped instance](../concepts/failures.md#stopped-instances)). `asked` is what the step was given, as JSON, read into the newest shape of its types as any kept value is (a field the JSON lacks takes the default its struct declares, and a field with no default stops the instance with `F0102`), then compared, or for a wait its channels and cases in order, without its lengths of time: the new code asking `charge#1` for another invoice, or reading the cases of a `wait match` in another order, is not the same question, and gets no silent answer. A step whose attempts were spent gets new ones, numbered on from the last.
+This is the one place an instance is played again. What was done since the stage is found by its key, what was read of the clock and of the random numbers since the stage is given back, and what is new runs; what was done and is no longer asked for stops it, with the list ([taking up a stopped instance](../concepts/failures.md#stopped-instances)). `asked` is what the step was given, as JSON, read into the newest shape of its types as any kept value is (a field the JSON lacks takes the default its struct declares, and a field with no default stops the instance with `F0102`), then compared, or for a wait its channels and cases in order, without its lengths of time: the new code asking `charge#1` for another invoice, or reading the cases of a `wait match` in another order, is not the same question, and gets no silent answer. A step whose attempts were spent gets new ones, numbered on from the last.
 
 ### 3. Turns: everything that can go on, goes on
 

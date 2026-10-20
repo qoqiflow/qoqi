@@ -930,6 +930,36 @@ func (vm *VM) now() int64 {
 	return time.Now().UnixMilli()
 }
 
+// Drawn is a value the program drew without a step: the time, from
+// std.time.now, or a random number, from std.random. A runtime of flows
+// keeps what an instance drew since its stage, to give it back when the
+// code after the stage runs again (see SetOnDraw).
+type Drawn struct {
+	// Of is what drew it, with what it was asked: "now", "below 10",
+	// "token 3". A value is given back only to the same question
+	Of    string  `json:"of"`
+	Int   int64   `json:"int,omitempty"`
+	Float float64 `json:"float,omitempty"`
+	Text  string  `json:"text,omitempty"`
+}
+
+// SetOnDraw sets what is asked each time the program draws a value
+// without a step: hook is given the value just drawn, and what it
+// returns is what the program gets. A runtime of flows keeps the values,
+// and gives back those kept in place of new ones when it runs the code
+// after a stage again. std.time.ticks is not asked about: it measures.
+func (vm *VM) SetOnDraw(hook func(vm *VM, fresh Drawn) Drawn) {
+	vm.onDraw = hook
+}
+
+// draw is a value the program drew, as the OnDraw hook has it.
+func (vm *VM) draw(fresh Drawn) Drawn {
+	if vm.onDraw == nil {
+		return fresh
+	}
+	return vm.onDraw(vm, fresh)
+}
+
 // CallValue calls a function value of the program, from a native function
 // the program called: the instruction loop is entered again.
 func (vm *VM) CallValue(fn Value, args []Value) (Value, error) {

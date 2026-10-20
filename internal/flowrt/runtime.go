@@ -85,6 +85,14 @@ type Instance struct {
 	// compared with what they were, and what they gave has to be taken
 	Replaying bool
 
+	// Drawn are the values its tasks drew without a step since AtStage,
+	// the time and random numbers, by task, in the order each drew them:
+	// kept with the instance, as what its steps gave is kept under their
+	// keys. Giving are those a replay gives back, by task, before it
+	// draws new ones: what was drawn when the instance was resumed
+	Drawn  map[string][]vm.Drawn
+	Giving map[string][]vm.Drawn
+
 	// Ended is why a person ended it as it was, stopped
 	Ended string
 
@@ -131,6 +139,8 @@ func (i *Instance) copy() *Instance {
 	c.Tries = copyCounts(i.Tries)
 	c.Retried = copyMoments(i.Retried)
 	c.Working = copyMoments(i.Working)
+	c.Drawn = copyDrawn(i.Drawn)
+	c.Giving = copyDrawn(i.Giving)
 	c.Undos = append([]vm.Undo(nil), i.Undos...)
 	c.Children = append([]string(nil), i.Children...)
 	c.Awaits = append([]string(nil), i.Awaits...)
@@ -958,6 +968,8 @@ func (r *Runtime) takeHeld(id string) error {
 	pass, atStage := inst.Pass, inst.AtStage
 	// A replay: what was kept since the stage, and what it took of it
 	replaying, taken := inst.Replaying, map[string]bool{}
+	// What its tasks drew since the stage, and what a replay gives back
+	drawn, giving := copyDrawn(inst.Drawn), copyDrawn(inst.Giving)
 
 	machine := vm.NewVM()
 	machine.SetClock(r.Now)
@@ -995,6 +1007,7 @@ func (r *Runtime) takeHeld(id string) error {
 		w.Undos = append([]vm.Undo(nil), undos...)
 		w.Children, w.Awaits = append([]string(nil), children...), m.Awaited()
 		w.Pass, w.AtStage, w.Replaying = pass, atStage, replaying
+		w.Drawn, w.Giving = copyDrawn(drawn), copyDrawn(giving)
 		w.Taking, taking = taking, nil
 		w.CancelTaken = inst.CancelTaken || flowHost.cancelTaken
 		return w, nil
@@ -1006,7 +1019,7 @@ func (r *Runtime) takeHeld(id string) error {
 		if !replaying {
 			return nil
 		}
-		replaying = false
+		replaying, giving = false, nil
 		if left := r.untaken(inst, pass, taken); len(left) > 0 {
 			return &vm.Stop{Reason: fmt.Errorf("%s: %s did something its new version does not account for: %s was kept, and nothing asked for it again", ErrUntaken, inst.ID, strings.Join(left, ", "))}
 		}
@@ -1031,6 +1044,8 @@ func (r *Runtime) takeHeld(id string) error {
 		}
 		noted(m, nil)
 		atStage = &AtStage{Name: name, Pass: pass, Vars: vars, Undos: len(undos)}
+		// What a replay from here gives back is drawn from here on
+		drawn, giving = nil, nil
 		if chunk == r.Chunk {
 			return nil
 		}
@@ -1051,6 +1066,35 @@ func (r *Runtime) takeHeld(id string) error {
 		}
 		noted(m, nil)
 		return &vm.Stop{Reason: &moving{}}
+	})
+
+	// The time read and the random numbers drawn without a step: kept, by
+	// task, and in a replay given back in the order they were drawn, as
+	// long as the new code draws them as the old one did. Each task draws
+	// in the order of its own code, whatever turns the tasks take; the
+	// first value asked otherwise, or not drawn before, ends what the
+	// task is given back, and from there it draws new ones. A step draws
+	// for the world: what it gives is kept, not what it drew
+	machine.SetOnDraw(func(m *vm.VM, fresh vm.Drawn) vm.Drawn {
+		if m.InStep() {
+			return fresh
+		}
+		task := m.TaskName()
+		value := fresh
+		if left := giving[task]; len(left) > 0 {
+			if left[0].Of == fresh.Of {
+				value = left[0]
+				giving[task] = left[1:]
+			}
+			if left[0].Of != fresh.Of || len(left) == 1 {
+				delete(giving, task)
+			}
+		}
+		if drawn == nil {
+			drawn = map[string][]vm.Drawn{}
+		}
+		drawn[task] = append(drawn[task], value)
+		return value
 	})
 
 	// The steps asked for since the last write: they leave together
@@ -1376,12 +1420,13 @@ func (r *Runtime) takeHeld(id string) error {
 	at.Counts, at.Tries, at.Retried, at.Working = copyCounts(counts), copyCounts(tries), copyMoments(retried), copyMoments(working)
 	at.Children, at.Awaits = children, nil
 	at.Pass, at.AtStage, at.Replaying = pass, atStage, replaying
+	at.Drawn, at.Giving = drawn, giving
 	at.Taking = taking
 	at.CancelTaken = inst.CancelTaken || flowHost.cancelTaken
 	if err == nil {
 		// Run ended: a replay ends here too
 		err = replayed()
-		at.Replaying = replaying
+		at.Replaying, at.Giving = replaying, giving
 	}
 	var frozen *vm.FrozenError
 	var stop *cancelled
@@ -1679,6 +1724,17 @@ func copyMoments(moments map[string]int64) map[string]int64 {
 		out[k] = v
 	}
 	return out
+}
+
+func copyDrawn(drawn map[string][]vm.Drawn) map[string][]vm.Drawn {
+	if drawn == nil {
+		return nil
+	}
+	c := make(map[string][]vm.Drawn, len(drawn))
+	for task, values := range drawn {
+		c[task] = append([]vm.Drawn(nil), values...)
+	}
+	return c
 }
 
 func copyCounts(counts map[string]int) map[string]int {

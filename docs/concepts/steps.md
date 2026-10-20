@@ -25,7 +25,7 @@ Inside a flow, and in every function it calls, nothing reaches outside the progr
    = Suggestion: make 'notify' a step fn, or move the call into one
 ```
 
-Three things need no step: the clock (`time.now()`), random numbers, and the program's own output (`println`, `std.log`). The clock and random numbers are given back to the flow when it is taken up; a line printed twice after a crash costs nothing.
+Three things need no step: the clock (`time.now()`), random numbers, and the program's own output (`println`, `std.log`). The clock and random numbers are given back to the flow when it is taken up: after a crash, what it read is in what was written, and resumed from its stage with a fix, it is given back, in order, what it read since the stage ([failures](failures.md#resuming-with-a-fix)). A line printed twice after a crash costs nothing.
 
 ## What a step takes and returns
 
