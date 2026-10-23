@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -413,6 +414,12 @@ func flowServe(options map[string]string) {
 		fatal(err)
 	}
 	daemon.Workers, daemon.Out = workers, out
+	if os.Getenv("GOMEMLIMIT") == "" {
+		// Each worker runs a program whose heap is refused beyond its
+		// limit; Go collects sooner as the process nears what they may
+		// hold together, rather than let it grow until the machine says no
+		debug.SetMemoryLimit(int64(max(workers, 1))*2*int64(vm.DefaultHeapSize) + 512<<20)
+	}
 	if err := daemon.Restore(); err != nil {
 		fatal(err)
 	}

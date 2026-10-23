@@ -348,13 +348,42 @@ func (vm *VM) appendToArray(arr *ArrayObj, v Value) error {
 	if arr.header.Frozen {
 		return fmt.Errorf(errFrozen)
 	}
-	before := cap(arr.elements)
-	arr.Append(v)
-	if after := cap(arr.elements); after > before {
-		_, err := vm.heap.grow(uint64(after-before) * valueSize)
+	elements, _, err := vm.roomForOne(arr.elements)
+	if err != nil {
 		return err
 	}
+	arr.elements = append(elements, v)
 	return nil
+}
+
+// roomForText says whether a text of size bytes fits under the limit,
+// collecting first if it does not: a native asks before it builds one in
+// Go, which the heap would only refuse once the machine had given it.
+func (vm *VM) roomForText(size uint64) error {
+	if size > maxTextBytes {
+		return fmt.Errorf("out of memory: a text of %d bytes cannot be made", size)
+	}
+	return vm.heap.reserve(size)
+}
+
+// roomForOne gives values with room for one more: as they are when there
+// is, or moved to twice the room, which is counted first. Refused, they
+// are left as they were, and nothing is asked of the machine. It says
+// whether they grew, for the caller to collect if it is due.
+func (vm *VM) roomForOne(values []Value) ([]Value, bool, error) {
+	if len(values) < cap(values) {
+		return values, false, nil
+	}
+	room := max(2*cap(values), 4)
+	if room > maxArrayCapacity {
+		return values, false, fmt.Errorf("out of memory: %d values cannot be held", room)
+	}
+	if _, err := vm.heap.grow(uint64(room-cap(values)) * valueSize); err != nil {
+		return values, false, err
+	}
+	grown := make([]Value, len(values), room)
+	copy(grown, values)
+	return grown, true, nil
 }
 
 // setField gives a field of an object a value, and accounts for the memory
@@ -363,12 +392,14 @@ func (vm *VM) setField(obj *ObjectObj, name string, v Value) error {
 	if obj.header.Frozen {
 		return fmt.Errorf(errFrozen)
 	}
-	before := cap(obj.slots)
-	obj.Set(name, v)
-	if after := cap(obj.slots); after > before {
-		_, err := vm.heap.grow(uint64(after-before) * valueSize)
-		return err
+	if _, there := obj.shape.index[name]; !there {
+		slots, _, err := vm.roomForOne(obj.slots)
+		if err != nil {
+			return err
+		}
+		obj.slots = slots
 	}
+	obj.Set(name, v)
 	return nil
 }
 

@@ -651,6 +651,10 @@ func (vm *VM) DataOf(v Value) ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// maxDataDepth is how deep data may be nested: as deep as encoding/json
+// reads it back.
+const maxDataDepth = 10000
+
 func dataOf(v Value, inside map[*ObjHeader]bool) (any, error) {
 	switch {
 	case v.IsInt():
@@ -681,6 +685,10 @@ func dataOf(v Value, inside map[*ObjHeader]bool) (any, error) {
 	}
 	if inside[h] {
 		return nil, fmt.Errorf("a value that holds itself is not data")
+	}
+	if len(inside) >= maxDataDepth {
+		// What holds it is as deep: data read back is as deep at most
+		return nil, fmt.Errorf("a value nested more than %d deep is not data", maxDataDepth)
 	}
 	inside[h] = true
 	defer delete(inside, h)

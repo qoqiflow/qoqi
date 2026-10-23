@@ -69,6 +69,10 @@ const (
 	// above what any heap limit allows: a number beyond it is a mistake,
 	// not a request to be tried.
 	maxArrayCapacity = 1 << 40
+
+	// maxTextBytes is the largest text, whatever the limit: a text counts
+	// its characters in 32 bits
+	maxTextBytes = 1<<31 - 1
 )
 
 // sizeOf is what an object counts for against the limit. It is asked when
@@ -172,6 +176,9 @@ func (h *Heap) track(obj Obj) {
 // AllocString allocates a string object.
 // Returns the object and a boolean indicating if GC should run.
 func (h *Heap) AllocString(s string) (*StringObj, bool, error) {
+	if len(s) > maxTextBytes {
+		return nil, false, fmt.Errorf("out of memory: a text of %d bytes cannot be made", len(s))
+	}
 	if err := h.reserve(uint64(unsafe.Sizeof(StringObj{})) + uint64(len(s))); err != nil {
 		return nil, false, err
 	}
@@ -230,6 +237,9 @@ func joined(a, b string) *StringObj {
 // AllocJoined allocates the text of two texts one after the other.
 // Returns the object and a boolean indicating if GC should run.
 func (h *Heap) AllocJoined(a, b string) (*StringObj, bool, error) {
+	if len(a)+len(b) > maxTextBytes {
+		return nil, false, fmt.Errorf("out of memory: a text of %d bytes cannot be made", len(a)+len(b))
+	}
 	if err := h.reserve(uint64(unsafe.Sizeof(StringObj{})) + uint64(len(a)+len(b))); err != nil {
 		return nil, false, err
 	}
@@ -241,9 +251,17 @@ func (h *Heap) AllocJoined(a, b string) (*StringObj, bool, error) {
 // AllocRope allocates the text of two texts one after the other, kept as
 // the two until its bytes are asked for. It knows its length in characters
 // from theirs.
+//
+// Its bytes are counted when they are asked for, but a text whose bytes
+// would not fit under the limit then is refused now: doubling a text
+// again and again would otherwise make one far larger than the limit,
+// which its first reader would ask of the machine whole.
 func (h *Heap) AllocRope(left, right *StringObj) (*StringObj, bool, error) {
 	size := left.ByteLen() + right.ByteLen()
-	if err := h.reserve(uint64(unsafe.Sizeof(StringObj{}))); err != nil {
+	if size > maxTextBytes {
+		return nil, false, fmt.Errorf("out of memory: a text of %d bytes cannot be made", size)
+	}
+	if err := h.reserve(uint64(unsafe.Sizeof(StringObj{})) + uint64(size)); err != nil {
 		return nil, false, err
 	}
 	obj := &StringObj{header: ObjHeader{Type: ObjTypeString}, side: &stringSide{left: left, right: right, size: size, heap: h}}

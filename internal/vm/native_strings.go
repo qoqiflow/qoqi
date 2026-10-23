@@ -150,6 +150,16 @@ func init() {
 			if err != nil {
 				return NewNull(), err
 			}
+			size := uint64(0)
+			for i, part := range parts {
+				size += uint64(len(part))
+				if i > 0 {
+					size += uint64(len(sep))
+				}
+			}
+			if err := vm.roomForText(size); err != nil {
+				return NewNull(), err
+			}
 			return vm.newString(strings.Join(parts, sep))
 		}},
 		native{"replace", 3, func(vm *VM, args []Value) (Value, error) {
@@ -168,6 +178,12 @@ func init() {
 			if old == "" {
 				return NewNull(), fmt.Errorf("the text to replace is empty")
 			}
+			if len(with) > len(old) {
+				grows := uint64(strings.Count(s, old)) * uint64(len(with)-len(old))
+				if err := vm.roomForText(uint64(len(s)) + grows); err != nil {
+					return NewNull(), err
+				}
+			}
 			return vm.newString(strings.ReplaceAll(s, old, with))
 		}},
 		native{"repeat", 2, func(vm *VM, args []Value) (Value, error) {
@@ -184,8 +200,11 @@ func init() {
 			}
 			// Checked before building it: the heap would only refuse the
 			// result once Go had already allocated it
-			if size := uint64(len(s)) * uint64(n); size > vm.heap.maxBytes {
-				return NewNull(), fmt.Errorf("out of memory: a text of %d bytes was requested, limit %d", size, vm.heap.maxBytes)
+			if n > 0 && uint64(len(s)) > maxTextBytes/uint64(n) {
+				return NewNull(), fmt.Errorf("out of memory: a text of %d bytes, %d times, cannot be made", len(s), n)
+			}
+			if err := vm.roomForText(uint64(len(s)) * uint64(n)); err != nil {
+				return NewNull(), err
 			}
 			return vm.newString(strings.Repeat(s, int(n)))
 		}},

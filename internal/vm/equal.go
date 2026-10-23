@@ -70,20 +70,29 @@ func (c *comparison) seen(a, b Value) bool {
 	return false
 }
 
+// equal compares, depth first and left to right, the pairs it has still
+// to compare, kept on a stack of its own: a value nested as deep as the
+// heap allows is compared without the Go stack growing with it.
 func (c *comparison) equal(a, b Value) (bool, error) {
-	for {
+	todo := [][2]Value{{a, b}}
+	for len(todo) > 0 {
+		a, b := todo[len(todo)-1][0], todo[len(todo)-1][1]
+		todo = todo[:len(todo)-1]
 		if a == b && !a.IsNumber() {
-			return true, nil
+			continue
 		}
 		if !holdsValues(a) || !holdsValues(b) {
-			return valuesEqual(a, b), nil
+			if !valuesEqual(a, b) {
+				return false, nil
+			}
+			continue
 		}
 		ha, hb := header(a), header(b)
 		if ha.Type != hb.Type {
 			return false, nil
 		}
 		if c.seen(a, b) {
-			return true, nil
+			continue
 		}
 
 		if ha.Type == ObjTypeArray {
@@ -91,13 +100,10 @@ func (c *comparison) equal(a, b Value) (bool, error) {
 			if xs.Len() != ys.Len() {
 				return false, nil
 			}
-			for i := 0; i < xs.Len(); i++ {
-				same, err := c.equal(xs.Get(i), ys.Get(i))
-				if err != nil || !same {
-					return false, err
-				}
+			for i := xs.Len() - 1; i >= 0; i-- {
+				todo = append(todo, [2]Value{xs.Get(i), ys.Get(i)})
 			}
-			return true, nil
+			continue
 		}
 
 		va, vb := (*ObjectObj)(unsafe.Pointer(ha)), (*ObjectObj)(unsafe.Pointer(hb))
@@ -114,39 +120,29 @@ func (c *comparison) equal(a, b Value) (bool, error) {
 			if err != nil {
 				return false, err
 			}
-			return result.IsBool() && result.AsBool(), nil
+			if !result.IsBool() || !result.AsBool() {
+				return false, nil
+			}
+			continue
 		}
 		if len(va.slots) != len(vb.slots) {
 			return false, nil
 		}
-		if len(va.slots) == 0 {
-			return true, nil
-		}
 
 		if va.shape != vb.shape {
 			// Not made the same way: by name, which is rare
-			for i, key := range va.shape.keys {
-				other, ok := vb.Get(key)
+			for i := len(va.shape.keys) - 1; i >= 0; i-- {
+				other, ok := vb.Get(va.shape.keys[i])
 				if !ok {
 					return false, nil
 				}
-				same, err := c.equal(va.slots[i], other)
-				if err != nil || !same {
-					return false, err
-				}
+				todo = append(todo, [2]Value{va.slots[i], other})
 			}
-			return true, nil
+			continue
 		}
-		last := len(va.slots) - 1
-		for i := 0; i < last; i++ {
-			same, err := c.equal(va.slots[i], vb.slots[i])
-			if err != nil || !same {
-				return false, err
-			}
+		for i := len(va.slots) - 1; i >= 0; i-- {
+			todo = append(todo, [2]Value{va.slots[i], vb.slots[i]})
 		}
-		// What is held last is compared by going round again rather
-		// than by a call: a list made of values, each holding the rest
-		// of the list, can be of any length.
-		a, b = va.slots[last], vb.slots[last]
 	}
+	return true, nil
 }

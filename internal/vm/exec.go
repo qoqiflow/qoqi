@@ -1801,13 +1801,13 @@ func (vm *VM) loop(base int) (Value, error) {
 			}
 
 			// A new field: the object takes the shape of those that have it
-			before := cap(obj.slots)
-			obj.slots = append(obj.slots, cur.regs[instr.C])
+			slots, grew, err := vm.roomForOne(obj.slots)
+			if err != nil {
+				return NewNull(), vm.runtimeError(err.Error())
+			}
+			obj.slots = append(slots, cur.regs[instr.C])
 			obj.shape = known.next
-			if after := cap(obj.slots); after > before {
-				if _, err := vm.heap.grow(uint64(after-before) * valueSize); err != nil {
-					return NewNull(), vm.runtimeError(err.Error())
-				}
+			if grew {
 				vm.collectIfNeeded()
 			}
 
@@ -1837,12 +1837,12 @@ func (vm *VM) loop(base int) (Value, error) {
 			if arrayObj.header.Frozen {
 				return NewNull(), vm.runtimeError(errFrozen)
 			}
-			before := cap(arrayObj.elements)
-			arrayObj.elements = append(arrayObj.elements, cur.regs[instr.B])
-			if after := cap(arrayObj.elements); after > before {
-				if _, err := vm.heap.grow(uint64(after-before) * valueSize); err != nil {
-					return NewNull(), vm.runtimeError(err.Error())
-				}
+			elements, grew, err := vm.roomForOne(arrayObj.elements)
+			if err != nil {
+				return NewNull(), vm.runtimeError(err.Error())
+			}
+			arrayObj.elements = append(elements, cur.regs[instr.B])
+			if grew {
 				vm.collectIfNeeded()
 			}
 
