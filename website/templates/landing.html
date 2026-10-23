@@ -5,9 +5,10 @@
   <section class="hero">
     <div class="hero-glow" aria-hidden="true"></div>
     <div class="hero-in">
-      <a class="pill" href="https://github.com/qoqiflow/qoqi/releases"><span class="pill-dot"></span>v0.1.0 · early, and open source</a>
+      <a class="pill" href="https://github.com/qoqiflow/qoqi/releases"><span class="pill-dot"></span>v0.1.0 · an early prototype, built with AI · open source</a>
       <h1>Durable workflows,<br>as plain programs.</h1>
-      <p class="lede">Write the process from top to bottom: wait three days, ask a manager, charge a card, retry, give up. Qoqi Flow keeps it alive through crashes, restarts and new versions of its own code, and never runs a finished step twice.</p>
+      <p class="lede">Write the process from top to bottom: wait three days, ask a manager, charge a card, retry, give up. Qoqi Flow keeps it alive through crashes, restarts and new versions of its own code, and never runs a step again once its result is kept.</p>
+      <p class="status-note">An early prototype by one person, built with heavy use of AI. It works end to end and is tested, but it has never run in production. <a href="/blog/durable-workflows-without-replay#where-the-project-stands">Where the project stands</a>.</p>
       <div class="install" data-copy-root>
         <span class="prompt">$</span>
         <code data-copy-text>curl -fsSL https://qoqi.dev/install.sh | sh</code>
@@ -87,7 +88,7 @@
           <li><span>its variables</span><b>its variables</b></li>
           <li><span>its sleep</span><b><code>wait time.after(3.days())</code></b></li>
           <li><span>its retries</span><b>a <code>for</code> loop</b></li>
-          <li><span>its crash recovery</span><b>nothing to write</b></li>
+          <li><span>its crash recovery</span><b>idempotent steps, and nothing else</b></li>
         </ul>
       </div>
     </div>
@@ -110,9 +111,9 @@
         <p>An instance is taken up from what was saved, not by running its history again. The code need not be deterministic, and a new version never re-runs an old history.</p>
       </a>
       <a class="cell" href="/docs/concepts/steps">
-        <span class="tag">exactly once</span>
-        <h3>Steps run once</h3>
-        <p>What a step returned is written before the flow goes on. One that may have half run is run again under the same key; one declared <code>Settled&lt;T&gt;</code> is never run twice.</p>
+        <span class="tag">at least once, keyed</span>
+        <h3>Steps, under a key</h3>
+        <p>What a step returned is written before the flow goes on, and is never asked for again. A step that may have half run is run again under the same key, for the service to recognise it: steps run at least once, as everywhere else. One declared <code>Settled&lt;T&gt;</code> is never sent twice, and the flow must handle <code>Unknown</code>.</p>
       </a>
       <a class="cell" href="/docs/concepts/versioning">
         <span class="tag">versions</span>
@@ -182,7 +183,7 @@
   <section class="compare">
     <div class="sec-head">
       <p class="eyebrow">How it compares</p>
-      <h2>Not a library added to a language.</h2>
+      <h2>A different trade-off, not a better engine.</h2>
     </div>
     <div class="table-wrap">
       <table>
@@ -190,13 +191,14 @@
         <tbody>
           <tr><th>What it is</th><td>A library or service added to an existing language</td><td class="us">A language and runtime made for flows</td></tr>
           <tr><th>Recovery after a crash</th><td>A history played again; the code must be deterministic</td><td class="us">The state frozen and thawed</td></tr>
-          <tr><th>Reaching the world outside a step</th><td>Found when it runs, or not at all</td><td class="us">Refused when it compiles</td></tr>
-          <tr><th>A new version of the code</th><td>A run is pinned to the version that started it, or patched by hand</td><td class="us">Pinned until the instance reaches a <code>stage</code>, where it moves, checked against <code>flow.lock</code></td></tr>
-          <tr><th>Testing crashes</th><td>Left to you</td><td class="us"><code>everyCrash</code></td></tr>
+          <tr><th>Reaching the world outside a step</th><td>A convention; a linter or a sandbox in some SDKs</td><td class="us">Refused when it compiles</td></tr>
+          <tr><th>A new version of the code</th><td>A run is pinned to the version that started it, or branches on a version marker in the code</td><td class="us">Pinned until the instance reaches a <code>stage</code>, where it moves, checked against <code>flow.lock</code></td></tr>
+          <tr><th>Testing</th><td>Test environments with time skipping; replay tests in some</td><td class="us">Trials on their own clock; <code>everyCrash</code> stops after every write</td></tr>
+          <tr><th>The cost</th><td>Your language, your libraries</td><td class="us">A new language for the flow itself</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="honest">What they have and Qoqi Flow does not yet: years in production, managed hosting, and SDKs for writing the flows themselves in many languages.</p>
+    <p class="honest">What they have and Qoqi Flow does not: years in production at scale, managed hosting, communities, and flows written in the languages you already use. For production work today, pick one of them.</p>
     {{if compare}}<p class="cta compare-more"><a class="btn" href="/vs/">Qoqi Flow against each of them</a></p>{{end}}
   </section>
 

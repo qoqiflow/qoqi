@@ -339,6 +339,8 @@ h1, h2, h3, h4 { line-height: 1.15; letter-spacing: -0.025em; font-weight: 600; 
 .compare td { color: var(--ink-2); }
 .compare .us { color: var(--ink); background: var(--accent-soft); }
 .compare thead .us { color: var(--accent); }
+.status-note { color: var(--ink-3); font-size: 14px; margin: -20px auto 30px; max-width: 560px; line-height: 1.5; }
+.status-note a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .honest { text-align: center; color: var(--ink-3); font-size: 15px; margin: 22px auto 0; max-width: 640px; }
 
 .end {
