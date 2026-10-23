@@ -481,3 +481,64 @@ func TestAProgramFrozenUnderTheOldNameIsTakenUp(t *testing.T) {
 		t.Errorf("sub is %s %s %s", got.Status, got.Result, got.Stopped)
 	}
 }
+
+// An instance held at a stage, a struct alive there, in two versions:
+// the second has the struct under the same name, with other fields.
+func answered(answer, describe string) string {
+	return `
+import std.flow.{Flow};
+import std.time;
+
+struct Answer { ` + answer + ` }
+
+struct Ask { id: String; }
+
+impl Flow<String> for Ask {
+    fn run() -> String {
+        let a = Answer { approved: true };
+        for i in 0..2 {
+            stage waiting;
+            wait time.after(10.milliseconds());
+        }
+        return said(a);
+    }
+}
+
+fn said(a: Answer) -> String { return ` + describe + `; }
+
+fn main() {}
+`
+}
+
+// A struct whose fields changed under the same name changes the shape of
+// the stages it is alive at: flow.lock says so, and an instance there
+// stays on its version rather than go on with fields it has not.
+func TestAStructChangedUnderItsNameChangesTheShape(t *testing.T) {
+	v1 := compiled(t, answered("approved: Bool;", `"${a.approved}"`))
+	v2src := strings.Replace(answered("note: String; approved: Bool;", `"${a.note.len()}"`), "Answer { approved: true }", `Answer { note: "", approved: true }`, 1)
+	v2 := compiled(t, v2src)
+
+	if changes := flowrt.Changes(flowrt.ShapesOf(v1, []string{"Ask"}), flowrt.ShapesOf(v2, []string{"Ask"})); len(changes) == 0 {
+		t.Errorf("flow.lock saw no change of the stage where an Answer is alive")
+	}
+
+	store := flowrt.NewMemory()
+	var out bytes.Buffer
+	first := flowrt.New(v1, store, &out)
+	if _, err := first.Start("ask", "Ask", []byte(`{"id": "1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.RunDue(); err != nil {
+		t.Fatal(err)
+	}
+	if inst, _, _ := store.Get("ask"); inst.Status != flowrt.Waiting {
+		t.Fatalf("ask is %s %s", inst.Status, inst.Stopped)
+	}
+	if err := flowrt.New(v2, store, &out).RunUntilIdle(10 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	inst, _, _ := store.Get("ask")
+	if inst.Status != flowrt.Done || string(inst.Result) != `"true"` || inst.Version != vm.Fingerprint(v1) {
+		t.Errorf("ask is %s %s %s, on %s", inst.Status, inst.Result, inst.Stopped, inst.Version)
+	}
+}

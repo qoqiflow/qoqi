@@ -93,6 +93,28 @@ func (c Change) String() string {
 	return fmt.Sprintf("stage %s of %s: %s", c.Stage, c.Flow, c.What)
 }
 
+// SameType says whether a variable of a stage has the same type in two
+// shapes. A type made of structs or enums carries the hash of their
+// layout after a #; a shape written before layouts were has none, and its
+// types are compared by name alone, so that a lock or a version of then
+// is not taken as changed everywhere.
+func SameType(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ia, ib := strings.LastIndex(a, "#"), strings.LastIndex(b, "#")
+	if ia >= 0 && ib >= 0 {
+		return false
+	}
+	if ia >= 0 {
+		a = a[:ia]
+	}
+	if ib >= 0 {
+		b = b[:ib]
+	}
+	return a == b
+}
+
 // Changes says what newer changed of the stages old had: a stage gone, a
 // variable added, gone, or of another type. A stage added is no change:
 // no instance is at it yet.
@@ -111,7 +133,7 @@ func Changes(old, newer Shapes) []Change {
 				switch t, ok := after[name]; {
 				case !ok:
 					said = append(said, name+" is gone")
-				case t != before[name]:
+				case !SameType(before[name], t):
 					said = append(said, fmt.Sprintf("%s: %s, now %s", name, before[name], t))
 				}
 			}
@@ -190,7 +212,7 @@ func Unanswered(changes []Change, old, newer Shapes, migrations []Migration) []C
 					switch t, ok := before["self."+name]; {
 					case !ok:
 						left = append(left, Change{change.Flow, "fields", fmt.Sprintf("migrate fn fields takes %s, which the flow had not", name)})
-					case t != m.Params[name]:
+					case !SameType(t, m.Params[name]):
 						left = append(left, Change{change.Flow, "fields", fmt.Sprintf("migrate fn fields takes %s as a %s; it was a %s", name, m.Params[name], t)})
 					}
 				}
@@ -208,7 +230,7 @@ func Unanswered(changes []Change, old, newer Shapes, migrations []Migration) []C
 			switch t, ok := before[name]; {
 			case !ok:
 				left = append(left, Change{change.Flow, change.Stage, fmt.Sprintf("migrate fn %s takes %s, which the stage had not", change.Stage, name)})
-			case t != m.Params[name]:
+			case !SameType(t, m.Params[name]):
 				left = append(left, Change{change.Flow, change.Stage, fmt.Sprintf("migrate fn %s takes %s as a %s; it was a %s there", change.Stage, name, m.Params[name], t)})
 			}
 		}

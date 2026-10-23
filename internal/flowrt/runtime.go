@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/qoqiflow/qoqi/internal/flowlock"
 	"github.com/qoqiflow/qoqi/internal/vm"
 )
 
@@ -342,7 +343,7 @@ func sameShape(old, newer *vm.Chunk, flow, stage string) bool {
 		return false
 	}
 	for name, t := range a.Shape {
-		if b.Shape[name] != t {
+		if other, ok := b.Shape[name]; !ok || !flowlock.SameType(t, other) {
 			return false
 		}
 	}
@@ -440,7 +441,7 @@ func (r *Runtime) migrate(old *vm.Chunk, flow string, at *AtStage) (*AtStage, er
 			continue
 		}
 		// What a loop keeps for itself, as it was
-		if from.Shape[name] != t || at.Vars[name] == nil {
+		if !flowlock.SameType(from.Shape[name], t) || at.Vars[name] == nil {
 			return nil, nil
 		}
 		vars[name] = at.Vars[name]
@@ -515,7 +516,7 @@ func sameFields(shape, fields map[string]string) bool {
 	for name, t := range shape {
 		if name == "self" || strings.HasPrefix(name, "self.") {
 			n++
-			if fields[name] != t {
+			if other, ok := fields[name]; !ok || !flowlock.SameType(t, other) {
 				return false
 			}
 		}
@@ -539,7 +540,7 @@ func sameVariables(a, b map[string]string) bool {
 		return false
 	}
 	for name, t := range a {
-		if name != "self" && !strings.HasPrefix(name, "self.") && b[name] != t {
+		if other, ok := b[name]; name != "self" && !strings.HasPrefix(name, "self.") && (!ok || !flowlock.SameType(t, other)) {
 			return false
 		}
 	}

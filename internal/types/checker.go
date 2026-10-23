@@ -1,6 +1,8 @@
 package types
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strconv"
@@ -2136,14 +2138,93 @@ func (c *Checker) noteStage(s *ast.ExprStmt) {
 		if t == nil {
 			continue
 		}
-		shape[sym.Name] = describe(t)
+		shape[sym.Name] = c.shapeOf(t)
 		if st, ok := t.(*StructType); ok && sym.Name == "self" {
+			// The flow by its name: its fields are each in the shape
+			shape[sym.Name] = describe(t)
 			if decl := c.structs[st.Name]; decl != nil {
 				for _, field := range decl.Fields {
-					shape["self."+field.Name] = describe(c.resolveType(field.Type))
+					shape["self."+field.Name] = c.shapeOf(c.resolveType(field.Type))
 				}
 			}
 		}
 	}
 	c.info.StageTypes[s] = shape
+}
+
+// shapeOf is a type as a stage's shape keeps it: as it is written, and,
+// for a type made of structs or enums, a hash of their layout after a #:
+// Answer#1f2e3d4c5b6a. A struct whose fields changed, or an enum whose
+// variants did, is then another shape, though its name is the same.
+func (c *Checker) shapeOf(t Type) string {
+	written := describe(t)
+	layout := c.layout(t, map[string]bool{})
+	if layout == written {
+		return written
+	}
+	sum := sha256.Sum256([]byte(layout))
+	return written + "#" + hex.EncodeToString(sum[:6])
+}
+
+// layout is a type with what it is made of: the fields of a struct, in
+// their order, the variants of an enum and what each holds, each of their
+// types the same way. A type met again inside itself is its name.
+func (c *Checker) layout(t Type, seen map[string]bool) string {
+	switch t := t.(type) {
+	case *StructType:
+		name := describe(t)
+		if seen[name] {
+			return name
+		}
+		seen[name] = true
+		defer delete(seen, name)
+		var parts []string
+		if decl := c.structs[t.Name]; decl != nil {
+			restore := c.bindStructParams(decl, t.TypeArgs)
+			for _, field := range decl.Fields {
+				parts = append(parts, field.Name+": "+c.layout(c.resolveType(field.Type), seen))
+			}
+			restore()
+			return name + "{" + strings.Join(parts, ", ") + "}"
+		}
+		if decl := c.enums[t.Name]; decl != nil {
+			for _, variant := range decl.Variants {
+				var values []string
+				for i, value := range c.variantFields(decl, variant, t.TypeArgs) {
+					v := c.layout(value, seen)
+					if i < len(variant.Names) {
+						v = variant.Names[i] + ": " + v
+					}
+					values = append(values, v)
+				}
+				parts = append(parts, variant.Name+"("+strings.Join(values, ", ")+")")
+			}
+			return name + "{" + strings.Join(parts, " | ") + "}"
+		}
+		if len(t.TypeArgs) == 0 {
+			return name
+		}
+		for _, arg := range t.TypeArgs {
+			parts = append(parts, c.layout(arg, seen))
+		}
+		return name + "[" + strings.Join(parts, ", ") + "]"
+	case *ArrayType:
+		inner := c.layout(t.ElementType, seen)
+		if inner == describe(t.ElementType) {
+			return describe(t)
+		}
+		return "[" + inner + "]"
+	case *UnionType:
+		parts := make([]string, len(t.Types))
+		changed := false
+		for i, member := range t.Types {
+			parts[i] = c.layout(member, seen)
+			changed = changed || parts[i] != describe(member)
+		}
+		if !changed {
+			return describe(t)
+		}
+		return strings.Join(parts, " | ")
+	}
+	return describe(t)
 }

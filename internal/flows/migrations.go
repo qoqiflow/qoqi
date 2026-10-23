@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/qoqiflow/qoqi/internal/ast"
+	"github.com/qoqiflow/qoqi/internal/flowlock"
 )
 
 // ErrMigration is a migrate fn that does not fit the flow it is written
@@ -88,7 +89,7 @@ func (c *checker) checkMigration(flow string, method *ast.FnDecl, shapes map[str
 		switch got, ok := fields[name]; {
 		case !ok:
 			wrong = append(wrong, fmt.Sprintf("%s has no field %s: %s", target, name, t))
-		case got != t:
+		case !flowlock.SameType(got, t):
 			wrong = append(wrong, fmt.Sprintf("%s.%s is a %s; %s is a %s at the stage", target, name, got, name, t))
 		}
 	}
