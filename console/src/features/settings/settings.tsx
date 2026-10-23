@@ -166,11 +166,13 @@ function UsersPanel() {
   return (
     <Panel
       title="Users"
-      hint="The people who sign in to this console. Each can do everything: start, cancel, edit and deploy."
+      hint="The people who sign in to this console. An operator starts, sends, cancels and resumes instances. An admin also edits and deploys code, which runs on the daemon's host, and changes people."
       action={
-        <Button onClick={() => setAdding(true)}>
-          <UserPlus /> Add a user
-        </Button>
+        !me.operator && (
+          <Button onClick={() => setAdding(true)}>
+            <UserPlus /> Add a user
+          </Button>
+        )
       }
     >
       <div className="overflow-hidden rounded-lg border">
@@ -178,6 +180,7 @@ function UsersPanel() {
           <TableHeader>
             <TableRow>
               <TableHead className="pl-4">Name</TableHead>
+              <TableHead>Role</TableHead>
               <TableHead>Since</TableHead>
               <TableHead className="pr-4 text-right" />
             </TableRow>
@@ -190,10 +193,11 @@ function UsersPanel() {
                   {u.name === me.user && <span className="ml-2 text-xs text-muted-foreground">you</span>}
                   {u.renew && <span className="ml-2 rounded bg-warning/15 px-1.5 text-xs text-warning">to choose a password</span>}
                 </TableCell>
+                <TableCell className="text-muted-foreground">{u.operator ? 'Operator' : 'Admin'}</TableCell>
                 <TableCell className="text-muted-foreground">{new Date(u.created).toLocaleDateString()}</TableCell>
                 <TableCell className="pr-4 text-right">
                   <div className="flex justify-end gap-1">
-                    {u.name !== me.user && (
+                    {u.name !== me.user && !me.operator && (
                       <>
                         <Button size="sm" variant="ghost" onClick={() => setResetting(u.name)}>
                           <KeyRound /> New password
@@ -211,7 +215,7 @@ function UsersPanel() {
         </Table>
       </div>
       <p className="text-xs text-muted-foreground">
-        From a terminal: <code className="font-mono">qoqi users add|passwd|rm &lt;name&gt;</code>
+        From a terminal: <code className="font-mono">qoqi users add|passwd|rm &lt;name&gt; [--admin]</code>
       </p>
 
       <PasswordDialog
@@ -219,8 +223,8 @@ function UsersPanel() {
         onClose={() => setAdding(false)}
         title="Add a user"
         withName
-        onSubmit={async (name, password) => {
-          await api.addUser(name, password);
+        onSubmit={async (name, password, admin) => {
+          await api.addUser(name, password, admin);
           toast.success(`${name} signs in from now on`);
           client.invalidateQueries({ queryKey: ['users'] });
         }}
@@ -268,14 +272,16 @@ function PasswordDialog({
   onClose: () => void;
   title: string;
   withName?: boolean;
-  onSubmit: (name: string, password: string) => Promise<void>;
+  onSubmit: (name: string, password: string, admin: boolean) => Promise<void>;
 }) {
   const [name, setName] = useState('');
+  const [admin, setAdmin] = useState(false);
   const [password, setPassword] = useState('');
   const [problem, setProblem] = useState('');
   const [busy, setBusy] = useState(false);
   const close = () => {
     setName('');
+    setAdmin(false);
     setPassword('');
     setProblem('');
     onClose();
@@ -293,7 +299,7 @@ function PasswordDialog({
             setBusy(true);
             setProblem('');
             try {
-              await onSubmit(name.trim(), password);
+              await onSubmit(name.trim(), password, admin);
               close();
             } catch (err) {
               setProblem((err as Error).message);
@@ -313,6 +319,15 @@ function PasswordDialog({
             <Input id="user-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus={!withName} />
             <p className="text-xs text-muted-foreground">10 characters at least. Give it to them: they choose their own when they sign in.</p>
           </div>
+          {withName && (
+            <div className="flex items-start gap-3">
+              <Switch id="user-admin" checked={admin} onCheckedChange={setAdmin} />
+              <div className="grid gap-0.5">
+                <Label htmlFor="user-admin">Admin</Label>
+                <p className="text-xs text-muted-foreground">Edits and deploys code, which runs on the daemon's host, and changes people. Otherwise an operator, who works with instances.</p>
+              </div>
+            </div>
+          )}
           {problem && <p className="text-sm text-destructive">{problem}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={close}>

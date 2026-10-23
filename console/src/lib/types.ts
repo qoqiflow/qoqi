@@ -250,6 +250,7 @@ export interface Principal {
   user?: string;
   token?: boolean;
   renew?: boolean; // a password given them: changed before anything else
+  operator?: boolean; // works with instances: does not deploy or change people
 }
 
 export interface AuthState {
@@ -270,6 +271,7 @@ export interface User {
   name: string;
   created: number;
   renew?: boolean; // to choose a password of their own at their next sign in
+  operator?: boolean; // works with instances: does not deploy or change people
 }
 
 /** A program as the editor lists it. */

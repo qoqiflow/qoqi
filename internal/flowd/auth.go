@@ -34,6 +34,10 @@ const (
 	// a header a page of another site cannot send without asking first
 	consoleHeader = "X-Qoqi-Console"
 	hashRounds    = 210_000
+	// What a request about people carries is small: a name and passwords
+	authBodyLimit = 4 << 10
+	// The names the throttle keeps, at most: beyond, the oldest go
+	throttleNames = 10_000
 )
 
 // Principal is who asks: a user by name, or a holder of the token.
@@ -43,6 +47,9 @@ type Principal struct {
 	// Renew says the user's password is one given them: until they change
 	// it, it is all they may do
 	Renew bool `json:"renew,omitempty"`
+	// Operator says the user works with instances only, not with code
+	// or people
+	Operator bool `json:"operator,omitempty"`
 }
 
 type principalKey struct{}
@@ -115,18 +122,22 @@ func sessionID(cookie string) string {
 }
 
 // throttle slows down whoever guesses passwords: a name that failed five
-// times in a quarter of an hour is refused until it passes.
+// times in a quarter of an hour is refused until it passes. It keeps
+// throttleNames names at most, so that guesses of many names do not fill
+// the memory.
 type throttle struct {
 	mu    sync.Mutex
 	fails map[string][]time.Time
 }
+
+const throttleWindow = 15 * time.Minute
 
 func (t *throttle) blocked(name string, now time.Time) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	var recent []time.Time
 	for _, at := range t.fails[name] {
-		if now.Sub(at) < 15*time.Minute {
+		if now.Sub(at) < throttleWindow {
 			recent = append(recent, at)
 		}
 	}
@@ -144,8 +155,40 @@ func (t *throttle) failed(name string, now time.Time) {
 	if t.fails == nil {
 		t.fails = map[string][]time.Time{}
 	}
+	if _, kept := t.fails[name]; !kept && len(t.fails) >= throttleNames {
+		t.forget(now)
+	}
 	t.fails[name] = append(t.fails[name], now)
 }
+
+// forget makes room: the names whose failures are past go, and if none
+// is, the one whose last failure is the oldest.
+func (t *throttle) forget(now time.Time) {
+	oldest, at := "", now
+	for name, fails := range t.fails {
+		last := fails[len(fails)-1]
+		if now.Sub(last) >= throttleWindow {
+			delete(t.fails, name)
+		} else if last.Before(at) {
+			oldest, at = name, last
+		}
+	}
+	if len(t.fails) >= throttleNames {
+		delete(t.fails, oldest)
+	}
+}
+
+// decodeBody reads a small JSON body, of limit bytes at most.
+func decodeBody(w http.ResponseWriter, r *http.Request, limit int64, into any) error {
+	return json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(into)
+}
+
+// absent is the hash a sign in under a name nobody has is checked
+// against, so that it takes as long as one under a name somebody has.
+var absent = sync.OnceValue(func() string {
+	hash, _ := HashPassword("")
+	return hash
+})
 
 func (t *throttle) passed(name string) {
 	t.mu.Lock()
@@ -173,7 +216,7 @@ func (d *Daemon) authenticate(r *http.Request) (Principal, string) {
 			if r.Method != http.MethodGet && r.Header.Get(consoleHeader) == "" {
 				return Principal{}, "a request of the console carries " + consoleHeader
 			}
-			return Principal{User: s.User, Renew: s.Renew}, ""
+			return Principal{User: s.User, Renew: s.Renew, Operator: s.Operator}, ""
 		}
 		return Principal{}, "sign in to the console, or give the daemon's token: Authorization: Bearer <token>"
 	}
@@ -243,7 +286,7 @@ type credentials struct {
 
 // addUser adds a person, with a password given them: with renew, theirs
 // to change at their first sign in.
-func (d *Daemon) addUser(w http.ResponseWriter, name, password string, renew bool) bool {
+func (d *Daemon) addUser(w http.ResponseWriter, name, password string, renew, operator bool) bool {
 	if err := CheckUserName(name); err != nil {
 		fail(w, http.StatusBadRequest, "name", err.Error())
 		return false
@@ -257,7 +300,7 @@ func (d *Daemon) addUser(w http.ResponseWriter, name, password string, renew boo
 		fail(w, http.StatusInternalServerError, "password", err.Error())
 		return false
 	}
-	if err := d.Keep.AddUser(User{Name: name, Hash: hash, Created: time.Now().UnixMilli(), Renew: renew}); err != nil {
+	if err := d.Keep.AddUser(User{Name: name, Hash: hash, Created: time.Now().UnixMilli(), Renew: renew, Operator: operator}); err != nil {
 		fail(w, http.StatusConflict, "name", err.Error())
 		return false
 	}
@@ -270,8 +313,14 @@ func (d *Daemon) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var c credentials
-	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		fail(w, http.StatusBadRequest, "body", "the body is JSON: {\"name\": ..., \"password\": ...}")
+	if err := decodeBody(w, r, authBodyLimit, &c); err != nil {
+		fail(w, http.StatusBadRequest, "body", "the body is JSON: {\"name\": ..., \"password\": ...}, of 4 KB at most")
+		return
+	}
+	if CheckUserName(c.Name) != nil {
+		// No user has such a name: nothing to throttle, nothing to keep
+		CheckPassword(absent(), c.Password)
+		fail(w, http.StatusUnauthorized, "login", "this name and this password do not go together")
 		return
 	}
 	now := time.Now()
@@ -280,7 +329,11 @@ func (d *Daemon) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := d.Keep.User(c.Name)
-	if err != nil || !CheckPassword(u.Hash, c.Password) {
+	if err != nil {
+		// As long as a wrong password, so that the time does not say who is there
+		u.Hash = absent()
+	}
+	if !CheckPassword(u.Hash, c.Password) || err != nil {
 		d.logins.failed(c.Name, now)
 		fail(w, http.StatusUnauthorized, "login", "this name and this password do not go together")
 		return
@@ -290,7 +343,7 @@ func (d *Daemon) login(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, "session", err.Error())
 		return
 	}
-	answer(w, http.StatusOK, Principal{User: u.Name, Renew: u.Renew})
+	answer(w, http.StatusOK, Principal{User: u.Name, Renew: u.Renew, Operator: u.Operator})
 }
 
 func (d *Daemon) logout(w http.ResponseWriter, r *http.Request) {
@@ -322,15 +375,20 @@ func (d *Daemon) createUser(w http.ResponseWriter, r *http.Request) {
 	if d.noAccounts(w) {
 		return
 	}
-	var c credentials
-	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		fail(w, http.StatusBadRequest, "body", "the body is JSON: {\"name\": ..., \"password\": ...}")
+	var c struct {
+		credentials
+		// Admin makes one who deploys and changes people: a user added is
+		// an operator otherwise
+		Admin bool `json:"admin"`
+	}
+	if err := decodeBody(w, r, authBodyLimit, &c); err != nil {
+		fail(w, http.StatusBadRequest, "body", "the body is JSON: {\"name\": ..., \"password\": ..., \"admin\": false}, of 4 KB at most")
 		return
 	}
 	d.accountsMu.Lock()
 	defer d.accountsMu.Unlock()
-	if d.addUser(w, c.Name, c.Password, true) {
-		answer(w, http.StatusCreated, User{Name: c.Name, Created: time.Now().UnixMilli(), Renew: true})
+	if d.addUser(w, c.Name, c.Password, true, !c.Admin) {
+		answer(w, http.StatusCreated, User{Name: c.Name, Created: time.Now().UnixMilli(), Renew: true, Operator: !c.Admin})
 	}
 }
 
@@ -371,8 +429,12 @@ func (d *Daemon) password(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 		Current  string `json:"current"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&asked); err != nil {
-		fail(w, http.StatusBadRequest, "body", "the body is JSON: {\"password\": ..., \"current\": ...}")
+	if err := decodeBody(w, r, authBodyLimit, &asked); err != nil {
+		fail(w, http.StatusBadRequest, "body", "the body is JSON: {\"password\": ..., \"current\": ...}, of 4 KB at most")
+		return
+	}
+	own := principalOf(r).User == name
+	if !own && !d.mayAdminister(w, r) {
 		return
 	}
 	u, err := d.Keep.User(name)
@@ -380,7 +442,6 @@ func (d *Daemon) password(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "user", "there is no user "+name)
 		return
 	}
-	own := principalOf(r).User == name
 	if own && !CheckPassword(u.Hash, asked.Current) {
 		fail(w, http.StatusUnauthorized, "password", "the current password is not this one")
 		return
@@ -426,4 +487,24 @@ func (d *Daemon) prefs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// mayAdminister says whether who asks deploys and changes people: the
+// token, or a user who is not an operator. Refused, the request is
+// answered.
+func (d *Daemon) mayAdminister(w http.ResponseWriter, r *http.Request) bool {
+	if principalOf(r).Operator {
+		fail(w, http.StatusForbidden, "role", "an operator works with instances: an admin deploys code and changes people")
+		return false
+	}
+	return true
+}
+
+// admin is a handler for admins alone.
+func (d *Daemon) admin(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if d.mayAdminister(w, r) {
+			h(w, r)
+		}
+	}
 }

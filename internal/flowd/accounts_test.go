@@ -3,6 +3,7 @@ package flowd_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -128,7 +129,7 @@ func TestTheConsoleStartsWithAdminWhoChoosesAPassword(t *testing.T) {
 		t.Fatalf("a change without the console's header: %d", status)
 	}
 	ada.plain = false
-	if status, said := ada.do(t, "POST", "/api/users", `{"name": "bob", "password": "another long one"}`); status != http.StatusCreated {
+	if status, said := ada.do(t, "POST", "/api/users", `{"name": "bob", "password": "another long one", "admin": true}`); status != http.StatusCreated {
 		t.Fatalf("admin adds bob: %d %s", status, said)
 	}
 
@@ -180,6 +181,112 @@ func TestGuessingPasswordsIsSlowedDown(t *testing.T) {
 	}
 	if status, _ := b.do(t, "POST", "/api/auth/login", `{"name": "ada", "password": "a long password"}`); status != http.StatusTooManyRequests {
 		t.Fatalf("after five guesses: %d", status)
+	}
+}
+
+// An operator works with instances: deploying code, which runs on the
+// daemon's host, running a draft and changing people are an admin's.
+func TestAnOperatorDoesNotDeployNorChangePeople(t *testing.T) {
+	d, server := kept(t)
+	signIn := func(name, password string, admin bool) *browser {
+		body, _ := json.Marshal(map[string]any{"name": name, "password": "given long password", "admin": admin})
+		if status, said := call(t, d, server, "POST", "/api/users", string(body)); status != http.StatusCreated {
+			t.Fatalf("add %s: %d %s", name, status, said)
+		}
+		b := newBrowser(t, server)
+		b.do(t, "POST", "/api/auth/login", `{"name": "`+name+`", "password": "given long password"}`)
+		if status, said := b.do(t, "POST", "/api/users/"+name+"/password", `{"password": "`+password+`", "current": "given long password"}`); status != http.StatusNoContent {
+			t.Fatalf("%s chooses a password: %d %s", name, status, said)
+		}
+		return b
+	}
+	op := signIn("op", "an operator's password", false)
+	ada := signIn("ada", "an admin's password", true)
+
+	if status, said := op.do(t, "GET", "/api/auth", ""); !strings.Contains(said, `"operator": true`) {
+		t.Fatalf("the console is told op is an operator: %d %s", status, said)
+	}
+	if status, said := call(t, d, server, "GET", "/api/users", ""); !strings.Contains(said, `"operator": true`) || strings.Count(said, `"operator"`) != 1 {
+		t.Fatalf("op alone is an operator: %d %s", status, said)
+	}
+	program, _ := json.Marshal(map[string]any{"name": "greet", "files": map[string]string{"greet.qi": greeter}})
+	file, _ := json.Marshal(map[string]string{"text": greeter})
+	refused := []struct{ method, path, body string }{
+		{"POST", "/api/deploy", string(program)},
+		{"POST", "/api/undeploy", `{"name": "greet"}`},
+		{"POST", "/api/deployments/1/redeploy", ""},
+		{"PUT", "/api/workspace/greet/files/greet.qi", string(file)},
+		{"DELETE", "/api/workspace/greet", ""},
+		{"POST", "/api/workspace/greet/deploy", ""},
+		{"POST", "/api/workspace/greet/test", ""},
+		{"POST", "/api/workspace/greet/try", ""},
+		{"POST", "/api/users", `{"name": "eve", "password": "a long password", "admin": true}`},
+		{"DELETE", "/api/users/ada", ""},
+		{"POST", "/api/users/ada/password", `{"password": "taken over by op"}`},
+	}
+	for _, r := range refused {
+		if status, said := op.do(t, r.method, r.path, r.body); status != http.StatusForbidden || !strings.Contains(said, `"role"`) {
+			t.Fatalf("an operator: %s %s: %d %s", r.method, r.path, status, said)
+		}
+	}
+	// What an operator does: read, check, and their own password
+	if status, said := op.do(t, "GET", "/api/instances", ""); status != 200 {
+		t.Fatalf("op reads the instances: %d %s", status, said)
+	}
+	if status, said := op.do(t, "POST", "/api/users/op/password", `{"password": "another operator's one", "current": "an operator's password"}`); status != http.StatusNoContent {
+		t.Fatalf("op changes their own password: %d %s", status, said)
+	}
+	// An admin deploys
+	if status, said := ada.do(t, "PUT", "/api/workspace/greet/files/greet.qi", string(file)); status != 200 {
+		t.Fatalf("ada saves a draft: %d %s", status, said)
+	}
+	if status, said := ada.do(t, "POST", "/api/workspace/greet/deploy", ""); status != 200 {
+		t.Fatalf("ada deploys: %d %s", status, said)
+	}
+	// And an operator starts what was deployed
+	if status, said := op.do(t, "POST", "/api/instances", `{"flow": "Greet", "id": "g:1", "fields": {"name": "op"}}`); status >= 300 {
+		t.Fatalf("op starts an instance: %d %s", status, said)
+	}
+}
+
+// What a request about people carries is small, and the throttle keeps
+// a bounded number of names: guesses of many long names do not fill the
+// memory. A name nobody has takes as long as a wrong password.
+func TestSigningInIsBounded(t *testing.T) {
+	d, server := kept(t)
+	b := newBrowser(t, server)
+	big := `{"name": "` + strings.Repeat("a", 1<<20) + `", "password": "x"}`
+	if status, said := b.do(t, "POST", "/api/auth/login", big); status != http.StatusBadRequest {
+		t.Fatalf("a body of a megabyte: %d %.200s", status, said)
+	}
+	long := `{"name": "` + strings.Repeat("a", 3000) + `", "password": "x"}`
+	if status, _ := b.do(t, "POST", "/api/auth/login", long); status != http.StatusUnauthorized {
+		t.Fatalf("a name no one can have: %d", status)
+	}
+	if n := d.Throttled(); n != 0 {
+		t.Fatalf("a name no one can have is kept by the throttle: %d", n)
+	}
+	for i := 0; i < flowd.ThrottleNames+50; i++ {
+		d.FailLogin(fmt.Sprintf("guess%d", i), time.Now())
+	}
+	if n := d.Throttled(); n > flowd.ThrottleNames {
+		t.Fatalf("the throttle keeps %d names, more than %d", n, flowd.ThrottleNames)
+	}
+	if status, said := call(t, d, server, "POST", "/api/users", `{"name": "ada", "password": "a long password"}`); status != http.StatusCreated {
+		t.Fatalf("add ada: %d %s", status, said)
+	}
+	timed := func(name string) time.Duration {
+		fastest := time.Hour
+		for range 3 {
+			start := time.Now()
+			b.do(t, "POST", "/api/auth/login", `{"name": "`+name+`", "password": "wrong password"}`)
+			fastest = min(fastest, time.Since(start))
+		}
+		return fastest
+	}
+	known, unknown := timed("ada"), timed("nobody")
+	if unknown < known/3 {
+		t.Fatalf("a name nobody has is answered in %v, ada's in %v: the time says who is there", unknown, known)
 	}
 }
 

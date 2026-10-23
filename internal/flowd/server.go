@@ -299,6 +299,11 @@ func (d *Daemon) poke() {
 // Handler is the HTTP API. Every request carries the token; the host a
 // request names has to be the daemon's own, so that a page of another
 // site cannot reach it under a name of its own.
+//
+// What changes code or people is for admins alone: the token, or a user
+// who is not an operator. Code deployed runs on the daemon's host with
+// the daemon's rights, through its steps, so that whoever deploys can do
+// there what the daemon can.
 func (d *Daemon) Handler(hosts ...string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/flows", d.listFlows)
@@ -312,33 +317,33 @@ func (d *Daemon) Handler(hosts ...string) http.Handler {
 	mux.HandleFunc("POST /api/instances/{id}/answer", d.answerByHand)
 	mux.HandleFunc("POST /api/instances/{id}/inboxes/{inbox}", d.send)
 	mux.HandleFunc("GET /api/program", d.program)
-	mux.HandleFunc("POST /api/deploy", d.deploy)
-	mux.HandleFunc("POST /api/undeploy", d.undeploy)
+	mux.HandleFunc("POST /api/deploy", d.admin(d.deploy))
+	mux.HandleFunc("POST /api/undeploy", d.admin(d.undeploy))
 	mux.HandleFunc("GET /api/deployments", d.deployments)
 	mux.HandleFunc("GET /api/deployments/{seq}", d.deployment)
 	mux.HandleFunc("GET /api/deployments/{seq}/diff", d.diff)
-	mux.HandleFunc("POST /api/deployments/{seq}/redeploy", d.redeploy)
+	mux.HandleFunc("POST /api/deployments/{seq}/redeploy", d.admin(d.redeploy))
 	mux.HandleFunc("GET /api/source", d.source)
 	mux.HandleFunc("GET /api/events", d.events)
 	mux.HandleFunc("GET /api/output", d.output)
 	mux.HandleFunc("GET /api/users", d.listUsers)
-	mux.HandleFunc("POST /api/users", d.createUser)
-	mux.HandleFunc("DELETE /api/users/{name}", d.removeUser)
+	mux.HandleFunc("POST /api/users", d.admin(d.createUser))
+	mux.HandleFunc("DELETE /api/users/{name}", d.admin(d.removeUser))
 	mux.HandleFunc("POST /api/users/{name}/password", d.password)
 	mux.HandleFunc("PUT /api/me/prefs", d.prefs)
 	mux.HandleFunc("GET /api/workspace", d.workspace)
 	mux.HandleFunc("GET /api/workspace/{program}", d.draft)
-	mux.HandleFunc("DELETE /api/workspace/{program}", d.discard)
-	mux.HandleFunc("PUT /api/workspace/{program}/files/{file...}", d.saveFile)
-	mux.HandleFunc("DELETE /api/workspace/{program}/files/{file...}", d.removeFile)
+	mux.HandleFunc("DELETE /api/workspace/{program}", d.admin(d.discard))
+	mux.HandleFunc("PUT /api/workspace/{program}/files/{file...}", d.admin(d.saveFile))
+	mux.HandleFunc("DELETE /api/workspace/{program}/files/{file...}", d.admin(d.removeFile))
 	mux.HandleFunc("POST /api/workspace/{program}/check", d.check)
-	mux.HandleFunc("POST /api/workspace/{program}/deploy", d.deployDraft)
-	mux.HandleFunc("POST /api/workspace/{program}/test", d.test)
-	mux.HandleFunc("POST /api/workspace/{program}/try", d.try)
+	mux.HandleFunc("POST /api/workspace/{program}/deploy", d.admin(d.deployDraft))
+	mux.HandleFunc("POST /api/workspace/{program}/test", d.admin(d.test))
+	mux.HandleFunc("POST /api/workspace/{program}/try", d.admin(d.try))
 	mux.HandleFunc("GET /api/sandboxes", d.listTrials)
 	mux.HandleFunc("GET /api/sandboxes/{id}", d.showTrial)
-	mux.HandleFunc("DELETE /api/sandboxes/{id}", d.closeTrial)
-	mux.HandleFunc("POST /api/sandboxes/{id}/{act}", d.actTrial)
+	mux.HandleFunc("DELETE /api/sandboxes/{id}", d.admin(d.closeTrial))
+	mux.HandleFunc("POST /api/sandboxes/{id}/{act}", d.admin(d.actTrial))
 	mux.HandleFunc("POST /api/format", d.format)
 	mux.HandleFunc("GET /api/stats", d.stats)
 	public := http.NewServeMux()

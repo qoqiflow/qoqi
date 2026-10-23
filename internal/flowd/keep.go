@@ -30,15 +30,20 @@ type User struct {
 	// Renew says the password is one given, admin's first: it is to be
 	// changed before anything else
 	Renew bool `json:"renew,omitempty"`
+	// Operator says the user works with instances only: they do not
+	// deploy code, run a draft or change people. Whoever deploys can run
+	// anything on the daemon's host, through a step
+	Operator bool `json:"operator,omitempty"`
 }
 
 // Session is a person signed in, by the hash of what their cookie holds.
 type Session struct {
-	ID      string
-	User    string
-	Created int64
-	Expires int64
-	Renew   bool // the user's password is to be changed first
+	ID       string
+	User     string
+	Created  int64
+	Expires  int64
+	Renew    bool // the user's password is to be changed first
+	Operator bool // the user works with instances only
 }
 
 // Draft is a file of a program written in the console, not deployed yet.
@@ -79,7 +84,8 @@ CREATE TABLE IF NOT EXISTS console_users (
     hash    TEXT NOT NULL,
     created INTEGER NOT NULL,
     prefs   TEXT NOT NULL DEFAULT '',
-    renew   INTEGER NOT NULL DEFAULT 0
+    renew   INTEGER NOT NULL DEFAULT 0,
+    operator INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS console_sessions (
     id      TEXT PRIMARY KEY,
@@ -120,7 +126,8 @@ CREATE TABLE IF NOT EXISTS console_users (
     hash    TEXT NOT NULL,
     created BIGINT NOT NULL,
     prefs   TEXT NOT NULL DEFAULT '',
-    renew   INTEGER NOT NULL DEFAULT 0
+    renew   INTEGER NOT NULL DEFAULT 0,
+    operator INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS console_sessions (
     id      TEXT PRIMARY KEY,
@@ -161,7 +168,8 @@ CREATE TABLE IF NOT EXISTS console_users (
     hash    TEXT NOT NULL,
     created BIGINT NOT NULL,
     prefs   TEXT NOT NULL,
-    renew   INTEGER NOT NULL DEFAULT 0
+    renew   INTEGER NOT NULL DEFAULT 0,
+    operator INTEGER NOT NULL DEFAULT 0
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 CREATE TABLE IF NOT EXISTS console_sessions (
     id      VARCHAR(128) PRIMARY KEY,
@@ -216,6 +224,8 @@ func OpenKeep(db *sql.DB, kind sqldb.Kind) (*Keep, error) {
 	}
 	// Tables made before a column was: refused when it is there already
 	_, _ = db.Exec(`ALTER TABLE console_users ADD COLUMN renew INTEGER NOT NULL DEFAULT 0`)
+	// Users from before roles were changed code and people: admins still
+	_, _ = db.Exec(`ALTER TABLE console_users ADD COLUMN operator INTEGER NOT NULL DEFAULT 0`)
 	return &Keep{db: db, kind: kind}, nil
 }
 
@@ -264,7 +274,7 @@ func (k *Keep) insertOnce(table, columns, key string) string {
 
 // Users are the people who sign in, by name.
 func (k *Keep) Users() ([]User, error) {
-	rows, err := k.db.Query(`SELECT name, hash, created, prefs, renew FROM console_users ORDER BY name`)
+	rows, err := k.db.Query(`SELECT name, hash, created, prefs, renew, operator FROM console_users ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +282,7 @@ func (k *Keep) Users() ([]User, error) {
 	var out []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.Name, &u.Hash, &u.Created, &u.Prefs, &u.Renew); err != nil {
+		if err := rows.Scan(&u.Name, &u.Hash, &u.Created, &u.Prefs, &u.Renew, &u.Operator); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -290,7 +300,7 @@ func (k *Keep) CountUsers() (int, error) {
 // User is a person, by name.
 func (k *Keep) User(name string) (User, error) {
 	var u User
-	err := k.db.QueryRow(k.q(`SELECT name, hash, created, prefs, renew FROM console_users WHERE name = ?`), name).Scan(&u.Name, &u.Hash, &u.Created, &u.Prefs, &u.Renew)
+	err := k.db.QueryRow(k.q(`SELECT name, hash, created, prefs, renew, operator FROM console_users WHERE name = ?`), name).Scan(&u.Name, &u.Hash, &u.Created, &u.Prefs, &u.Renew, &u.Operator)
 	if errors.Is(err, sql.ErrNoRows) {
 		return u, ErrNoUser
 	}
@@ -302,7 +312,7 @@ func (k *Keep) AddUser(u User) error {
 	if _, err := k.User(u.Name); err == nil {
 		return fmt.Errorf("there is a user %s already", u.Name)
 	}
-	_, err := k.db.Exec(k.q(`INSERT INTO console_users (name, hash, created, prefs, renew) VALUES (?, ?, ?, ?, ?)`), u.Name, u.Hash, u.Created, u.Prefs, flag(u.Renew))
+	_, err := k.db.Exec(k.q(`INSERT INTO console_users (name, hash, created, prefs, renew, operator) VALUES (?, ?, ?, ?, ?, ?)`), u.Name, u.Hash, u.Created, u.Prefs, flag(u.Renew), flag(u.Operator))
 	return err
 }
 
@@ -367,8 +377,8 @@ func (k *Keep) PutSession(s Session) error {
 // Session is a session by its id, if it has not expired by now.
 func (k *Keep) Session(id string, now int64) (Session, bool) {
 	var s Session
-	err := k.db.QueryRow(k.q(`SELECT s.id, s.who, s.created, s.expires, COALESCE(u.renew, 0) FROM console_sessions s
-		LEFT JOIN console_users u ON u.name = s.who WHERE s.id = ?`), id).Scan(&s.ID, &s.User, &s.Created, &s.Expires, &s.Renew)
+	err := k.db.QueryRow(k.q(`SELECT s.id, s.who, s.created, s.expires, COALESCE(u.renew, 0), COALESCE(u.operator, 1) FROM console_sessions s
+		LEFT JOIN console_users u ON u.name = s.who WHERE s.id = ?`), id).Scan(&s.ID, &s.User, &s.Created, &s.Expires, &s.Renew, &s.Operator)
 	if err != nil || s.Expires <= now {
 		return s, false
 	}

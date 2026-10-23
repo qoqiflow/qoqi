@@ -19,13 +19,16 @@ import (
 
 const usersUsage = `Usage:
   qoqi users ls
-  qoqi users add <name> [--password-stdin]
+  qoqi users add <name> [--password-stdin] [--admin]
   qoqi users passwd <name> [--password-stdin]
   qoqi users rm <name>
                               The people who sign in to the console, through
                               the daemon. A password given here is theirs to
                               change at their next sign in. Without
-                              --password-stdin, it is asked for`
+                              --password-stdin, it is asked for. A user
+                              added is an operator, who works with instances;
+                              --admin makes one who also deploys code and
+                              changes people`
 
 func cmdUsers(rest []string, options map[string]string) {
 	if len(rest) == 0 {
@@ -47,7 +50,11 @@ func cmdUsers(rest []string, options map[string]string) {
 			if u.Renew {
 				renew = "  (to change their password)"
 			}
-			fmt.Printf("%-24s since %s%s\n", u.Name, time.UnixMilli(u.Created).Format("2006-01-02"), renew)
+			role := "admin"
+			if u.Operator {
+				role = "operator"
+			}
+			fmt.Printf("%-24s %-9s since %s%s\n", u.Name, role, time.UnixMilli(u.Created).Format("2006-01-02"), renew)
 		}
 	case "add", "passwd":
 		if len(rest) != 2 {
@@ -62,9 +69,9 @@ func cmdUsers(rest []string, options map[string]string) {
 		if err := flowd.CheckPasswordStrength(password); err != nil {
 			fatal(err)
 		}
-		path, body := "/api/users", map[string]string{"name": name, "password": password}
+		path, body := "/api/users", map[string]any{"name": name, "password": password, "admin": options["admin"] != ""}
 		if rest[0] == "passwd" {
-			path, body = "/api/users/"+url.PathEscape(name)+"/password", map[string]string{"password": password}
+			path, body = "/api/users/"+url.PathEscape(name)+"/password", map[string]any{"password": password}
 		}
 		data, _ := json.Marshal(body)
 		if status, said := flowRequest("POST", path, data); status >= 400 {

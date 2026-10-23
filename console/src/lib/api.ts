@@ -82,7 +82,7 @@ export const api = {
   login: (name: string, password: string) => call('POST', '/api/auth/login', { name, password }),
   logout: () => call('POST', '/api/auth/logout'),
   users: () => call<User[]>('GET', '/api/users').then((r) => r.data ?? []),
-  addUser: (name: string, password: string) => call<User>('POST', '/api/users', { name, password }),
+  addUser: (name: string, password: string, admin: boolean) => call<User>('POST', '/api/users', { name, password, admin }),
   removeUser: (name: string) => call('DELETE', '/api/users/' + encodeURIComponent(name)),
   password: (name: string, password: string, current?: string) =>
     call('POST', '/api/users/' + encodeURIComponent(name) + '/password', { password, current }),

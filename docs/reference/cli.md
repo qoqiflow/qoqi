@@ -124,6 +124,7 @@ Opens the console of the daemon in a browser. People sign in to it with a name a
 
 ```console
 $ qoqi users add ada                  # the password is asked for, twice
+$ qoqi users add lin --admin          # deploys code and changes people too
 $ echo "$PASSWORD" | qoqi users add ci --password-stdin
 $ qoqi users ls
 $ qoqi users passwd ada               # their sessions end; they choose another at their next sign in
@@ -131,6 +132,8 @@ $ qoqi users rm ada
 ```
 
 The people who sign in to the console, through the daemon. The console starts with `admin`, password `admin`; a password given to someone, here or in the console, is theirs to change at their next sign in, before anything else.
+
+A person added is an operator: they start, send to, cancel, resume, answer and end instances, and read everything. An admin, added with `--admin`, also edits, tries, tests and deploys programs, and adds and removes people. Code deployed runs on the daemon's host with the daemon's rights, through its steps: whoever deploys can do there whatever the daemon can, so make admins only of those you would give a shell on that host. The daemon's token is an admin's. People added before roles existed are admins.
 
 ### `qoqi gen`
 

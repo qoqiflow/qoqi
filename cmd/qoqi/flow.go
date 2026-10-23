@@ -68,7 +68,7 @@ const flowUsage = `Usage:
                               person: then resume it
   qoqi end <name> [reason]    A stopped instance, ended as it is, with no more undos
   qoqi ui                     Open the console of the daemon in a browser
-  qoqi users ls|add|passwd|rm [name] [--password-stdin]
+  qoqi users ls|add|passwd|rm [name] [--password-stdin] [--admin]
                               The people who sign in to the console
   qoqi gen go <program> [--package steps] [--queue billing]
   qoqi gen php <program> --namespace 'App\Flow' --out src/Flow [--queue billing]
@@ -325,7 +325,7 @@ func flowOptions(args []string) (map[string]string, []string) {
 				options[key] = value
 				continue
 			}
-			if name == "go" || name == "json" || name == "nothing" || name == "watch" || name == "dry" || name == "password-stdin" {
+			if name == "go" || name == "json" || name == "nothing" || name == "watch" || name == "dry" || name == "password-stdin" || name == "admin" {
 				// A flag alone: resume for real, the API's JSON as it is,
 				// deploy again what changes, or only say what a deploy does
 				options[name] = "true"
