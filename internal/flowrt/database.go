@@ -42,18 +42,34 @@ func (r *Runtime) database() (*sql.DB, sqldb.Kind, error) {
 }
 
 // keep keeps what a step gave: in the transaction it wrote in, when it
-// asked for the store, committed with it.
-func (r *Runtime) keep(tx *sql.Tx, key string, kept Kept) error {
-	if tx == nil {
-		return r.Store.PutResult(key, kept)
+// asked for the store, committed with it. It gives what is kept under
+// the key: the first kept stands, and one kept before, by this daemon
+// before it stopped or by another that took the instance up meanwhile,
+// is what the flow goes on with, not what the step gave this time.
+func (r *Runtime) keep(tx *sql.Tx, key string, kept Kept) (Kept, error) {
+	var err error
+	switch in, ok := r.Store.(InDatabase); {
+	case tx == nil:
+		err = r.Store.PutResult(key, kept)
+	case ok:
+		err = in.KeepIn(tx, key, kept)
+	default:
+		if err = tx.Commit(); err == nil {
+			err = r.Store.PutResult(key, kept)
+		}
 	}
-	if in, ok := r.Store.(InDatabase); ok {
-		return in.KeepIn(tx, key, kept)
+	if err != nil {
+		return Kept{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return err
+	stored, found, err := r.Store.Result(key)
+	if err != nil {
+		return Kept{}, err
 	}
-	return r.Store.PutResult(key, kept)
+	if !found {
+		// A store that keeps nothing, as a dry run's
+		return kept, nil
+	}
+	return stored, nil
 }
 
 // againAfter is, for a step whose transaction the database ended for

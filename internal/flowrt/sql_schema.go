@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS instances (
     cancel  TEXT NOT NULL DEFAULT '',
     awaits  TEXT NOT NULL DEFAULT '',
     held_by    TEXT NOT NULL DEFAULT '',
-    held_until INTEGER NOT NULL DEFAULT 0
+    held_until INTEGER NOT NULL DEFAULT 0,
+    held_as    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS instances_due ON instances(status, wake_at);
 CREATE TABLE IF NOT EXISTS versions (
@@ -91,6 +92,7 @@ var added = []string{
 	`CREATE INDEX IF NOT EXISTS attempts_under_way ON attempts(queue, state)`,
 	`ALTER TABLE instances ADD COLUMN held_by TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE instances ADD COLUMN held_until INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE instances ADD COLUMN held_as TEXT NOT NULL DEFAULT ''`,
 }
 
 // Columns a server's tables made before them have not: added, once.
@@ -98,10 +100,12 @@ var addedOnServers = map[sqldb.Kind][]string{
 	sqldb.Postgres: {
 		`ALTER TABLE instances ADD COLUMN IF NOT EXISTS held_by TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE instances ADD COLUMN IF NOT EXISTS held_until BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE instances ADD COLUMN IF NOT EXISTS held_as TEXT NOT NULL DEFAULT ''`,
 	},
 	sqldb.MySQL: {
 		`ALTER TABLE instances ADD COLUMN held_by VARCHAR(255) NOT NULL DEFAULT ''`,
 		`ALTER TABLE instances ADD COLUMN held_until BIGINT NOT NULL DEFAULT 0`,
+		`ALTER TABLE instances ADD COLUMN held_as VARCHAR(64) NOT NULL DEFAULT ''`,
 	},
 }
 
@@ -115,7 +119,8 @@ CREATE TABLE IF NOT EXISTS instances (
     cancel  TEXT NOT NULL DEFAULT '',
     awaits  TEXT NOT NULL DEFAULT '',
     held_by    TEXT NOT NULL DEFAULT '',
-    held_until BIGINT NOT NULL DEFAULT 0
+    held_until BIGINT NOT NULL DEFAULT 0,
+    held_as    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS instances_due ON instances(status, wake_at);
 CREATE TABLE IF NOT EXISTS versions (
@@ -181,6 +186,7 @@ CREATE TABLE IF NOT EXISTS instances (
     awaits  MEDIUMTEXT NOT NULL DEFAULT (''),
     held_by    VARCHAR(255) NOT NULL DEFAULT '',
     held_until BIGINT NOT NULL DEFAULT 0,
+    held_as    VARCHAR(64) NOT NULL DEFAULT '',
     INDEX instances_due (status, wake_at)
 )` + mysqlTable + `;
 CREATE TABLE IF NOT EXISTS versions (

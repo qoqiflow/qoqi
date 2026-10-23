@@ -40,6 +40,10 @@ type SQL struct {
 	// runs its instances under their leases; "" for a store one process
 	// has alone
 	holder string
+	// holds are the leases this store took, by instance: what each lease
+	// was taken as. A lease lost is kept until it is let go of, so that
+	// the store's saves of that instance are refused meanwhile
+	holds map[string]string
 
 	mu        sync.Mutex
 	writes    int
@@ -126,21 +130,53 @@ var ErrNotHeld = errors.New("another daemon holds the instance now")
 // Claim takes an instance for this daemon until a time, or holds it
 // longer: false when another holds it. On a store one process has
 // alone, it is always this one's.
+//
+// Each lease is taken as a token of its own, drawn when it is taken: it
+// is held longer only as that token, and a save of the instance is
+// refused unless the lease is still the one the store took. A daemon
+// that stopped for longer than its lease, and whose instance another
+// took, and maybe let go of, writes nothing of it any more.
 func (s *SQL) Claim(id string, now, until int64) (bool, error) {
 	if s.holder == "" {
 		return true, nil
 	}
-	n, err := s.exec(s.q(`UPDATE instances SET held_by = ?, held_until = ?
-		WHERE id = ? AND (held_by = '' OR held_by = ? OR held_until <= ?)`), s.holder, until, id, s.holder, now)
-	return n == 1, err
+	s.mu.Lock()
+	as, holding := s.holds[id]
+	s.mu.Unlock()
+	if holding {
+		// Held longer, as it was taken; lost if another took it meanwhile
+		n, err := s.exec(s.q(`UPDATE instances SET held_until = ? WHERE id = ? AND held_by = ? AND held_as = ?`), until, id, s.holder, as)
+		return n == 1, err
+	}
+	as = birth() + birth()
+	n, err := s.exec(s.q(`UPDATE instances SET held_by = ?, held_until = ?, held_as = ?
+		WHERE id = ? AND (held_by = '' OR held_until <= ?)`), s.holder, until, as, id, now)
+	if err != nil || n != 1 {
+		return false, err
+	}
+	s.mu.Lock()
+	if s.holds == nil {
+		s.holds = map[string]string{}
+	}
+	s.holds[id] = as
+	s.mu.Unlock()
+	return true, nil
 }
 
-// Unclaim lets an instance go, for any daemon to take up when it is due.
+// Unclaim lets an instance go, for any daemon to take up when it is due:
+// the lease the store took, if another has not taken it since.
 func (s *SQL) Unclaim(id string) error {
 	if s.holder == "" {
 		return nil
 	}
-	_, err := s.exec(s.q(`UPDATE instances SET held_by = '', held_until = 0 WHERE id = ? AND held_by = ?`), id, s.holder)
+	s.mu.Lock()
+	as, holding := s.holds[id]
+	delete(s.holds, id)
+	s.mu.Unlock()
+	if !holding {
+		return nil
+	}
+	_, err := s.exec(s.q(`UPDATE instances SET held_by = '', held_until = 0, held_as = '' WHERE id = ? AND held_by = ? AND held_as = ?`), id, s.holder, as)
 	return err
 }
 
@@ -161,26 +197,38 @@ func (s *SQL) LetGoOf(gone func(holder string) bool) error {
 	}
 	rows.Close()
 	for _, holder := range holders {
-		if _, err := s.exec(s.q(`UPDATE instances SET held_by = '', held_until = 0 WHERE held_by = ?`), holder); err != nil {
+		if _, err := s.exec(s.q(`UPDATE instances SET held_by = '', held_until = 0, held_as = '' WHERE held_by = ?`), holder); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// stillHeld refuses, in a write, an instance another daemon holds now.
+// stillHeld refuses, in a write, an instance whose lease is not the one
+// this store took: another daemon holds it now, or took it and let it
+// go since. One this store took no lease of is refused while another
+// daemon holds it.
 func (s *SQL) stillHeld(tx *sql.Tx, id string, now int64) error {
 	if s.holder == "" {
 		return nil
 	}
-	var holder string
+	s.mu.Lock()
+	as, holding := s.holds[id]
+	s.mu.Unlock()
+	var holder, heldAs string
 	var until int64
-	err := tx.QueryRow(s.q(`SELECT held_by, held_until FROM instances WHERE id = ?`), id).Scan(&holder, &until)
+	err := tx.QueryRow(s.q(`SELECT held_by, held_until, held_as FROM instances WHERE id = ?`), id).Scan(&holder, &until, &heldAs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+	if holding {
+		if holder != s.holder || heldAs != as {
+			return ErrNotHeld
+		}
+		return nil
 	}
 	if holder != "" && holder != s.holder && until > now {
 		return ErrNotHeld

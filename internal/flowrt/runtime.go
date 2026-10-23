@@ -925,7 +925,7 @@ func (r *Runtime) take(id string) error {
 			case <-ticker.C:
 				now := time.Now()
 				if held, err := leased.Claim(id, now.UnixMilli(), now.Add(lease).UnixMilli()); err == nil && !held {
-					// Another took it: its next save is refused
+					// Another took it: its saves are refused from now on
 					return
 				}
 			}
@@ -934,11 +934,12 @@ func (r *Runtime) take(id string) error {
 	err = r.takeHeld(id)
 	close(done)
 	<-renewed
+	unclaimed := leased.Unclaim(id)
 	if errors.Is(err, ErrNotHeld) {
 		// Another daemon runs it now, from its last write
 		return nil
 	}
-	if unclaimed := leased.Unclaim(id); err == nil {
+	if err == nil {
 		err = unclaimed
 	}
 	return err
@@ -1217,12 +1218,14 @@ func (r *Runtime) takeHeld(id string) error {
 				// It left once, and nothing says what came of it: it is not
 				// run again, and the flow is told so
 				taken[key] = true
-				if err := r.Store.PutResult(key, Kept{Data: []byte(Unknown), Asked: askedOf(m, call.Args)}); err != nil {
+				stored, err := r.keep(nil, key, Kept{Data: []byte(Unknown), Asked: askedOf(m, call.Args)})
+				if err != nil {
 					fault = err
 					return vm.NewNull(), false, err
 				}
 				counts[asked] = n
-				v, err := m.ValueOfData([]byte(Unknown))
+				noted(m, stored.Undos)
+				v, err := m.ValueOfData(stored.Data)
 				return v, true, err
 			}
 			if again && at > r.Now() {
@@ -1293,7 +1296,8 @@ func (r *Runtime) takeHeld(id string) error {
 			s.call.Give(vm.NewNull(), fmt.Errorf("what %s returned: %v", s.call.Name, err))
 			return nil
 		}
-		if err := r.keep(tx, s.key, Kept{Data: data, Undos: fromStep, Asked: askedOf(m, s.call.Args)}); err != nil {
+		stored, err := r.keep(tx, s.key, Kept{Data: data, Undos: fromStep, Asked: askedOf(m, s.call.Args)})
+		if err != nil {
 			if again := r.againAfter(err); again != nil {
 				// Ended by the database for another transaction: nothing
 				// of it was kept, and it runs again
@@ -1303,8 +1307,15 @@ func (r *Runtime) takeHeld(id string) error {
 			fault = err
 			return err
 		}
+		if string(stored.Data) != string(data) {
+			// Another run of it was kept first: what the flow goes on with
+			if v, err = m.ValueOfData(stored.Data); err != nil {
+				fault = err
+				return err
+			}
+		}
 		taken[s.key] = true
-		undos = append(undos, fromStep...)
+		undos = append(undos, stored.Undos...)
 		s.call.Give(v, nil)
 		return nil
 	}
@@ -1650,7 +1661,11 @@ func (r *Runtime) finish(inst *Instance) error {
 			case err != nil:
 				return r.stopFinishing(w, fmt.Sprintf("%s could not undo: %v", undo.Step, err))
 			}
-			if err := r.keep(tx, key, Kept{Data: data, Asked: undo.Argument}); err != nil {
+			stored, err := r.keep(tx, key, Kept{Data: data, Asked: undo.Argument})
+			if err == nil {
+				data = stored.Data
+			}
+			if err != nil {
 				if again := r.againAfter(err); again != nil {
 					w.Retried[key] = r.Now() + again.After
 					w.Status, w.WakeAt = Waiting, w.Retried[key]
