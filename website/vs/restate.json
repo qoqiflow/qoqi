@@ -83,7 +83,7 @@
   "faq": [
     {
       "q": "Is Qoqi Flow ready for production?",
-      "a": "It is at v0.1.0. The language, the runtime and the daemon work end to end, and they are tested by crashing them on purpose after every write. What it does not have yet is years in production. Start with a flow that matters, not the one that holds the company up."
+      "a": "It is at v0.2.0. The language, the runtime and the daemon work end to end, and they are tested by crashing them on purpose after every write. What it does not have yet is years in production. Start with a flow that matters, not the one that holds the company up."
     },
     {
       "q": "How do Restate's ideas map?",

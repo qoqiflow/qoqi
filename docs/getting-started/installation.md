@@ -11,7 +11,7 @@ $ curl -fsSL https://qoqi.dev/install.sh | sh
 $ qoqi version
 ```
 
-`QOQI_VERSION=v0.1.0` picks a release, `QOQI_INSTALL=/usr/local/bin` the folder. The binaries, Windows' too, are also on [the releases](https://github.com/qoqiflow/qoqi/releases).
+`QOQI_VERSION=v0.2.0` picks a release, `QOQI_INSTALL=/usr/local/bin` the folder. The binaries, Windows' too, are also on [the releases](https://github.com/qoqiflow/qoqi/releases).
 
 ## From the source
 
