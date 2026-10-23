@@ -86,7 +86,7 @@ func resumeIn(t *testing.T, src string, store *flowrt.Memory, out *bytes.Buffer)
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("o")
+	inst, _, _ := store.Get("o")
 	return inst
 }
 
@@ -178,7 +178,7 @@ func TestADryRun(t *testing.T) {
 	if len(dry.Next) != 1 || dry.Next[0] != `ship ["paid-hold"]` || dry.Stopped != "" {
 		t.Errorf("expected the ship to leave next, got %v %q", dry.Next, dry.Stopped)
 	}
-	if inst, _ := store.Get("o"); store.Writes() != writes || inst.Status != flowrt.Stopped {
+	if inst, _, _ := store.Get("o"); store.Writes() != writes || inst.Status != flowrt.Stopped {
 		t.Errorf("a dry run writes nothing: %d writes, %s", store.Writes()-writes, inst.Status)
 	}
 
@@ -249,7 +249,7 @@ func TestResumingAnUndo(t *testing.T) {
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ = store.Get("trip")
+	inst, _, _ = store.Get("trip")
 	if inst.Status != flowrt.Done || !strings.Contains(string(inst.Result), "no flight to rome") {
 		t.Fatalf("expected done with its Err, got %s %s %q", inst.Status, inst.Result, inst.Stopped)
 	}
@@ -268,7 +268,7 @@ func TestEnding(t *testing.T) {
 	if err := rt.End("trip", "the hotel was called"); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("trip")
+	inst, _, _ := store.Get("trip")
 	if inst.Status != flowrt.Done || !strings.Contains(string(inst.Result), "no flight to oslo") || inst.Ended != "the hotel was called" || strings.Contains(out.String(), "WORLD free") {
 		t.Errorf("expected done as it was, no more undos, got %s %s %q\n%s", inst.Status, inst.Result, inst.Ended, out.String())
 	}
@@ -282,7 +282,7 @@ func TestEnding(t *testing.T) {
 	if err := flowrt.New(compiled(t, buggy), mistaken, &bytes.Buffer{}).End("o", ""); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ = mistaken.Get("o")
+	inst, _, _ = mistaken.Get("o")
 	if inst.Status != flowrt.Failed || inst.Ended != "a person ended it" {
 		t.Errorf("expected failed, got %s %q", inst.Status, inst.Ended)
 	}

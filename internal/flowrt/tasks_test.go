@@ -166,7 +166,7 @@ func runFlow(t *testing.T, rt *flowrt.Runtime, store flowrt.Store, id, flow, fie
 	if err := rt.RunUntilIdle(10 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get(id)
+	inst, _, _ := store.Get(id)
 	return inst
 }
 

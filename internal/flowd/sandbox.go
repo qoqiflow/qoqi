@@ -148,7 +148,7 @@ func span(ms int64) string {
 }
 
 func (d *Daemon) sandboxView(b *sandbox) SandboxView {
-	inst, _ := b.store.Get(sandboxID)
+	inst, _, _ := b.store.Get(sandboxID)
 	view := SandboxView{
 		ID: b.id, Program: b.program, Flow: b.flow,
 		Clock: time.UnixMilli(b.now).UTC().Format(time.RFC3339Nano), Elapsed: b.now - b.started,

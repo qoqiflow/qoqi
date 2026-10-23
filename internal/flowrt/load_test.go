@@ -54,7 +54,7 @@ func TestAQueueHasRoomForSoMany(t *testing.T) {
 	if got := l.app.count("charge"); got != 1 {
 		t.Fatalf("one charge under way, as many as billing takes, got %d: %s", got, l.app.steps())
 	}
-	held, _ := l.store.Get("p")
+	held, _, _ := l.store.Get("p")
 	if held.Status != flowrt.Waiting {
 		t.Fatalf("the second waits, got %s %q", held.Status, held.Stopped)
 	}
@@ -77,7 +77,7 @@ func TestAQueueHasRoomForSoMany(t *testing.T) {
 	}
 	l.run()
 	for _, id := range []string{"o", "p"} {
-		if inst, _ := l.store.Get(id); inst.Status != flowrt.Done {
+		if inst, _, _ := l.store.Get(id); inst.Status != flowrt.Done {
 			t.Errorf("%s: expected done, got %s %q", id, inst.Status, inst.Stopped)
 		}
 	}

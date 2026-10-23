@@ -96,7 +96,7 @@ func TestAFlowHearsItsCancellation(t *testing.T) {
 			if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			inst, _ := store.Get("r")
+			inst, _, _ := store.Get("r")
 			if inst.Status != c.status || string(inst.Result) != c.result {
 				t.Fatalf("expected %s with %s, got %s %s %q", c.status, c.result, inst.Status, inst.Result, inst.Stopped)
 			}

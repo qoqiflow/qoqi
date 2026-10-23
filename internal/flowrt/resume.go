@@ -53,7 +53,10 @@ func (r *Runtime) Resume(id string) error {
 // resumed is the instance as Resume writes it, and the keys of the undos
 // whose Err it forgets.
 func (r *Runtime) resumed(id string) (*Instance, []string, error) {
-	inst, ok := r.Store.Get(id)
+	inst, ok, err := r.Store.Get(id)
+	if err != nil {
+		return nil, nil, err
+	}
 	if !ok {
 		return nil, nil, fmt.Errorf("there is no instance %s", id)
 	}
@@ -67,7 +70,11 @@ func (r *Runtime) resumed(id string) (*Instance, []string, error) {
 		var forget []string
 		for n := 1; n <= len(w.Undos); n++ {
 			key := Key(w, w.Pass, "finish", "undo", n)
-			if kept, ok := r.Store.Result(key); ok && isErr(kept.Data) {
+			kept, ok, err := r.Store.Result(key)
+			if err != nil {
+				return nil, nil, err
+			}
+			if ok && isErr(kept.Data) {
 				forget = append(forget, key)
 			}
 			delete(w.Retried, key)
@@ -133,7 +140,10 @@ func (r *Runtime) End(id, reason string) error {
 	r.swap.RLock()
 	defer r.swap.RUnlock()
 
-	inst, ok := r.Store.Get(id)
+	inst, ok, err := r.Store.Get(id)
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return fmt.Errorf("there is no instance %s", id)
 	}
@@ -144,7 +154,11 @@ func (r *Runtime) End(id, reason string) error {
 		reason = "a person ended it"
 	}
 	for _, child := range inst.Children {
-		if c, ok := r.Store.Get(child); ok && !c.ended() {
+		c, ok, err := r.Store.Get(child)
+		if err != nil {
+			return err
+		}
+		if ok && !c.ended() {
 			if err := r.Store.Cancel(child, "its parent "+id+" was ended", r.Now()); err != nil {
 				return err
 			}
@@ -219,9 +233,9 @@ type dryStore struct {
 	forgotten map[string]bool
 }
 
-func (d *dryStore) Get(id string) (*Instance, bool) {
+func (d *dryStore) Get(id string) (*Instance, bool, error) {
 	if inst, ok := d.instances[id]; ok {
-		return inst.copy(), true
+		return inst.copy(), true, nil
 	}
 	return d.Store.Get(id)
 }
@@ -232,16 +246,16 @@ func (d *dryStore) Save(inst *Instance) error {
 }
 
 func (d *dryStore) Create(inst *Instance) (bool, *Instance, error) {
-	if existing, ok := d.Get(inst.ID); ok {
-		return false, existing, nil
+	if existing, ok, err := d.Get(inst.ID); err != nil || ok {
+		return false, existing, err
 	}
 	d.instances[inst.ID] = inst.copy()
 	return true, nil, nil
 }
 
-func (d *dryStore) Result(key string) (Kept, bool) {
+func (d *dryStore) Result(key string) (Kept, bool, error) {
 	if d.forgotten[key] {
-		return Kept{}, false
+		return Kept{}, false, nil
 	}
 	return d.Store.Result(key)
 }
@@ -249,8 +263,8 @@ func (d *dryStore) Result(key string) (Kept, bool) {
 func (d *dryStore) PutResult(string, Kept) error { return nil }
 func (d *dryStore) PutAttempt(Attempt) error     { return nil }
 func (d *dryStore) Mark(key string, attempt int, _ AttemptState, _ string) (Attempt, error) {
-	a, _ := d.Store.Attempt(key)
-	return a, nil
+	a, _, err := d.Store.Attempt(key)
+	return a, err
 }
 func (d *dryStore) ForgetResult(string) error          { return nil }
 func (d *dryStore) Cancel(string, string, int64) error { return nil }
@@ -275,7 +289,10 @@ func (r *Runtime) AnswerByHand(id, key string, value json.RawMessage, nothing bo
 	r.swap.RLock()
 	defer r.swap.RUnlock()
 
-	inst, ok := r.Store.Get(id)
+	inst, ok, err := r.Store.Get(id)
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return fmt.Errorf("there is no instance %s", id)
 	}
@@ -285,7 +302,10 @@ func (r *Runtime) AnswerByHand(id, key string, value json.RawMessage, nothing bo
 	if !strings.HasPrefix(key, id+"/") {
 		return fmt.Errorf("%s is not the key of a step of %s", key, id)
 	}
-	a, sent := r.Store.Attempt(key)
+	a, sent, err := r.Store.Attempt(key)
+	if err != nil {
+		return err
+	}
 	if nothing {
 		if !sent {
 			return fmt.Errorf("no attempt of %s was sent: there is nothing to reclaim", key)

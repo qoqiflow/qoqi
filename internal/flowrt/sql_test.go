@@ -38,7 +38,7 @@ func stoppedEverywhereIn(t *testing.T, p place, chunk *vm.Chunk, flow, fields st
 	result := func(at string) *flowrt.Instance {
 		store := p.open(t, at)
 		defer store.Close()
-		inst, ok := store.Get("x")
+		inst, ok, _ := store.Get("x")
 		if !ok {
 			t.Fatalf("no instance in %s", at)
 		}
@@ -160,7 +160,7 @@ func keepsASleepingInstance(t *testing.T, p place, chunk *vm.Chunk) {
 	if _, err := rt.RunDue(); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("nap")
+	inst, _, _ := store.Get("nap")
 	if inst.Status != flowrt.Waiting || inst.State == nil || inst.WakeAt <= time.Now().UnixMilli() {
 		t.Fatalf("expected it asleep, written, due later; got %s, state %d bytes, wake %d", inst.Status, len(inst.State), inst.WakeAt)
 	}
@@ -172,7 +172,7 @@ func keepsASleepingInstance(t *testing.T, p place, chunk *vm.Chunk) {
 	if err := flowrt.New(chunk, again, &out).RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ = again.Get("nap")
+	inst, _, _ = again.Get("nap")
 	if inst.Status != flowrt.Done || string(inst.Result) != `"hello ada and back"` {
 		t.Errorf("expected it done, got %s %s %s", inst.Status, inst.Result, inst.Stopped)
 	}
@@ -210,8 +210,8 @@ func programsInOneStore(t *testing.T, p place) {
 	defer again.Close()
 	shop, _ = again.Program("shop")
 	bills, _ = again.Program("billing.v2")
-	a, _ := shop.Get("x")
-	b, _ := bills.Get("x")
+	a, _, _ := shop.Get("x")
+	b, _, _ := bills.Get("x")
 	if a == nil || b == nil || a.Flow != "Order" || b.Flow != "Billing" || string(b.Result) != "201" {
 		t.Fatalf("expected an Order and a Billing under the same name, got %+v %+v", a, b)
 	}

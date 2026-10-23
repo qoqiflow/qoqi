@@ -172,7 +172,7 @@ func (t *trial) run() error {
 }
 
 func (t *trial) instance() *flowrt.Instance {
-	inst, _ := t.store.Get(trialID)
+	inst, _, _ := t.store.Get(trialID)
 	return inst
 }
 

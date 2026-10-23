@@ -137,7 +137,7 @@ func TestResumingGivesBackTheClockAndTheRandomNumbers(t *testing.T) {
 			}
 			idle(t, rt)
 
-			inst, _ = open().Get("n")
+			inst, _, _ = open().Get("n")
 			if inst.Status != flowrt.Done || inst.Replaying || !strings.HasPrefix(string(inst.Result), `"sent at 1000000 `) {
 				t.Fatalf("expected done with what was sent, got %s %s %q", inst.Status, inst.Result, inst.Stopped)
 			}
@@ -165,7 +165,7 @@ func TestResumingThatDrawsOtherwise(t *testing.T) {
 		t.Fatal(err)
 	}
 	idle(t, rt)
-	inst, _ := store.Get("n")
+	inst, _, _ := store.Get("n")
 	if inst.Status != flowrt.Stopped || !strings.Contains(inst.Stopped, "F0102") || !strings.Contains(inst.Stopped, "at 2000000 ") {
 		t.Fatalf("expected F0102 with the clock read anew, got %s %q", inst.Status, inst.Stopped)
 	}
@@ -187,13 +187,13 @@ func TestResumingAfterAWait(t *testing.T) {
 				t.Fatal(err)
 			}
 			due(t, rt)
-			inst, _ := open().Get("n")
+			inst, _, _ := open().Get("n")
 			if inst.Status != flowrt.Waiting {
 				t.Fatalf("expected it asleep, got %s %q", inst.Status, inst.Stopped)
 			}
 			clock.Store(1_000_000 + 3_600_000)
 			due(t, rt)
-			inst, _ = open().Get("n")
+			inst, _, _ = open().Get("n")
 			if inst.Status != flowrt.Stopped {
 				t.Fatalf("expected it stopped by the mistake, got %s %q", inst.Status, inst.Stopped)
 			}
@@ -204,7 +204,7 @@ func TestResumingAfterAWait(t *testing.T) {
 				t.Fatal(err)
 			}
 			due(t, rt)
-			inst, _ = open().Get("n")
+			inst, _, _ = open().Get("n")
 			if inst.Status != flowrt.Done || !strings.HasPrefix(string(inst.Result), `"sent at 4600000 `) {
 				t.Fatalf("expected done with what was sent, got %s %s %q", inst.Status, inst.Result, inst.Stopped)
 			}

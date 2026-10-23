@@ -310,8 +310,8 @@ func instanceOf(id, flow, status string, wakeAt int64, data, cancel string) (*In
 }
 
 func (s *SQL) Create(inst *Instance) (bool, *Instance, error) {
-	if existing, ok := s.Get(inst.ID); ok {
-		return false, existing, nil
+	if existing, ok, err := s.Get(inst.ID); err != nil || ok {
+		return false, existing, err
 	}
 	if err := s.write(); err != nil {
 		return false, nil, err
@@ -327,8 +327,8 @@ func (s *SQL) Create(inst *Instance) (bool, *Instance, error) {
 	}
 	if n == 0 {
 		// Another made it meanwhile
-		existing, _ := s.Get(inst.ID)
-		return false, existing, nil
+		existing, _, err := s.Get(inst.ID)
+		return false, existing, err
 	}
 	return true, nil, nil
 }
@@ -431,18 +431,21 @@ func (s *SQL) wakeIfAnswered(tx *sql.Tx, inst *Instance) error {
 	return nil
 }
 
-func (s *SQL) Get(id string) (*Instance, bool) {
+func (s *SQL) Get(id string) (*Instance, bool, error) {
 	var flow, status, data, cancel string
 	var wakeAt int64
 	err := s.db.QueryRow(s.q(`SELECT flow, status, wake_at, row, cancel FROM instances WHERE id = ?`), id).Scan(&flow, &status, &wakeAt, &data, &cancel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
 	inst, err := instanceOf(id, flow, status, wakeAt, data, cancel)
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
-	return inst, true
+	return inst, true, nil
 }
 
 // Due takes up, as a runtime that starts again does, what was running
@@ -476,7 +479,10 @@ func (s *SQL) AnyWaiting() bool {
 }
 
 func (s *SQL) Cancel(id, reason string, now int64) error {
-	inst, ok := s.Get(id)
+	inst, ok, err := s.Get(id)
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return fmt.Errorf("there is no instance %s", id)
 	}
@@ -489,7 +495,7 @@ func (s *SQL) Cancel(id, reason string, now int64) error {
 	// The first reason stands; one that waits or stopped is due at once.
 	// wake_at is set before status: MySQL reads, in an assignment, what
 	// those before it wrote
-	_, err := s.exec(s.q(`UPDATE instances SET cancel = ?,
+	_, err = s.exec(s.q(`UPDATE instances SET cancel = ?,
 		wake_at = CASE WHEN status IN ('waiting', 'stopped') THEN ? ELSE wake_at END,
 		status = CASE WHEN status IN ('waiting', 'stopped') THEN 'waiting' ELSE status END
 		WHERE id = ? AND cancel = '' AND status NOT IN ('done', 'failed')`), reason, now, id)
@@ -520,23 +526,26 @@ func (s *SQL) PutResult(key string, kept Kept) error {
 	return nil
 }
 
-func (s *SQL) Result(key string) (Kept, bool) {
+func (s *SQL) Result(key string) (Kept, bool, error) {
 	var data, undo, asked string
 	err := s.db.QueryRow(s.q(`SELECT result, undo, asked FROM steps WHERE key = ?`), key).Scan(&data, &undo, &asked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Kept{}, false, nil
+	}
 	if err != nil {
-		return Kept{}, false
+		return Kept{}, false, err
 	}
 	var undos []vm.Undo
 	if undo != "" {
 		if err := json.Unmarshal([]byte(undo), &undos); err != nil {
-			return Kept{}, false
+			return Kept{}, false, fmt.Errorf("what %s gave flow.undo: %v", key, err)
 		}
 	}
 	kept := Kept{Data: []byte(data), Undos: undos}
 	if asked != "" {
 		kept.Asked = []byte(asked)
 	}
-	return kept, true
+	return kept, true, nil
 }
 
 func (s *SQL) ForgetResult(key string) error {

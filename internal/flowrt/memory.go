@@ -21,14 +21,16 @@ type Store interface {
 	// cancellation asked, which it leaves as it is. The save that ends an
 	// instance makes those that wait for it due, in the same write.
 	Save(inst *Instance) error
-	Get(id string) (*Instance, bool)
+	// Get gives an instance, ok false when there is none of that name. An
+	// error is a read that failed: it says nothing of whether it is there
+	Get(id string) (inst *Instance, ok bool, err error)
 	// Due are the instances waiting whose time has come.
 	Due(now int64) []string
 	AnyWaiting() bool
 	// PutResult keeps what a step gave under its key, in one write; the
 	// first one kept stands.
 	PutResult(key string, kept Kept) error
-	Result(key string) (Kept, bool)
+	Result(key string) (kept Kept, ok bool, err error)
 	// ForgetResult forgets what a step gave: a person said the world
 	// changed, and the step is to run again (an undo that gave an Err).
 	ForgetResult(key string) error
@@ -57,7 +59,7 @@ type Store interface {
 	// leaves, and gives up the one before it under its key. Attempt
 	// gives the last under a key.
 	PutAttempt(a Attempt) error
-	Attempt(key string) (Attempt, bool)
+	Attempt(key string) (a Attempt, ok bool, err error)
 	Attempts(key string) []Attempt
 	// Mark moves an attempt on in its life, unless an answer or its
 	// giving up landed first, or, to Working, it is no longer Sent: it
@@ -279,14 +281,14 @@ func cancelable(inst *Instance) error {
 	return nil
 }
 
-func (m *Memory) Get(id string) (*Instance, bool) {
+func (m *Memory) Get(id string) (*Instance, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	inst, ok := m.instances[id]
 	if !ok {
-		return nil, false
+		return nil, false, nil
 	}
-	return inst.copy(), true
+	return inst.copy(), true, nil
 }
 
 // Due takes up, as a runtime that crashed and starts again does, the
@@ -377,11 +379,11 @@ func (m *Memory) PutResult(key string, kept Kept) error {
 	return nil
 }
 
-func (m *Memory) Result(key string) (Kept, bool) {
+func (m *Memory) Result(key string) (Kept, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	k, ok := m.results[key]
-	return k.copy(), ok
+	return k.copy(), ok, nil
 }
 
 func (m *Memory) ForgetResult(key string) error {

@@ -160,7 +160,7 @@ func TestAKeptStepSurvivesAStopAtEveryWrite(t *testing.T) {
 	if err := run(&bank{kept: map[string]string{}, wires: map[string]int{}}, plain); err != nil {
 		t.Fatal(err)
 	}
-	clean, _ := plain.Get("o")
+	clean, _, _ := plain.Get("o")
 	if !strings.Contains(string(clean.Result), "wired w-3") {
 		t.Fatalf("expected wired, got %s %q", clean.Result, clean.Stopped)
 	}
@@ -175,7 +175,7 @@ func TestAKeptStepSurvivesAStopAtEveryWrite(t *testing.T) {
 		if err := run(b, store); err != nil {
 			t.Fatalf("after stopping at write %d: %v", k, err)
 		}
-		inst, _ := store.Get("o")
+		inst, _, _ := store.Get("o")
 		if string(inst.Result) != string(clean.Result) {
 			t.Errorf("stopped at write %d: expected %s, got %s %s %q", k, clean.Result, inst.Status, inst.Result, inst.Stopped)
 		}

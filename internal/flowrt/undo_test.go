@@ -176,7 +176,7 @@ func TestCancelling(t *testing.T) {
 	if _, err := rt.RunDue(); err != nil {
 		t.Fatal(err)
 	}
-	if inst, _ := store.Get("o"); inst.Status != flowrt.Waiting || len(inst.Undos) != 2 {
+	if inst, _, _ := store.Get("o"); inst.Status != flowrt.Waiting || len(inst.Undos) != 2 {
 		t.Fatalf("expected it asleep with two undos, got %s %v", inst.Status, inst.Undos)
 	}
 
@@ -186,7 +186,7 @@ func TestCancelling(t *testing.T) {
 	if _, err := rt.RunDue(); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("o")
+	inst, _, _ := store.Get("o")
 	if inst.Status != flowrt.Failed || inst.Cancel != "the customer changed their mind" || inst.Result != nil {
 		t.Fatalf("expected failed, cancelled, got %s %q %s", inst.Status, inst.Cancel, inst.Result)
 	}
@@ -219,7 +219,7 @@ func TestAMistakeThenACancellation(t *testing.T) {
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ = store.Get("o")
+	inst, _, _ = store.Get("o")
 	if inst.Status != flowrt.Failed || !strings.HasSuffix(strings.Join(worldLines(out.String()), "|"), "WORLD refund p-mistake|WORLD release h-mistake") {
 		t.Errorf("expected failed with both undone, got %s\n%s", inst.Status, out.String())
 	}
@@ -265,7 +265,7 @@ func everyStopOf(t *testing.T, src string, start func(rt *flowrt.Runtime) error,
 	if err := run(plain, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	clean, _ := plain.Get("o")
+	clean, _, _ := plain.Get("o")
 	writes := plain.Writes()
 
 	expected := map[string]int{}
@@ -285,7 +285,7 @@ func everyStopOf(t *testing.T, src string, start func(rt *flowrt.Runtime) error,
 		if err := run(store, &out); err != nil {
 			t.Fatalf("after stopping at write %d: %v", k, err)
 		}
-		inst, _ := store.Get("o")
+		inst, _, _ := store.Get("o")
 		if inst.Status != status || string(inst.Result) != string(clean.Result) {
 			t.Fatalf("after stopping at write %d of %d: expected %s %s, got %s %s %q", k, writes, status, clean.Result, inst.Status, inst.Result, inst.Stopped)
 		}
@@ -363,7 +363,7 @@ func cancelKept(t *testing.T, p place) {
 		t.Fatal(err)
 	}
 	// A save of the instance leaves the cancellation as it is
-	inst, _ := store.Get("o")
+	inst, _, _ := store.Get("o")
 	if err := store.Save(inst); err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,7 @@ func cancelKept(t *testing.T, p place) {
 	if err := flowrt.New(chunk, again, &out).RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ = again.Get("o")
+	inst, _, _ = again.Get("o")
 	if inst.Status != flowrt.Failed || inst.Cancel != "withdrawn" || !strings.HasSuffix(out.String(), "WORLD release h-late\n") {
 		t.Errorf("expected failed and undone, got %s %q\n%s", inst.Status, inst.Cancel, out.String())
 	}
@@ -389,7 +389,7 @@ func TestACancellationIsNotSleptThrough(t *testing.T) {
 		if _, err := rt.Start("o", "Order", []byte(cart("late", 5))); err != nil {
 			t.Fatal(err)
 		}
-		inst, _ := store.Get("o")
+		inst, _, _ := store.Get("o")
 		inst.Status = flowrt.Running
 		if err := store.Save(inst); err != nil {
 			t.Fatal(err)

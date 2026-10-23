@@ -495,7 +495,11 @@ func (a *attempting) Deliver(d vm.Delivery) vm.Answer {
 		Probe(d vm.Delivery, of Attempt) vm.Answer
 	}); ok && d.Settled {
 		if _, started := prober.Kept(d.Queue, d.Shape); started {
-			if before, ok := a.r.Store.Attempt(d.Key); ok && before.State != Answered {
+			before, ok, err := a.r.Store.Attempt(d.Key)
+			if err != nil {
+				return unread(err)
+			}
+			if ok && before.State != Answered {
 				switch probed := prober.Probe(d, before); probed.Outcome {
 				case vm.Again:
 					// Unseen: sent again
@@ -517,7 +521,11 @@ func (a *attempting) Deliver(d vm.Delivery) vm.Answer {
 		}
 		d.Args = args
 	}
-	if before, ok := a.r.Store.Attempt(d.Key); ok && before.State == Nothing {
+	before, ok, err := a.r.Store.Attempt(d.Key)
+	if err != nil {
+		return unread(err)
+	}
+	if ok && before.State == Nothing {
 		d.Reclaim = before.Attempt
 	}
 	d.Token, d.Until = drawToken(), a.r.Now()+d.Within
@@ -526,7 +534,7 @@ func (a *attempting) Deliver(d vm.Delivery) vm.Answer {
 		a.r.gate.Unlock()
 		return vm.Answer{Outcome: vm.Held, Reason: fmt.Sprintf("the queue %s has %d steps under way, as many as it takes", d.Queue, gate.Concurrency(d.Queue)), After: 200}
 	}
-	err := a.r.Store.PutAttempt(Attempt{
+	err = a.r.Store.PutAttempt(Attempt{
 		Key: d.Key, Attempt: d.Attempt, Instance: a.inst, Queue: d.Queue, Step: d.Step, Shape: d.Shape, Token: d.Token, Until: d.Until,
 		State: Sent, Settled: d.Settled, Undo: d.Undo,
 	})
@@ -762,4 +770,10 @@ func (q *HTTPQueues) Probe(d vm.Delivery, of Attempt) vm.Answer {
 		return vm.Answer{Outcome: vm.Answered, Value: said.Value, Undo: said.Undo}
 	}
 	return again
+}
+
+// unread is a step that does not leave, the store not read: the same
+// attempt leaves a little later.
+func unread(err error) vm.Answer {
+	return vm.Answer{Outcome: vm.Held, Reason: fmt.Sprintf("the store could not be read: %v", err), After: 1000}
 }

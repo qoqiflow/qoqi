@@ -198,7 +198,7 @@ func TestAnOrderAndItsPayment(t *testing.T) {
 			if got := worldLines(out.String()); strings.Join(got, "|") != strings.Join(c.world, "|") {
 				t.Errorf("want %v\ngot  %v", c.world, got)
 			}
-			child, ok := store.Get("payment:" + c.id)
+			child, ok, _ := store.Get("payment:" + c.id)
 			if !ok || child.Status != flowrt.Done || child.Parent != "o" || strings.Join(inst.Children, ",") != "payment:"+c.id {
 				t.Errorf("expected the payment done, the order's child: %+v %v", child, inst.Children)
 			}
@@ -218,14 +218,14 @@ func TestAParentWaitsWithoutTheClock(t *testing.T) {
 	if _, err := rt.RunDue(); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("o")
+	inst, _, _ := store.Get("o")
 	if inst.Status != flowrt.Waiting || inst.WakeAt != flowrt.Never || strings.Join(inst.Awaits, ",") != "payment:fine" {
 		t.Fatalf("expected it asleep for its payment alone, got %s %d %v", inst.Status, inst.WakeAt, inst.Awaits)
 	}
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if inst, _ := store.Get("o"); inst.Status != flowrt.Done {
+	if inst, _, _ := store.Get("o"); inst.Status != flowrt.Done {
 		t.Errorf("expected the order done once its payment was, got %s %q", inst.Status, inst.Stopped)
 	}
 }
@@ -251,8 +251,8 @@ func TestCancellingAParent(t *testing.T) {
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("o")
-	child, _ := store.Get("payment:late")
+	inst, _, _ := store.Get("o")
+	child, _, _ := store.Get("payment:late")
 	if inst.Status != flowrt.Failed || child.Status != flowrt.Failed || !strings.Contains(child.Cancel, "its parent o is ending") {
 		t.Fatalf("expected both failed, got %s %s %q", inst.Status, child.Status, child.Cancel)
 	}
@@ -275,8 +275,8 @@ func TestAStoppedChild(t *testing.T) {
 	if err := rt.RunUntilIdle(time.Second); err == nil {
 		t.Fatalf("expected the order still waiting for its stopped payment")
 	}
-	child, _ := store.Get("payment:broken")
-	if inst, _ := store.Get("o"); child.Status != flowrt.Stopped || inst.Status != flowrt.Waiting {
+	child, _, _ := store.Get("payment:broken")
+	if inst, _, _ := store.Get("o"); child.Status != flowrt.Stopped || inst.Status != flowrt.Waiting {
 		t.Fatalf("expected the payment stopped and the order waiting, got %s %s", child.Status, inst.Status)
 	}
 	if err := rt.Cancel("o", "a person looked"); err != nil {
@@ -285,7 +285,7 @@ func TestAStoppedChild(t *testing.T) {
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("o")
+	inst, _, _ := store.Get("o")
 	if inst.Status != flowrt.Failed || !strings.HasSuffix(strings.Join(worldLines(out.String()), "|"), "WORLD void a-broken|WORLD release h-broken") {
 		t.Errorf("expected failed, the payment undone first, got %s\n%s", inst.Status, out.String())
 	}
@@ -318,8 +318,8 @@ func TestNamesAndDetachedChildren(t *testing.T) {
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	alone, _ := store.Get("alone:z")
-	child, _ := store.Get("child:z")
+	alone, _, _ := store.Get("alone:z")
+	child, _, _ := store.Get("child:z")
 	if alone.Status != flowrt.Done || alone.Parent != "" || child.Status != flowrt.Failed {
 		t.Errorf("expected the detached one done and the child cancelled, got %s %q %s", alone.Status, alone.Parent, child.Status)
 	}

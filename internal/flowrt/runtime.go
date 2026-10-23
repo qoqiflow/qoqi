@@ -620,8 +620,9 @@ func (h *host) Cancelled(take bool) (string, bool) {
 	if h.inst.CancelTaken || h.cancelTaken {
 		return "", false
 	}
-	now, ok := h.r.Store.Get(h.inst.ID)
-	if !ok || now.Cancel == "" {
+	now, ok, err := h.r.Store.Get(h.inst.ID)
+	if err != nil || !ok || now.Cancel == "" {
+		// Not read: asked again at the next wait, or when it is taken up
 		return "", false
 	}
 	if take {
@@ -692,15 +693,22 @@ func (h *host) StartInstance(name string, fields []byte, detached bool) error {
 }
 
 func (h *host) Ended(name string) ([]byte, bool, error) {
-	return h.r.endedAs(name)
+	result, ended, err := h.r.endedAs(name)
+	if err != nil {
+		// Not read: the instance is taken up again from its last write
+		*h.fault = err
+	}
+	return result, ended, err
 }
 
 // endedAs is what waits for an instance gets once it has ended: Ok with
 // what its run returned, or Err with how it was cancelled. One that is
-// not there has gone.
+// not there has gone; one that cannot be read is an error, not gone.
 func (r *Runtime) endedAs(name string) ([]byte, bool, error) {
-	inst, ok := r.Store.Get(name)
+	inst, ok, err := r.Store.Get(name)
 	switch {
+	case err != nil:
+		return nil, false, err
 	case !ok:
 		return cancelledAs("gone"), true, nil
 	case inst.Status == Done:
@@ -840,7 +848,10 @@ func (r *Runtime) Send(id, inbox, key string, message []byte) (already bool, err
 	r.swap.RLock()
 	defer r.swap.RUnlock()
 
-	inst, ok := r.Store.Get(id)
+	inst, ok, err := r.Store.Get(id)
+	if err != nil {
+		return false, err
+	}
 	if !ok {
 		return false, fmt.Errorf("there is no instance %s", id)
 	}
@@ -936,7 +947,10 @@ func (r *Runtime) take(id string) error {
 // takeHeld is take, the version held already: an instance moved at a
 // stage is taken up again in the same hold.
 func (r *Runtime) takeHeld(id string) error {
-	inst, ok := r.Store.Get(id)
+	inst, ok, err := r.Store.Get(id)
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return fmt.Errorf("no instance %s", id)
 	}
@@ -1114,7 +1128,14 @@ func (r *Runtime) takeHeld(id string) error {
 		n := counts[asked] + 1
 		key := Key(inst, pass, m.TaskName(), call.Name, n)
 		for {
-			if kept, found := r.Store.Result(key); found {
+			kept, found, err := r.Store.Result(key)
+			if err != nil {
+				// Not read: whether it ran is not known, and it is not run;
+				// the instance is taken up again from its last write
+				fault = err
+				return vm.NewNull(), false, err
+			}
+			if found {
 				if replaying && kept.Asked != nil {
 					if now := askedOf(m, call.Args); now != nil && string(now) != string(kept.Asked) {
 						return vm.NewNull(), false, &vm.Stop{Reason: fmt.Errorf("%s: %s asks %s otherwise than it was asked under %s: %s, not %s; the world answered a question the new code does not ask", ErrAskedOtherwise, inst.ID, call.Name, key, now, kept.Asked)}
@@ -1132,7 +1153,11 @@ func (r *Runtime) takeHeld(id string) error {
 			if until, waits := working[key]; waits {
 				// The application answers it later: the task waits for the
 				// answer until its time is up, out of memory meanwhile
-				a, _ := r.Store.Attempt(key)
+				a, _, err := r.Store.Attempt(key)
+				if err != nil {
+					fault = err
+					return vm.NewNull(), false, err
+				}
 				name := call.Name[strings.LastIndex(call.Name, ".")+1:]
 				var answer vm.Answer
 				switch {
@@ -1174,11 +1199,19 @@ func (r *Runtime) takeHeld(id string) error {
 				continue
 			}
 			at, again := retried[key]
-			if call.Once && tries[key] > 0 && !again && call.ByQueue && r.keptOrNeverSent(key, tries[key]) {
-				// By a queue: it never left, its attempt not written before
-				// the process stopped; or it left by a queue that keeps its
-				// answers, sent again under once, asked of under started
-				retried[key], at, again = r.Now(), r.Now(), true
+			if call.Once && tries[key] > 0 && !again && call.ByQueue {
+				found, err := r.keptOrNeverSent(key, tries[key])
+				if err != nil {
+					fault = err
+					return vm.NewNull(), false, err
+				}
+				if found {
+					// By a queue: it never left, its attempt not written
+					// before the process stopped; or it left by a queue that
+					// keeps its answers, sent again under once, asked of
+					// under started
+					retried[key], at, again = r.Now(), r.Now(), true
+				}
 			}
 			if call.Once && tries[key] > 0 && !again {
 				// It left once, and nothing says what came of it: it is not
@@ -1280,7 +1313,12 @@ func (r *Runtime) takeHeld(id string) error {
 	// instance sleeps until the clock wakes one of its tasks. A
 	// cancellation asked meanwhile is found here, before anything leaves
 	machine.SetOnIdle(func(m *vm.VM) error {
-		if now, ok := r.Store.Get(id); ok && now.Cancel != "" && !inst.CancelTaken && !flowHost.cancelTaken {
+		now, ok, err := r.Store.Get(id)
+		if err != nil {
+			fault = err
+			return err
+		}
+		if ok && now.Cancel != "" && !inst.CancelTaken && !flowHost.cancelTaken {
 			// A flow that waits for its cancellation is given it, at its
 			// wait match; while its steps leave or come back it goes on.
 			// One that waits elsewhere, or does not listen, stops here
@@ -1310,7 +1348,12 @@ func (r *Runtime) takeHeld(id string) error {
 				continue
 			}
 			if key, ok := strings.CutPrefix(name, "answer:"); ok {
-				if a, found := r.Store.Attempt(key); found && a.State == Answered {
+				a, found, err := r.Store.Attempt(key)
+				if err != nil {
+					fault = err
+					return err
+				}
+				if found && a.State == Answered {
 					m.Arrived(name)
 					arrived = true
 				}
@@ -1536,7 +1579,10 @@ func (r *Runtime) finish(inst *Instance) error {
 	// run before its own
 	var left []string
 	for _, child := range w.Children {
-		c, ok := r.Store.Get(child)
+		c, ok, err := r.Store.Get(child)
+		if err != nil {
+			return err
+		}
 		if !ok || c.ended() {
 			continue
 		}
@@ -1554,7 +1600,10 @@ func (r *Runtime) finish(inst *Instance) error {
 	for n := 1; n <= len(w.Undos); n++ {
 		undo := w.Undos[len(w.Undos)-n]
 		key := Key(w, w.Pass, "finish", "undo", n)
-		kept, found := r.Store.Result(key)
+		kept, found, err := r.Store.Result(key)
+		if err != nil {
+			return err
+		}
 		data := kept.Data
 		if !found {
 			if at, again := w.Retried[key]; again && at > r.Now() {
@@ -1632,21 +1681,24 @@ func (r *Runtime) stopFinishing(w *Instance, why string) error {
 // never did, its attempt not written, or did by a queue whose manifest
 // keeps its answers, under once or under started: what may have arrived
 // of it is then found out, not taken as Unknown.
-func (r *Runtime) keptOrNeverSent(key string, attempt int) bool {
-	a, ok := r.Store.Attempt(key)
+func (r *Runtime) keptOrNeverSent(key string, attempt int) (bool, error) {
+	a, ok, err := r.Store.Attempt(key)
+	if err != nil {
+		return false, err
+	}
 	if !ok || a.Attempt < attempt {
 		// Written before it leaves: not written, and it did not; the one
 		// before was answered, or it would not have been sent again
-		return true
+		return true, nil
 	}
 	kept, ok := r.Queues.(interface {
 		Kept(queue, shape string) (once, started bool)
 	})
 	if !ok {
-		return false
+		return false, nil
 	}
 	once, started := kept.Kept(a.Queue, a.Shape)
-	return once || started
+	return once || started, nil
 }
 
 // refused is a write the store refused while an undo ran: not what the

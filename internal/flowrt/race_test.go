@@ -45,7 +45,7 @@ func TestAWaitForAChildThatEndsMeanwhile(t *testing.T) {
 						t.Fatalf("round %d: %v", round, err)
 					}
 				}
-				if got, _ := store.Get(parent.ID); got.Status != flowrt.Waiting || got.WakeAt != 0 {
+				if got, _, _ := store.Get(parent.ID); got.Status != flowrt.Waiting || got.WakeAt != 0 {
 					t.Fatalf("round %d: the parent sleeps through its child's end: %s, due at %d", round, got.Status, got.WakeAt)
 				}
 			}
@@ -100,7 +100,7 @@ func TestSendsAtOnce(t *testing.T) {
 			if len(kept)+already+full != 24 {
 				t.Errorf("expected every send answered once: %d kept, %d already, %d full", len(kept), already, full)
 			}
-			if got, _ := store.Get("i"); got.WakeAt != 0 {
+			if got, _, _ := store.Get("i"); got.WakeAt != 0 {
 				t.Errorf("expected it due once a message came, due at %d", got.WakeAt)
 			}
 		})

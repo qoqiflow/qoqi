@@ -134,14 +134,14 @@ func (m *Memory) UnderWay(queue string, now int64) int {
 	return n
 }
 
-func (m *Memory) Attempt(key string) (Attempt, bool) {
+func (m *Memory) Attempt(key string) (Attempt, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	list := m.attempts[key]
 	if len(list) == 0 {
-		return Attempt{}, false
+		return Attempt{}, false, nil
 	}
-	return *list[len(list)-1], true
+	return *list[len(list)-1], true, nil
 }
 
 func (m *Memory) Attempts(key string) []Attempt {
@@ -260,9 +260,12 @@ func scanAttempt(row interface{ Scan(...any) error }) (Attempt, error) {
 	return a, nil
 }
 
-func (s *SQL) Attempt(key string) (Attempt, bool) {
+func (s *SQL) Attempt(key string) (Attempt, bool, error) {
 	a, err := scanAttempt(s.db.QueryRow(s.q(`SELECT `+attemptColumns+` FROM attempts WHERE key = ? ORDER BY attempt DESC LIMIT 1`), key))
-	return a, err == nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return Attempt{}, false, nil
+	}
+	return a, err == nil, err
 }
 
 func (s *SQL) Attempts(key string) []Attempt {

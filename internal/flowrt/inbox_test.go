@@ -122,7 +122,7 @@ func TestADecisionFromOutside(t *testing.T) {
 	if _, err := rt.RunDue(); err != nil {
 		t.Fatal(err)
 	}
-	if inst, _ := store.Get("e1"); inst.Status != flowrt.Waiting {
+	if inst, _, _ := store.Get("e1"); inst.Status != flowrt.Waiting {
 		t.Fatalf("expected it asleep, got %s %q", inst.Status, inst.Stopped)
 	}
 
@@ -142,7 +142,7 @@ func TestADecisionFromOutside(t *testing.T) {
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("e1")
+	inst, _, _ := store.Get("e1")
 	if inst.Status != flowrt.Done || string(inst.Result) != `"approved by grace"` {
 		t.Fatalf("expected approved, got %s %s %q", inst.Status, inst.Result, inst.Stopped)
 	}
@@ -208,7 +208,7 @@ func TestAResumeTakesItsMessagesAgain(t *testing.T) {
 		}
 	}
 	if err := rt.RunUntilIdle(time.Second); err == nil {
-		inst, _ := store.Get("c")
+		inst, _, _ := store.Get("c")
 		if inst.Status != flowrt.Stopped {
 			t.Fatalf("expected it stopped on 13, got %s %q", inst.Status, inst.Stopped)
 		}
@@ -254,7 +254,7 @@ func commandsKept(t *testing.T, p place) {
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("c")
+	inst, _, _ := store.Get("c")
 	if inst.Status != flowrt.Done || string(inst.Result) != "13" || len(store.Messages("c", "commands")) != 0 {
 		t.Errorf("expected done with 13, every message taken, got %s %s %q", inst.Status, inst.Result, inst.Stopped)
 	}

@@ -120,7 +120,7 @@ func TestStepsWriteInTheStore(t *testing.T) {
 			if err := rt.RunUntilIdle(10 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			inst, _ := store.Get("x")
+			inst, _, _ := store.Get("x")
 			if inst.Status != flowrt.Done || string(inst.Result) != settled {
 				t.Fatalf("expected done with %s, got %s %s %s", settled, inst.Status, inst.Result, inst.Stopped)
 			}
@@ -181,7 +181,7 @@ func TestStepsWriteInTheStoreOnceThroughEveryStop(t *testing.T) {
 				if err := run(at, src, 0, &out); err != nil {
 					t.Fatalf("after stopping at write %d: %v", k, err)
 				}
-				inst, _ := store.Get("x")
+				inst, _, _ := store.Get("x")
 				if inst.Status != flowrt.Done || string(inst.Result) != settled {
 					t.Fatalf("stopped at write %d: expected done with %s, got %s %s %s", k, settled, inst.Status, inst.Result, inst.Stopped)
 				}
@@ -213,7 +213,7 @@ func TestStepsWriteInTheStoreFromManyWorkers(t *testing.T) {
 				t.Fatal(err)
 			}
 			for i := 0; i < 20; i++ {
-				inst, _ := store.Get(fmt.Sprintf("b%d", i))
+				inst, _, _ := store.Get(fmt.Sprintf("b%d", i))
 				want := fmt.Sprintf(`"receipt for inv-%d, 1 seen, noted"`, i)
 				if inst.Status != flowrt.Done || string(inst.Result) != want {
 					t.Errorf("b%d: expected done with %s, got %s %s %s", i, want, inst.Status, inst.Result, inst.Stopped)

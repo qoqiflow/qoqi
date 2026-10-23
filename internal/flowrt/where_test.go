@@ -64,7 +64,7 @@ func TestWhereTheTasksOfAnInstanceAre(t *testing.T) {
 	if _, err := rt.RunDue(); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("crew:1")
+	inst, _, _ := store.Get("crew:1")
 	if inst.Status != flowrt.Waiting {
 		t.Fatalf("expected it asleep, got %s %s", inst.Status, inst.Stopped)
 	}
@@ -135,7 +135,7 @@ func TestResultsOfOneInstance(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, id := range []string{"order:1", "order:10", "order:1/b"} {
-			inst, _ := store.Get(id)
+			inst, _, _ := store.Get(id)
 			kept := store.Results(flowrt.Prefix(inst))
 			if len(kept) != 1 || !strings.HasPrefix(kept[0].Key, id+"/"+inst.Birth+"/") || string(kept[0].Result) != "4" {
 				t.Errorf("%s: the results of %s alone, got %+v", name, id, kept)

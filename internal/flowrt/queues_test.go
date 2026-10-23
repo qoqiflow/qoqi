@@ -495,7 +495,7 @@ func TestQueuesSurviveAStopAtEveryWrite(t *testing.T) {
 	if err := run(&application{t: t, answer: declined}, plain); err != nil {
 		t.Fatal(err)
 	}
-	clean, _ := plain.Get("o")
+	clean, _, _ := plain.Get("o")
 	for k := 1; k <= plain.Writes(); k++ {
 		app := &application{t: t, answer: declined}
 		store := flowrt.NewMemory()
@@ -507,7 +507,7 @@ func TestQueuesSurviveAStopAtEveryWrite(t *testing.T) {
 		if err := run(app, store); err != nil {
 			t.Fatalf("after stopping at write %d: %v", k, err)
 		}
-		inst, _ := store.Get("o")
+		inst, _, _ := store.Get("o")
 		if inst.Status != clean.Status || string(inst.Result) != string(clean.Result) {
 			t.Errorf("stopped at write %d: expected %s %s, got %s %s %q", k, clean.Status, clean.Result, inst.Status, inst.Result, inst.Stopped)
 		}

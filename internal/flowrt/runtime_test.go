@@ -107,7 +107,7 @@ func TestAFlowRunsToItsEnd(t *testing.T) {
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("order:A1")
+	inst, _, _ := store.Get("order:A1")
 	if inst.Status != flowrt.Done || string(inst.Result) != shipped {
 		t.Fatalf("expected done with %s, got %s %s %s", shipped, inst.Status, inst.Result, inst.Stopped)
 	}
@@ -165,7 +165,7 @@ func TestAFlowSurvivesAStopAtEveryWrite(t *testing.T) {
 			t.Fatalf("after stopping at write %d: %v", k, err)
 		}
 
-		inst, _ := store.Get("order:A1")
+		inst, _, _ := store.Get("order:A1")
 		if inst.Status != flowrt.Done || string(inst.Result) != shipped {
 			t.Fatalf("after stopping at write %d: expected done with %s, got %s %s %s", k, shipped, inst.Status, inst.Result, inst.Stopped)
 		}
@@ -230,7 +230,7 @@ func TestANameIsOneInstance(t *testing.T) {
 	if got := len(worldLines(out.String())); got != 10 {
 		t.Errorf("expected two orders of five steps, got %d lines:\n%s", got, out.String())
 	}
-	other, _ := store.Get("order:B2")
+	other, _, _ := store.Get("order:B2")
 	if other.Birth == first.Birth {
 		t.Errorf("two instances with one birth: %s", first.Birth)
 	}
@@ -269,7 +269,7 @@ fn main() {}
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("broken")
+	inst, _, _ := store.Get("broken")
 	if inst.Status != flowrt.Stopped || !strings.Contains(inst.Stopped, "index out of bounds") {
 		t.Errorf("expected stopped on the index, got %s %q", inst.Status, inst.Stopped)
 	}
@@ -320,7 +320,7 @@ fn main() {}
 	if err := flowrt.New(chunk, store, &out).RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("t")
+	inst, _, _ := store.Get("t")
 	if string(inst.Result) != `"ada 2 | ada 1"` {
 		t.Errorf("expected the first send on its second attempt, got %s %s", inst.Result, inst.Stopped)
 	}

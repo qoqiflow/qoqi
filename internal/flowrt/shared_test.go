@@ -75,7 +75,7 @@ func TestTwoDaemonsShareAStore(t *testing.T) {
 			store := p.open(t, at)
 			defer store.Close()
 			for i := 0; i < 20; i++ {
-				inst, _ := store.Get(fmt.Sprintf("o%d", i))
+				inst, _, _ := store.Get(fmt.Sprintf("o%d", i))
 				want := "std.result.Result.Ok"
 				if i%5 == 0 {
 					want = "too much"
@@ -84,7 +84,7 @@ func TestTwoDaemonsShareAStore(t *testing.T) {
 					t.Errorf("o%d: expected done with %s, got %s %s %q", i, want, inst.Status, inst.Result, inst.Stopped)
 				}
 			}
-			if campaign, _ := store.Get("campaign"); campaign.Status != flowrt.Done || string(campaign.Result) != "4" {
+			if campaign, _, _ := store.Get("campaign"); campaign.Status != flowrt.Done || string(campaign.Result) != "4" {
 				t.Errorf("the campaign: expected done with 4, got %s %s %q", campaign.Status, campaign.Result, campaign.Stopped)
 			}
 			done := map[string]int{}
@@ -141,7 +141,7 @@ func TestALeaseRunsOut(t *testing.T) {
 			if held, err := b.Claim("o1", later, later+30000); err != nil || !held {
 				t.Fatalf("b: expected to hold o1 once a's lease ran out, got %v %v", held, err)
 			}
-			inst, _ := a.Get("o1")
+			inst, _, _ := a.Get("o1")
 			inst.Status = flowrt.Running
 			if err := a.Save(inst); !errors.Is(err, flowrt.ErrNotHeld) {
 				t.Errorf("a saved o1, which b holds: %v", err)
@@ -158,7 +158,7 @@ func TestALeaseRunsOut(t *testing.T) {
 			if err := rt.RunUntilIdle(20 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			if inst, _ := b.Get("o1"); inst.Status != flowrt.Done {
+			if inst, _, _ := b.Get("o1"); inst.Status != flowrt.Done {
 				t.Errorf("expected b to finish o1, got %s %s", inst.Status, inst.Stopped)
 			}
 		})

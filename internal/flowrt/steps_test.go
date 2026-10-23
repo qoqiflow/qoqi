@@ -26,7 +26,7 @@ func stoppedEverywhere(t *testing.T, chunk *vm.Chunk, flow, fields string, check
 	if err := rt.RunUntilIdle(10 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := plain.Get("x")
+	inst, _, _ := plain.Get("x")
 	check(0, plainOut.String(), inst)
 
 	for k := 1; k <= plain.Writes(); k++ {
@@ -49,7 +49,7 @@ func stoppedEverywhere(t *testing.T, chunk *vm.Chunk, flow, fields string, check
 		if err := again.RunUntilIdle(10 * time.Second); err != nil {
 			t.Fatalf("after stopping at write %d: %v", k, err)
 		}
-		inst, _ := store.Get("x")
+		inst, _, _ := store.Get("x")
 		check(k, out.String(), inst)
 	}
 }
@@ -93,7 +93,7 @@ func TestRetry(t *testing.T) {
 	if err := rt.RunUntilIdle(10 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("x")
+	inst, _, _ := store.Get("x")
 	if string(inst.Result) != `"got example.com on attempt 3"` {
 		t.Fatalf("expected the third attempt's answer, got %s %s", inst.Result, inst.Stopped)
 	}
@@ -122,7 +122,7 @@ func TestRetryGivesUp(t *testing.T) {
 	if err := rt.RunUntilIdle(10 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("x")
+	inst, _, _ := store.Get("x")
 	if inst.Status != flowrt.Stopped || !strings.Contains(inst.Stopped, "fetch asked to be run again 4 times, and was not: the server is down") {
 		t.Errorf("expected stopped after four attempts, got %s %q", inst.Status, inst.Stopped)
 	}
@@ -218,7 +218,7 @@ func TestSettledRetried(t *testing.T) {
 	if err := rt.RunUntilIdle(10 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("x")
+	inst, _, _ := store.Get("x")
 	if string(inst.Result) != `"for ada paid ref-7"` {
 		t.Errorf("expected the second attempt to pay, got %s %s", inst.Result, inst.Stopped)
 	}

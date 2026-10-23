@@ -61,7 +61,7 @@ func started(t *testing.T, store flowrt.Store, out *bytes.Buffer) *flowrt.Instan
 	if _, err := rt.RunDue(); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("sub")
+	inst, _, _ := store.Get("sub")
 	if inst.Status != flowrt.Waiting || inst.Version != vm.Fingerprint(compiled(t, v1)) {
 		t.Fatalf("expected it asleep in the first version, got %s %s", inst.Status, inst.Version)
 	}
@@ -80,7 +80,7 @@ func TestAnInstanceMovesAtAStage(t *testing.T) {
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("sub")
+	inst, _, _ := store.Get("sub")
 	if inst.Status != flowrt.Done || string(inst.Result) != "502" || inst.Version != vm.Fingerprint(newer) {
 		t.Fatalf("expected done with 100 + 201 + 201 in the newer version, got %s %s %q %s", inst.Status, inst.Result, inst.Stopped, inst.Version)
 	}
@@ -104,7 +104,7 @@ func TestAnInstanceStaysWhenTheStageChanged(t *testing.T) {
 	if err := rt.RunUntilIdle(5 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("sub")
+	inst, _, _ := store.Get("sub")
 	if inst.Status != flowrt.Done || string(inst.Result) != "700" || inst.Version != vm.Fingerprint(compiled(t, v1)) {
 		t.Fatalf("expected done in its own version, its bills the newer one's, got %s %s %q", inst.Status, inst.Result, inst.Stopped)
 	}
@@ -149,7 +149,7 @@ func TestMovingSurvivesAStopAtEveryWrite(t *testing.T) {
 		if err := flowrt.New(newer, store, &out).RunUntilIdle(5 * time.Second); err != nil {
 			t.Fatalf("after stopping at write %d: %v", k, err)
 		}
-		inst, _ := store.Get("sub")
+		inst, _, _ := store.Get("sub")
 		if inst.Status != flowrt.Done || string(inst.Result) != "502" {
 			t.Errorf("after stopping at write %d of %d: expected done with 502, got %s %s %q\n%s", k, count, inst.Status, inst.Result, inst.Stopped, out.String())
 		}
@@ -235,7 +235,7 @@ func TestAnInstanceMigratesAtAStage(t *testing.T) {
 			if err := flowrt.New(newer, store, &out).RunUntilIdle(5 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			inst, _ := store.Get("sub")
+			inst, _, _ := store.Get("sub")
 			if inst.Status != flowrt.Done || string(inst.Result) != c.result || inst.Version != vm.Fingerprint(newer) {
 				t.Fatalf("expected done with %s in the newer version, got %s %s %q", c.result, inst.Status, inst.Result, inst.Stopped)
 			}
@@ -321,7 +321,7 @@ func TestStepsRunInTheNewestVersion(t *testing.T) {
 			if err := flowrt.New(compiled(t, c.newer), store, &out).RunUntilIdle(5 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			if inst, _ := store.Get("late"); inst.Status != flowrt.Done {
+			if inst, _, _ := store.Get("late"); inst.Status != flowrt.Done {
 				t.Fatalf("expected done, got %s %q", inst.Status, inst.Stopped)
 			}
 			if got := worldLines(out.String()); strings.Join(got, "|") != strings.Join(c.world, "|") {
@@ -374,7 +374,7 @@ impl Sub {
 			if err := flowrt.New(newer, store, &out).RunUntilIdle(5 * time.Second); err != nil {
 				t.Fatal(err)
 			}
-			inst, _ := store.Get("sub")
+			inst, _, _ := store.Get("sub")
 			if inst.Status != flowrt.Done || string(inst.Result) != c.result {
 				t.Fatalf("expected done with %s, got %s %s %q\n%s", c.result, inst.Status, inst.Result, inst.Stopped, out.String())
 			}

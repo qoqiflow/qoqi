@@ -180,7 +180,7 @@ func (d *Daemon) runtimeOf(flow string) *flowrt.Runtime {
 // find is an instance, and the runtime of the program it belongs to.
 func (d *Daemon) find(id string) (*flowrt.Runtime, *flowrt.Instance, bool) {
 	for _, p := range d.programs() {
-		if inst, ok := p.Runtime.Store.Get(id); ok {
+		if inst, ok, _ := p.Runtime.Store.Get(id); ok {
 			return p.Runtime, inst, true
 		}
 	}
@@ -809,7 +809,7 @@ func (d *Daemon) cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.poke()
-	inst, _ := rt.Store.Get(id)
+	inst, _, _ := rt.Store.Get(id)
 	answer(w, http.StatusAccepted, viewOf(inst))
 }
 
@@ -843,7 +843,7 @@ func (d *Daemon) resume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.poke()
-	inst, _ := rt.Store.Get(id)
+	inst, _, _ := rt.Store.Get(id)
 	answer(w, http.StatusAccepted, viewOf(inst))
 }
 
@@ -866,7 +866,7 @@ func (d *Daemon) end(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "end", err.Error())
 		return
 	}
-	inst, _ := rt.Store.Get(id)
+	inst, _, _ := rt.Store.Get(id)
 	answer(w, http.StatusAccepted, viewOf(inst))
 }
 

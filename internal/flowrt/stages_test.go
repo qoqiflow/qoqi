@@ -101,7 +101,7 @@ func TestAStageWithAnotherTaskAlive(t *testing.T) {
 	if _, err := rt.RunDue(); err != nil {
 		t.Fatal(err)
 	}
-	inst, _ := store.Get("busy")
+	inst, _, _ := store.Get("busy")
 	if inst.Pass != 1 || inst.AtStage != nil {
 		t.Errorf("at the first stage, a task alive: expected pass 1 and no stage kept, got %d %+v", inst.Pass, inst.AtStage)
 	}

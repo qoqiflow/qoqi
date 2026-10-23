@@ -136,7 +136,7 @@ func TestAStepWaitingKeepsNoneFromTheStore(t *testing.T) {
 				t.Fatal(err)
 			}
 			for id, want := range map[string]string{"slow": `"saw 0"`, "quick": "5"} {
-				if inst, _ := store.Get(id); inst.Status != flowrt.Done || string(inst.Result) != want {
+				if inst, _, _ := store.Get(id); inst.Status != flowrt.Done || string(inst.Result) != want {
 					t.Errorf("%s: expected done with %s, got %s %s %s", id, want, inst.Status, inst.Result, inst.Stopped)
 				}
 			}
@@ -179,7 +179,7 @@ func TestAStepThatReadWhatChangedRunsAgain(t *testing.T) {
 	if err := rt.RunUntilIdle(20 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if inst, _ := store.Get("slow"); inst.Status != flowrt.Done || string(inst.Result) != `"saw 1"` {
+	if inst, _, _ := store.Get("slow"); inst.Status != flowrt.Done || string(inst.Result) != `"saw 1"` {
 		t.Errorf(`expected done with "saw 1", got %s %s %s`, inst.Status, inst.Result, inst.Stopped)
 	}
 	// The first run is ended at its next statement, before it says

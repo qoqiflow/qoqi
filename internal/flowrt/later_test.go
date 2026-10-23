@@ -64,7 +64,7 @@ func (l *later) run() *flowrt.Instance {
 			break
 		}
 	}
-	inst, _ := l.store.Get("o")
+	inst, _, _ := l.store.Get("o")
 	return inst
 }
 
@@ -262,7 +262,7 @@ func TestALaterAnswerSurvivesAStopAtEveryWrite(t *testing.T) {
 			if _, err := l.rt.RunDue(); err != nil && !errors.Is(err, flowrt.ErrCrash) {
 				t.Fatal(err)
 			}
-			inst, _ := l.store.Get("o")
+			inst, _, _ := l.store.Get("o")
 			if inst == nil {
 				// Stopped as it was made: started again
 				if _, err := l.rt.Start("o", "Order", []byte(shopOrder(false))); err != nil {
@@ -276,7 +276,7 @@ func TestALaterAnswerSurvivesAStopAtEveryWrite(t *testing.T) {
 			// What waits for an answer gets it, once
 			for _, name := range inst.Awaits {
 				key := strings.TrimPrefix(name, "answer:")
-				a, ok := l.store.Attempt(key)
+				a, ok, _ := l.store.Attempt(key)
 				if !ok || a.State == flowrt.Answered {
 					continue
 				}
@@ -290,7 +290,7 @@ func TestALaterAnswerSurvivesAStopAtEveryWrite(t *testing.T) {
 			}
 			l.rt = l.runtime(l.queues)
 		}
-		inst, _ := l.store.Get("o")
+		inst, _, _ := l.store.Get("o")
 		return inst
 	}
 	plain := servedLater(t, flowrt.NewMemory(), chargeLater)

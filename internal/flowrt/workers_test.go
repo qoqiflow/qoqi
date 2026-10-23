@@ -76,7 +76,7 @@ func TestWorkers(t *testing.T) {
 			}
 
 			for i := 0; i < 20; i++ {
-				inst, _ := store.Get(fmt.Sprintf("o%d", i))
+				inst, _, _ := store.Get(fmt.Sprintf("o%d", i))
 				want := "std.result.Result.Ok"
 				if i%5 == 0 {
 					want = "too much"
@@ -85,7 +85,7 @@ func TestWorkers(t *testing.T) {
 					t.Errorf("o%d: expected done with %s, got %s %s %q", i, want, inst.Status, inst.Result, inst.Stopped)
 				}
 			}
-			if campaign, _ := store.Get("campaign"); campaign.Status != flowrt.Done || string(campaign.Result) != "4" {
+			if campaign, _, _ := store.Get("campaign"); campaign.Status != flowrt.Done || string(campaign.Result) != "4" {
 				t.Errorf("the campaign: expected done with 4, got %s %s %q", campaign.Status, campaign.Result, campaign.Stopped)
 			}
 
