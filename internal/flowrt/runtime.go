@@ -99,7 +99,12 @@ type Instance struct {
 	// Taking are the messages it took since it was last written: the save
 	// marks them taken, in the same write, and keeps nothing of them here
 	Taking []Taken
-	untake bool // a resume gives back the messages taken since the stage
+	// Starting are the instances it started since it was last written:
+	// made by the save that follows, in the same write, so that a process
+	// that stops before it leaves none behind, which the instance taken up
+	// would start again under other names
+	Starting []*Instance
+	untake   bool // a resume gives back the messages taken since the stage
 
 	// CancelTaken says that the flow, which waits for its cancellation,
 	// was given it: it ends its own way, and is not stopped for it
@@ -582,17 +587,10 @@ func (r *Runtime) Start(id, flow string, fields []byte) (*Instance, error) {
 // start makes an instance, a child of parent unless that is "", and says
 // whether it made it.
 func (r *Runtime) start(id, flow string, fields []byte, parent string) (*Instance, bool, error) {
-	if r.Chunk.FindPrototype(flow+".run") < 0 {
-		return nil, false, fmt.Errorf("the program has no flow %s", flow)
-	}
-	version, err := r.newestVersion()
+	inst, err := r.newInstance(id, flow, fields, parent)
 	if err != nil {
 		return nil, false, err
 	}
-	if fields, err = withInboxes(fields, r.Chunk.Prototypes[r.Chunk.FindPrototype(flow+".run")].Inboxes); err != nil {
-		return nil, false, err
-	}
-	inst := &Instance{ID: id, Birth: birth(), Flow: flow, Status: Waiting, Fields: fields, Counts: map[string]int{}, WakeAt: r.Now(), Parent: parent, Version: version}
 	created, existing, err := r.Store.Create(inst)
 	if err != nil {
 		return nil, false, err
@@ -603,6 +601,21 @@ func (r *Runtime) start(id, flow string, fields []byte, parent string) (*Instanc
 	return inst, true, nil
 }
 
+// newInstance is an instance as it starts, not kept yet.
+func (r *Runtime) newInstance(id, flow string, fields []byte, parent string) (*Instance, error) {
+	if r.Chunk.FindPrototype(flow+".run") < 0 {
+		return nil, fmt.Errorf("the program has no flow %s", flow)
+	}
+	version, err := r.newestVersion()
+	if err != nil {
+		return nil, err
+	}
+	if fields, err = withInboxes(fields, r.Chunk.Prototypes[r.Chunk.FindPrototype(flow+".run")].Inboxes); err != nil {
+		return nil, err
+	}
+	return &Instance{ID: id, Birth: birth(), Flow: flow, Status: Waiting, Fields: fields, Counts: map[string]int{}, WakeAt: r.Now(), Parent: parent, Version: version}, nil
+}
+
 // host is the runtime, as the program of one instance asks it about
 // others.
 type host struct {
@@ -610,7 +623,8 @@ type host struct {
 	inst     *Instance
 	children *[]string
 	fault    *error
-	taking   *[]Taken // the messages taken since the last write
+	taking   *[]Taken     // the messages taken since the last write
+	starting *[]*Instance // the instances started since the last write
 	pass     *int
 	// the cancellation, given to the flow during this run
 	cancelTaken bool
@@ -670,14 +684,25 @@ func (h *host) StartInstance(name string, fields []byte, detached bool) error {
 	if detached {
 		parent = ""
 	}
-	child, created, err := h.r.start(name, typed.Type, fields, parent)
-	switch {
-	case errors.Is(err, ErrCrash):
-		*h.fault = err
-		return err
-	case err != nil:
-		return err
-	case child.Flow != typed.Type:
+	// Started already, since the last write, or before it
+	child, created := h.started(name), false
+	if child == nil {
+		existing, ok, err := h.r.Store.Get(name)
+		if err != nil {
+			*h.fault = err
+			return err
+		}
+		child = existing
+		if !ok {
+			// Made with the instance's next write
+			if child, err = h.r.newInstance(name, typed.Type, fields, parent); err != nil {
+				return err
+			}
+			*h.starting = append(*h.starting, child)
+			created = true
+		}
+	}
+	if child.Flow != typed.Type {
 		return fmt.Errorf("%s is an instance of %s, not of %s", name, child.Flow, typed.Type)
 	}
 	// Its child if it made it, or made it before a stop it is taken up from
@@ -692,7 +717,21 @@ func (h *host) StartInstance(name string, fields []byte, detached bool) error {
 	return nil
 }
 
+// started is an instance started since the last write, by its name.
+func (h *host) started(name string) *Instance {
+	for _, child := range *h.starting {
+		if child.ID == name {
+			return child
+		}
+	}
+	return nil
+}
+
 func (h *host) Ended(name string) ([]byte, bool, error) {
+	if h.started(name) != nil {
+		// Not even made yet
+		return nil, false, nil
+	}
 	result, ended, err := h.r.endedAs(name)
 	if err != nil {
 		// Not read: the instance is taken up again from its last write
@@ -994,7 +1033,8 @@ func (r *Runtime) takeHeld(id string) error {
 	}
 	var fault error // a write the store refused: the process stops here
 	var taking []Taken
-	flowHost := &host{r: r, inst: inst, children: &children, fault: &fault, taking: &taking, pass: &pass}
+	var starting []*Instance
+	flowHost := &host{r: r, inst: inst, children: &children, fault: &fault, taking: &taking, starting: &starting, pass: &pass}
 	machine.SetFlowHost(flowHost)
 	var queues *attempting
 	if r.Queues != nil {
@@ -1024,6 +1064,7 @@ func (r *Runtime) takeHeld(id string) error {
 		w.Pass, w.AtStage, w.Replaying = pass, atStage, replaying
 		w.Drawn, w.Giving = copyDrawn(drawn), copyDrawn(giving)
 		w.Taking, taking = taking, nil
+		w.Starting, starting = starting, nil
 		w.CancelTaken = inst.CancelTaken || flowHost.cancelTaken
 		return w, nil
 	}
@@ -1377,7 +1418,12 @@ func (r *Runtime) takeHeld(id string) error {
 				}
 				continue
 			}
-			if _, ended, _ := r.endedAs(name); ended {
+			_, ended, err := flowHost.Ended(name)
+			if err != nil {
+				fault = err
+				return err
+			}
+			if ended {
 				m.Arrived(name)
 				arrived = true
 			}
@@ -1476,6 +1522,7 @@ func (r *Runtime) takeHeld(id string) error {
 	at.Pass, at.AtStage, at.Replaying = pass, atStage, replaying
 	at.Drawn, at.Giving = drawn, giving
 	at.Taking = taking
+	at.Starting = starting
 	at.CancelTaken = inst.CancelTaken || flowHost.cancelTaken
 	if err == nil {
 		// Run ended: a replay ends here too

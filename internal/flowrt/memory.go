@@ -196,6 +196,19 @@ func (m *Memory) Save(inst *Instance) error {
 	if err := m.write(); err != nil {
 		return err
 	}
+	for _, child := range inst.Starting {
+		if made, ok := m.instances[child.ID]; ok {
+			if child.Parent != "" && made.Parent != inst.ID {
+				return fmt.Errorf("%w: %s, started by %s, was started meanwhile by another", ErrStartedMeanwhile, child.ID, inst.ID)
+			}
+			continue
+		}
+	}
+	for _, child := range inst.Starting {
+		if _, ok := m.instances[child.ID]; !ok {
+			m.instances[child.ID] = child.copy()
+		}
+	}
 	for _, taken := range inst.Taking {
 		for _, msg := range m.messages[inst.ID] {
 			if msg.seq == taken.Seq {
@@ -204,7 +217,7 @@ func (m *Memory) Save(inst *Instance) error {
 		}
 	}
 	saved := inst.copy()
-	saved.Taking = nil
+	saved.Taking, saved.Starting = nil, nil
 	saved.Cancel = ""
 	if old, ok := m.instances[inst.ID]; ok {
 		saved.Cancel = old.Cancel

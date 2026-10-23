@@ -409,6 +409,12 @@ func (s *SQL) Save(inst *Instance) error {
 		if err != nil {
 			return err
 		}
+		// The instances it started since its last write: made with this one
+		for _, child := range inst.Starting {
+			if err := s.makeStarted(tx, inst.ID, child); err != nil {
+				return err
+			}
+		}
 		// The messages it took since its last write: taken with this one
 		for _, taken := range inst.Taking {
 			if _, err := tx.Exec(s.q(`UPDATE messages SET taken = 1, pass = ? WHERE seq = ?`), taken.Pass, taken.Seq); err != nil {
@@ -430,6 +436,44 @@ func (s *SQL) Save(inst *Instance) error {
 		return nil
 	})
 }
+
+// makeStarted makes, in a save of the instance that started it, an
+// instance started since its last write. A name another took meanwhile
+// fails the save, if the instance took it for its child: taken up again
+// from its last write, it finds the name taken.
+func (s *SQL) makeStarted(tx *sql.Tx, by string, child *Instance) error {
+	data, err := rowOf(child)
+	if err != nil {
+		return err
+	}
+	result, err := tx.Exec(s.q(`INSERT INTO instances (id, flow, status, wake_at, row) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`),
+		child.ID, child.Flow, string(child.Status), child.WakeAt, data)
+	if err != nil {
+		return err
+	}
+	if n, _ := result.RowsAffected(); n == 1 || child.Parent == "" {
+		return nil
+	}
+	var row string
+	if err := tx.QueryRow(s.q(`SELECT row FROM instances WHERE id = ?`), child.ID).Scan(&row); err != nil {
+		return err
+	}
+	var made struct {
+		Parent string `json:"parent"`
+		Birth  string `json:"birth"`
+	}
+	if err := json.Unmarshal([]byte(row), &made); err != nil {
+		return err
+	}
+	if made.Parent != by {
+		return fmt.Errorf("%w: %s, started by %s, was started meanwhile by another", ErrStartedMeanwhile, child.ID, by)
+	}
+	return nil
+}
+
+// ErrStartedMeanwhile is a save of an instance that started a child under
+// a name another took between the start and the save.
+var ErrStartedMeanwhile = errors.New("a name was taken meanwhile")
 
 // wakeIfAnswered makes an instance that starts to wait due at once if
 // what it waits for came while it ran: one it waits for that ended, a
