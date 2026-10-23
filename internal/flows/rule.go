@@ -10,8 +10,14 @@
 //   - a call of a method goes to the method of the receiver's type, or,
 //     when only a trait is known, to every method of that name;
 //   - a call of a function value goes to every function of the same arity
-//     whose value is taken in what the walk has reached, since the state
-//     of a flow is data and no function value comes into it from outside;
+//     whose value is taken in what the walk has reached, or kept in a
+//     variable of the program's own, outside any function: the state of a
+//     flow is data, and no other function value comes into it;
+//   - a native given a function, which it may call, calls every function
+//     whose value is taken, whatever its arity;
+//   - what the machine calls of itself, the show, equals and compare of a
+//     type, when it formats, compares or sorts a value that holds one, is
+//     reached from every flow;
 //   - a function written inside another is part of it;
 //   - a step is where the walk stops.
 //
@@ -79,6 +85,7 @@ func Check(prog *ast.Program, table *resolve.Table, info *types.Info, errs *erro
 		fns: map[*ast.FnDecl]*fn{}, methods: map[string]map[string][]*fn{}, byName: map[string][]*fn{},
 	}
 	c.index(prog)
+	c.keptInGlobals(prog)
 	c.checkQueues(prog, queues)
 	roots := c.roots(prog)
 	c.checkStages(prog, roots)
@@ -91,6 +98,9 @@ func Check(prog *ast.Program, table *resolve.Table, info *types.Info, errs *erro
 		return
 	}
 	c.walk(roots)
+	// Then what the machine calls of itself, unless a flow calls it: the
+	// way to the world is said from the flow then
+	c.walk(c.calledByTheMachine(prog))
 	c.report()
 }
 
@@ -104,6 +114,9 @@ type checker struct {
 	methods map[string]map[string][]*fn // type, then method name
 	byName  map[string][]*fn            // methods by name alone, for a call through a trait
 	order   []*fn
+	// global are the functions whose value is kept in a variable outside
+	// any function, where any code may have put it
+	global []*fn
 }
 
 func (c *checker) add(decl *ast.FnDecl, owner string) {
@@ -176,7 +189,7 @@ func (c *checker) walk(roots []*fn) {
 			}
 		}
 		// Calls of function values, against what is taken by now
-		var taken []*fn
+		taken := append([]*fn(nil), c.global...)
 		for _, f := range c.order {
 			if f.reached && !f.decl.Step {
 				taken = append(taken, f.taken...)
@@ -189,7 +202,7 @@ func (c *checker) walk(roots []*fn) {
 			}
 			for _, value := range f.values {
 				for _, t := range taken {
-					if arity(t) == value.arity {
+					if value.arity == anyArity || arity(t) == value.arity {
 						reach(t, f, value.at)
 					}
 				}
@@ -203,6 +216,106 @@ func (c *checker) walk(roots []*fn) {
 
 func arity(f *fn) int {
 	return len(f.decl.Params)
+}
+
+// anyArity is the arity of a call a native makes of a function it is
+// given: it may be any of them.
+const anyArity = -1
+
+// takesFunction says whether a native may be given a function, which it
+// may call: result.attempt's protect, which takes Any, a sort given its
+// order.
+func takesFunction(decl *ast.FnDecl) bool {
+	for _, param := range decl.Params {
+		if param.Type != nil && (param.Type.Kind == ast.TypeFunction || param.Type.Name == "Any") {
+			return true
+		}
+	}
+	return false
+}
+
+// keptInGlobals finds the functions whose value is kept in a variable
+// outside any function: written so, or put there by any code, a step
+// among it, or code no flow reaches. A flow that reads the variable may
+// call any of them.
+func (c *checker) keptInGlobals(prog *ast.Program) {
+	// The compiler has made each such variable a function that gives its
+	// place, an array of one, made of the value it is declared with
+	for _, f := range c.order {
+		if f.decl.Body == nil {
+			continue
+		}
+		if strings.Contains(f.decl.Name, resolve.VariablePrefix) {
+			c.global = append(c.global, c.takenIn(f.decl.Body)...)
+			continue
+		}
+		ast.Walk(f.decl.Body, func(expr ast.Expr) {
+			if b, ok := expr.(*ast.BinaryExpr); ok && ast.IsAssignment(b.Op) && isGlobalPlace(b.Left) {
+				c.global = append(c.global, c.takenIn(b.Right)...)
+			}
+		}, func(ast.Stmt) {})
+	}
+}
+
+// isGlobalPlace says whether an expression is the place of a variable
+// outside functions, as the compiler writes it: __var_name()[0].
+func isGlobalPlace(e ast.Expr) bool {
+	index, ok := e.(*ast.IndexExpr)
+	if !ok {
+		return false
+	}
+	call, ok := index.Expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := call.Func.(*ast.Ident)
+	return ok && strings.Contains(ident.Name, resolve.VariablePrefix)
+}
+
+// takenIn are the functions whose value an expression takes.
+func (c *checker) takenIn(e ast.Node) []*fn {
+	var taken []*fn
+	callees := map[ast.Expr]bool{}
+	ast.Walk(e, func(expr ast.Expr) {
+		switch e := expr.(type) {
+		case *ast.CallExpr:
+			callees[e.Func] = true
+		case *ast.Ident:
+			if target := c.function(e); target != nil && !callees[e] {
+				taken = append(taken, target)
+			}
+		case *ast.MemberExpr:
+			if !callees[e] {
+				taken = append(taken, c.methodsOf(e)...)
+			}
+		}
+	}, func(ast.Stmt) {})
+	return taken
+}
+
+// calledByTheMachine are the methods the machine calls of itself on a
+// value it formats, compares or sorts: those of Show, Equal and Ordered,
+// and the equality the compiler gives a type of Equal. A value that
+// holds one can be in any flow.
+func (c *checker) calledByTheMachine(prog *ast.Program) []*fn {
+	var out []*fn
+	for _, decl := range prog.Decls {
+		impl, ok := decl.(*ast.ImplDecl)
+		if !ok {
+			continue
+		}
+		switch impl.TraitName {
+		case types.TraitShow, types.TraitEqual, types.TraitOrdered:
+		default:
+			continue
+		}
+		for _, method := range impl.Methods {
+			if f := c.fns[method]; f != nil && !isLibrary(method) {
+				out = append(out, f)
+			}
+		}
+	}
+	return out
 }
 
 // scan reads a body once: what it calls, and what function values it
@@ -260,6 +373,9 @@ func (c *checker) scanCall(f *fn, e *ast.CallExpr) {
 			if reachesWorld(decl) {
 				f.world = append(f.world, call{at: at, native: decl.Name})
 			}
+			if takesFunction(decl) {
+				f.values = append(f.values, call{at: at, arity: anyArity})
+			}
 			return
 		}
 		f.calls = append(f.calls, call{at: at, target: c.fns[decl]})
@@ -274,6 +390,9 @@ func (c *checker) scanCall(f *fn, e *ast.CallExpr) {
 			if target.decl.Extern {
 				if reachesWorld(target.decl) {
 					f.world = append(f.world, call{at: at, native: target.decl.Name})
+				}
+				if takesFunction(target.decl) {
+					f.values = append(f.values, call{at: at, arity: anyArity})
 				}
 				continue
 			}
@@ -313,7 +432,26 @@ func (c *checker) methodsOf(member *ast.MemberExpr) []*fn {
 			return found
 		}
 	}
+	if c.isField(recv, member.Name) {
+		// A function kept in a field: not the method of another type
+		// that has the name
+		return nil
+	}
 	return c.byName[member.Name]
+}
+
+// isField says whether a struct has a field of that name.
+func (c *checker) isField(t types.Type, name string) bool {
+	st, ok := t.(*types.StructType)
+	if !ok {
+		return false
+	}
+	for _, owner := range []string{st.Name, st.BaseName} {
+		if _, ok := c.info.StructFields[owner][name]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // owners are the impls a value of a type takes its methods from, the

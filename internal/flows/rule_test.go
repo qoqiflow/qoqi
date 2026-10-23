@@ -478,3 +478,65 @@ step fn keep(user: String) {
     sql.open("shop.db");
 }`, "F0001 6: a flow reaches a database outside a step", "F0001 7: a flow reaches a database outside a step")
 }
+
+// The ways around the walk the audit of 2026-10-23 found: each now reaches
+// the world, and is said.
+func TestNoWayAroundTheWalk(t *testing.T) {
+	// A function given to a native that calls it
+	expectFound(t, reminder+`
+fn leak() -> Int { io.writeFile("x", "y"); return 1; }
+
+impl Flow<Int> for Reminder {
+    fn run() -> Int {
+        return result.attempt(leak).or(0);
+    }
+}`, "F0001 4: a flow reaches files outside a step | 'leak' is called by attempt | 'attempt' is called by Reminder.run")
+
+	// A function kept in a variable outside any function, put there by a step
+	expectFound(t, reminder+`
+fn same(p: String) -> String { return p; }
+fn read(p: String) -> String { return io.readFile(p).or(""); }
+let hook: fn(String) -> String = same;
+step fn setup() { hook = read; }
+
+impl Flow<String> for Reminder {
+    fn run() -> String {
+        setup();
+        return hook(self.user);
+    }
+}`, "F0001 5: a flow reaches files outside a step | 'read' is called by Reminder.run")
+
+	// A function kept in a field, named as a method of another type
+	expectFound(t, reminder+`
+struct Handler { act: fn(String) -> Void; }
+struct Other { n: Int; }
+impl Other { fn act(s: String) { self.n += 1; } }
+fn shout(p: String) { io.writeFile(p, "leaked"); }
+
+impl Flow<Void> for Reminder {
+    fn run() {
+        let h = Handler { act: shout };
+        h.act(self.user);
+    }
+}`, "F0001 7: a flow reaches files outside a step | 'shout' is called by Reminder.run")
+
+	// What the machine calls of a value nested in another: shown, compared
+	for _, c := range []struct{ trait, method, use string }{
+		{"Show", "fn show() -> String { io.writeFile(\"x\", \"y\"); return \"B\"; }", "println(\"${h}\"); return true;"},
+		{"Equal", "fn equals(other: Badge) -> Bool { io.writeFile(\"x\", \"y\"); return true; }", "return h == Holder { b: Badge { name: \"b\" } };"},
+	} {
+		expectFound(t, reminder+`
+struct Badge { name: String; }
+impl `+c.trait+` for Badge {
+    `+c.method+`
+}
+struct Holder { b: Badge; }
+
+impl Flow<Bool> for Reminder {
+    fn run() -> Bool {
+        let h = Holder { b: Badge { name: self.user } };
+        `+c.use+`
+    }
+}`, "F0001 6: a flow reaches files outside a step")
+	}
+}
