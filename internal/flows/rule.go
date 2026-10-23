@@ -61,6 +61,7 @@ type fn struct {
 	world    []call // to natives of the world: target is nil, native says which
 	values   []call // calls of a function value: arity says how many arguments
 	taken    []*fn  // functions whose value is taken here
+	suspends bool   // it waits itself, in a native where a task waits
 	scanned  bool
 	reached  bool
 	from     *fn         // the function the walk came from
@@ -102,6 +103,7 @@ func Check(prog *ast.Program, table *resolve.Table, info *types.Info, errs *erro
 	// way to the world is said from the flow then
 	c.walk(c.calledByTheMachine(prog))
 	c.report()
+	c.checkCallbacks(prog)
 }
 
 type checker struct {
@@ -372,6 +374,9 @@ func (c *checker) scanCall(f *fn, e *ast.CallExpr) {
 		if decl.Extern {
 			if reachesWorld(decl) {
 				f.world = append(f.world, call{at: at, native: decl.Name})
+			}
+			if suspends(decl) {
+				f.suspends = true
 			}
 			if takesFunction(decl) {
 				f.values = append(f.values, call{at: at, arity: anyArity})

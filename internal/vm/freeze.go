@@ -101,8 +101,16 @@ type frozenTask struct {
 	Base     int               `json:"base"`
 	Size     int               `json:"size"`
 	Open     []int             `json:"open,omitempty"`
+	// Handlers are where its calls go on after a failure, to run what
+	// they deferred: by the call each is of and where it goes on there
+	Handlers []frozenHandler `json:"handlers,omitempty"`
 
 	Waiters []int64 `json:"waiters,omitempty"` // the tasks woken when it ends
+}
+
+type frozenHandler struct {
+	Depth int `json:"depth"`
+	IP    int `json:"ip"`
 }
 
 type frozenFrame struct {
@@ -238,8 +246,8 @@ func (vm *VM) Freeze() ([]byte, error) {
 			frozen.Run = &run
 		case c.depth > 1:
 			return nil, fmt.Errorf("cannot freeze a program that waits inside a function given to a native one")
-		case len(c.handlers) > 0 || len(c.pending) > 0:
-			return nil, fmt.Errorf("cannot freeze a program that waits while it catches a failure")
+		case len(c.pending) > 0:
+			return nil, fmt.Errorf("cannot freeze a program that waits while it runs what it deferred, after a failure")
 		default:
 			for _, v := range c.stk.vals[:c.base+len(c.regs)] {
 				frozen.Stack = append(frozen.Stack, w.value(v))
@@ -251,6 +259,9 @@ func (vm *VM) Freeze() ([]byte, error) {
 			frozen.IP, frozen.Base, frozen.Size = c.ip, c.base, len(c.regs)
 			for _, upval := range c.stk.open {
 				frozen.Open = append(frozen.Open, w.ref(&upval.header))
+			}
+			for _, h := range c.handlers {
+				frozen.Handlers = append(frozen.Handlers, frozenHandler{Depth: h.depth, IP: h.ip})
 			}
 		}
 		state.Tasks = append(state.Tasks, frozen)
@@ -673,6 +684,13 @@ func (t *thawer) execution(frozen *frozenTask) (execution, error) {
 	}
 	c.function = fn
 	c.regs = stack.vals[frozen.Base : frozen.Base+frozen.Size : frozen.Base+frozen.Size]
+	for _, h := range frozen.Handlers {
+		if h.Depth < 0 || h.Depth > c.frameCount {
+			return execution{}, fmt.Errorf("a frozen task whose handler is of a call it is not in")
+		}
+		// Nothing natives pinned is taken up: they pin again what they hold
+		c.handlers = append(c.handlers, handler{depth: h.Depth, ip: h.IP})
+	}
 	return c, nil
 }
 

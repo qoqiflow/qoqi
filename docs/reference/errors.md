@@ -34,6 +34,7 @@ Every diagnostic has a code, and usually a suggestion that says the fix. `qoqi c
 | `F0009` | A step that returns `Settled<T>` without saying its time limit (`within d`) | [Steps](../concepts/steps.md#after-a-crash) |
 | `F0011` | A warning: since the version deployed, a stage changed shape, and no `migrate fn` says how an instance there goes on. The daemon refuses the deploy while an instance is there | [flow.lock](../concepts/versioning.md#flowlock) |
 | `F0012` | A step `by` a queue that `qoqi.json` does not declare | [Queues](configuration.md#queues) |
+| `F0013` | A flow that would wait (call a step, `wait`) inside a function the machine calls from Go: the one given to `result.attempt` or `result.guard`, directly or through a function that hands it on, or the `show`, `equals` or `compare` of a type, which it calls as it formats, compares or sorts. The instance could not be written there. Call the step outside, and give what it returned | [Steps](../concepts/steps.md) |
 | `W0011` | A loop of `run` that waits with no stage in it: the instance keeps everything it did since it started, and never moves to a new version | [Versions](../concepts/versioning.md) |
 
 ### When a stopped instance is taken up

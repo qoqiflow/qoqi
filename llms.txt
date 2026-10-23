@@ -118,6 +118,7 @@ flow (above), time (now, `wait time.after(d)`, durations, dates), task (run, map
 - Giving a step a task, a channel or a connection: `F0004`. Steps take and return data.
 - Changing the variables alive at a `stage` without a `migrate fn`: the compiler warns (`F0011`) and the daemon refuses the deploy while an instance is at that stage.
 - A step `by` a queue that `qoqi.json` does not declare: `F0012`.
+- A step or a `wait` inside the function given to `result.attempt`/`result.guard`, or inside a `show`/`equals`/`compare`: `F0013` (call the step outside). `defer` around a step or a wait is fine.
 - A trait, type or function of a module used without its import (`Ordered`, `Dict`, `attempt`, `Inbox`): `qoqi check` names the import to add.
 - Writing `x.length` or `len(x)`: it is `x.len()`. There is no `sort()`: `sorted(...)`, `sortedBy(...)` return a new array.
 - Writing `case X =>` or `case X { }`: it is `case X: { }`.

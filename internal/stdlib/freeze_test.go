@@ -587,3 +587,40 @@ fn main() -> Int {
 		t.Errorf("want %q, got %q", plain, out.String())
 	}
 }
+
+// What a call deferred is kept while it waits, and run at the end of the
+// call once it is taken up: on a return, or from a defer of a call
+// further out.
+func TestFreezeDefers(t *testing.T) {
+	expectFrozenAnywhere(t, `
+import std.time;
+
+fn tidy(log: [String], early: Bool) -> Int {
+    defer log.push("tidied");
+    log.push("before");
+    wait time.after(10.milliseconds());
+    if early {
+        return 0;
+    }
+    log.push("after");
+    return 1;
+}
+
+fn outer(log: [String]) -> Int {
+    defer log.push("outer tidied");
+    let n = tidy(log, true);
+    wait time.after(10.milliseconds());
+    return n + 2;
+}
+
+fn main() -> Int {
+    let log: [String] = [];
+    println(tidy(log, false), log);
+    let other: [String] = [];
+    println(outer(other), other);
+    return 0;
+}`,
+		`1 ["before", "after", "tidied"]`,
+		`2 ["before", "tidied", "outer tidied"]`,
+	)
+}

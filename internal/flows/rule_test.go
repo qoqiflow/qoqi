@@ -540,3 +540,64 @@ impl Flow<Bool> for Reminder {
 }`, "F0001 6: a flow reaches files outside a step")
 	}
 }
+
+// A flow waits where the program is written whole: not inside what the
+// machine calls from Go, which would stop the instance there.
+func TestNoWaitInAFunctionCalledFromGo(t *testing.T) {
+	const pinging = `
+step fn ping(n: Int) -> Int { return n + 1; }
+fn twice(n: Int) -> Int { return ping(n) * 2; }
+`
+	expectFound(t, reminder+pinging+`
+impl Flow<Int> for Reminder {
+    fn run() -> Int {
+        return result.attempt(() -> ping(5)).or(0);
+    }
+}`, "F0013 9: a flow waits inside the function given to attempt, which calls it from Go: the instance cannot be written there, and would stop")
+
+	// Named, through a function that calls the step
+	expectFound(t, reminder+pinging+`
+fn ten() -> Int { return twice(5); }
+
+impl Flow<Int> for Reminder {
+    fn run() -> Int {
+        return result.attempt(ten).or(0);
+    }
+}`, "F0013 11: a flow waits inside the function given to attempt, which calls it from Go: the instance cannot be written there, and would stop")
+
+	// Through a function of the program's that hands it on
+	expectFound(t, reminder+pinging+`
+fn orZero(action: fn() -> Int) -> Int { return result.attempt(action).or(0); }
+
+impl Flow<Int> for Reminder {
+    fn run() -> Int {
+        return orZero(() -> {
+            wait time.after(1.seconds());
+            return 1;
+        });
+    }
+}`, "F0013 11: a flow waits inside the function given to orZero, which calls it from Go: the instance cannot be written there, and would stop")
+
+	// A show the machine calls as it formats a value
+	expectFound(t, reminder+pinging+`
+struct Badge { n: Int; }
+impl Show for Badge {
+    fn show() -> String { return "${ping(self.n)}"; }
+}
+
+impl Flow<String> for Reminder {
+    fn run() -> String {
+        return "${[Badge { n: 1 }]}";
+    }
+}`, "F0013 9: Badge.show waits, and the machine calls it from Go as it formats, compares or sorts a value: a flow that does so cannot be written there, and would stop")
+
+	// What does not wait, and what waits in a task of its own, are fine
+	expectFound(t, reminder+pinging+`
+impl Flow<Int> for Reminder {
+    fn run() -> Int {
+        let n = result.attempt(() -> 2 + 2).or(0);
+        task.start(() -> ping(n));
+        return n;
+    }
+}`)
+}
