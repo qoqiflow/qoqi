@@ -55,6 +55,17 @@ func (w *byteWriter) string(s string) {
 // A text is its length in bytes followed by the bytes. The same chunk is
 // always written as the same bytes.
 func SerializeChunk(chunk *Chunk) ([]byte, error) {
+	w, err := writeCode(chunk)
+	if err != nil {
+		return nil, err
+	}
+	writeDebugInfo(w, chunk)
+	return w.data, nil
+}
+
+// writeCode writes all of a chunk but where its instructions come from
+// in the source: what it does, and what the runtime reads of it.
+func writeCode(chunk *Chunk) (*byteWriter, error) {
 	if chunk == nil {
 		return nil, fmt.Errorf("cannot serialize nil chunk")
 	}
@@ -158,8 +169,7 @@ func SerializeChunk(chunk *Chunk) ([]byte, error) {
 		}
 	}
 
-	writeDebugInfo(w, chunk)
-	return w.data, nil
+	return w, nil
 }
 
 // Debug information says, for an instruction, where in the source it comes

@@ -133,8 +133,24 @@ type frozenObject struct {
 }
 
 // Fingerprint names a chunk by its bytecode: what was frozen on one is
-// taken up on the same.
+// taken up on the same. It is the hash of all the bytecode file says but
+// where each instruction comes from in the source: its instructions, its
+// constants, its strings, and of each function what the runtime reads
+// (a step or not, its inboxes, its stages and their shapes); a comment
+// changed is the same version.
 func Fingerprint(chunk *Chunk) string {
+	w, err := writeCode(chunk)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(w.data)
+	return fmt.Sprintf("sha256:%x", sum)
+}
+
+// legacyFingerprint is what Fingerprint was before it read the whole
+// bytecode: instructions, function names and strings alone. A program
+// frozen under it is still taken up on the same bytecode.
+func legacyFingerprint(chunk *Chunk) string {
 	h := sha256.New()
 	for _, instr := range chunk.Code {
 		fmt.Fprintf(h, "%v;", instr)
@@ -401,7 +417,7 @@ func (vm *VM) Thaw(chunk *Chunk, data []byte) (result Value, err error) {
 	if state.Format != FreezeFormat {
 		return NewNull(), fmt.Errorf("a frozen program of format %q, not %q", state.Format, FreezeFormat)
 	}
-	if got := Fingerprint(chunk); got != state.Chunk {
+	if got := Fingerprint(chunk); got != state.Chunk && legacyFingerprint(chunk) != state.Chunk {
 		return NewNull(), fmt.Errorf("the program was frozen on other bytecode (%s, not %s)", state.Chunk, got)
 	}
 	if err := Verify(chunk); err != nil {

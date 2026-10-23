@@ -2,6 +2,8 @@ package flowrt_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -402,5 +404,80 @@ impl Sub {
 	wrong := []flowrt.Migration{{Flow: "Sub", Stage: "fields", Params: map[string]string{"months": "String", "plan": "String"}}}
 	if left := flowrt.Unanswered(changes, old, newer, wrong); len(left) != 2 {
 		t.Errorf("a migration of the fields that does not fit: got %v", left)
+	}
+}
+
+// A version is all the bytecode does: a constant changed, or a function
+// made a step, is another version; a comment changed is the same.
+func TestAVersionIsAllTheBytecodeDoes(t *testing.T) {
+	const program = `
+import std.flow.{Flow};
+
+struct Price { n: Int; }
+
+impl Flow<Float> for Price {
+    fn run() -> Float {
+        return ask(self.n) * 2.5;
+    }
+}
+
+fn ask(n: Int) -> Float { return 1.0 * n; }
+
+fn main() {}
+`
+	base := vm.Fingerprint(compiled(t, program))
+	for _, c := range []struct{ name, from, to string }{
+		{"a float constant", "2.5", "9.75"},
+		{"a large int constant", "1.0 * n", "1.0 * (n + 1000000000001)"},
+		{"a function made a step", "fn ask(", "step fn ask("},
+	} {
+		if vm.Fingerprint(compiled(t, strings.Replace(program, c.from, c.to, 1))) == base {
+			t.Errorf("%s: the same version", c.name)
+		}
+	}
+	commented := strings.Replace(program, "fn main() {}", "// the entry\nfn main() {}", 1)
+	if vm.Fingerprint(compiled(t, commented)) != base {
+		t.Errorf("a comment made another version")
+	}
+}
+
+// legacyFingerprint is how a version was named before it was the hash
+// of all the bytecode does.
+func legacyFingerprint(chunk *vm.Chunk) string {
+	h := sha256.New()
+	for _, instr := range chunk.Code {
+		fmt.Fprintf(h, "%v;", instr)
+	}
+	for _, proto := range chunk.Prototypes {
+		fmt.Fprintf(h, "%s@%d;", proto.Name, proto.CodeStart)
+	}
+	for _, s := range chunk.StringPool {
+		fmt.Fprintf(h, "%q;", s)
+	}
+	return fmt.Sprintf("sha256:%x", h.Sum(nil))
+}
+
+// A program frozen when versions were named otherwise is taken up on the
+// same bytecode.
+func TestAProgramFrozenUnderTheOldNameIsTakenUp(t *testing.T) {
+	store := flowrt.NewMemory()
+	var out bytes.Buffer
+	inst := started(t, store, &out)
+	var state map[string]json.RawMessage
+	if err := json.Unmarshal(inst.State, &state); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := json.Marshal(legacyFingerprint(compiled(t, v1)))
+	state["chunk"] = old
+	inst.State, _ = json.Marshal(state)
+	if err := store.Save(inst); err != nil {
+		t.Fatal(err)
+	}
+	rt := flowrt.New(compiled(t, v1), store, &out)
+	if err := rt.RunUntilIdle(10 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := store.Get("sub"); got.Status != flowrt.Done || string(got.Result) != "300" {
+		t.Errorf("sub is %s %s %s", got.Status, got.Result, got.Stopped)
 	}
 }
