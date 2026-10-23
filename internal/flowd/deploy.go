@@ -192,6 +192,11 @@ func (d *Daemon) Deploy(pkg *Package, dry bool) (*Report, error) {
 		rt.Queues, rt.Boundary = sends, boundary
 		d.observe(rt)
 		rt.Finished = d.poke
+		name := pkg.Name
+		rt.Problem = func(id string, err error) {
+			// One instance the store cannot run is put aside; the others run
+			fmt.Fprintf(d.Log, "qoqi: %s: instance %s: %v\n", name, id, err)
+		}
 		served = &Program{Name: pkg.Name, Runtime: rt}
 	}
 

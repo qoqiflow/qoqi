@@ -205,6 +205,13 @@ type Runtime struct {
 	Workers  int
 	Finished func()
 
+	// Problem, when set, is told of an instance that could not be run:
+	// a read or a write of the store that failed, a row it cannot read.
+	// That instance alone is put aside, and taken up again a little later
+	// each time, while the others run; without it, the fault is RunDue's.
+	// A store that stops as a process does, in a test, is RunDue's always
+	Problem func(id string, err error)
+
 	// dry, in a dry run of a resume, is told what the instance would do
 	dry *DryRun
 
@@ -213,6 +220,8 @@ type Runtime struct {
 	taken   map[string]bool
 	working int
 	failure error
+	// The instances put aside after a fault, and until when
+	aside map[string]setAside
 
 	// swap keeps a new version out while an instance runs on the one
 	// before: each run, and each call from outside, holds it to read
@@ -773,12 +782,17 @@ func cancelledAs(reason string) []byte {
 func (r *Runtime) RunDue() (int, error) {
 	ids := r.Store.Due(r.Now())
 	if r.Workers <= 1 {
+		ran := 0
 		for _, id := range ids {
-			if err := r.take(id); err != nil {
+			if r.isAside(id) {
+				continue
+			}
+			ran++
+			if err := r.faulted(id, r.take(id)); err != nil {
 				return 0, err
 			}
 		}
-		return len(ids), nil
+		return ran, nil
 	}
 
 	r.claims.Lock()
@@ -791,7 +805,7 @@ func (r *Runtime) RunDue() (int, error) {
 	}
 	started := 0
 	for _, id := range ids {
-		if r.taken[id] || r.working >= r.Workers {
+		if r.taken[id] || r.working >= r.Workers || r.asideLocked(id) {
 			continue
 		}
 		r.taken[id] = true
@@ -804,7 +818,7 @@ func (r *Runtime) RunDue() (int, error) {
 
 // work is a worker running one instance.
 func (r *Runtime) work(id string) {
-	err := r.take(id)
+	err := r.faulted(id, r.take(id))
 	r.claims.Lock()
 	delete(r.taken, id)
 	r.working--
@@ -815,6 +829,51 @@ func (r *Runtime) work(id string) {
 	if r.Finished != nil {
 		r.Finished()
 	}
+}
+
+// setAside is an instance put aside after a fault: how many in a row,
+// and until when.
+type setAside struct {
+	faults int
+	until  time.Time
+}
+
+// faulted is what a fault running an instance comes to: with Problem,
+// the instance alone is put aside, a second the first time, twice as
+// long each time after, five minutes at most, and the fault is told;
+// without it, or for a store that stops as a process does, it is the
+// runtime's.
+func (r *Runtime) faulted(id string, err error) error {
+	r.claims.Lock()
+	defer r.claims.Unlock()
+	if err == nil {
+		delete(r.aside, id)
+		return nil
+	}
+	if r.Problem == nil || errors.Is(err, ErrCrash) {
+		return err
+	}
+	if r.aside == nil {
+		r.aside = map[string]setAside{}
+	}
+	a := r.aside[id]
+	a.faults++
+	pause := time.Second << min(a.faults-1, 9)
+	a.until = time.Now().Add(min(pause, 5*time.Minute))
+	r.aside[id] = a
+	r.Problem(id, fmt.Errorf("%w; taken up again in %v", err, min(pause, 5*time.Minute)))
+	return nil
+}
+
+func (r *Runtime) isAside(id string) bool {
+	r.claims.Lock()
+	defer r.claims.Unlock()
+	return r.asideLocked(id)
+}
+
+func (r *Runtime) asideLocked(id string) bool {
+	a, ok := r.aside[id]
+	return ok && time.Now().Before(a.until)
 }
 
 // Busy says how many instances the workers are running.
