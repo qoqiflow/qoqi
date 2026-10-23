@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/go-sql-driver/mysql"
@@ -413,6 +414,9 @@ func sqlRunOn(on querier, kind sqldb.Kind, query string, args []any, rows bool) 
 	query = kind.Rebind(query)
 	ctx := context.Background()
 	if !rows {
+		if kind == sqldb.SQLite {
+			return sqliteExec(ctx, on, query, args)
+		}
 		result, err := on.ExecContext(ctx, query, args...)
 		if err != nil {
 			return 0, nil, err
@@ -450,6 +454,72 @@ func sqlRunOn(on querier, kind sqldb.Kind, query string, args []any, rows bool) 
 		}
 	}
 	return 0, out, found.Err()
+}
+
+// sqliteExec runs a statement on SQLite, and says how many rows it
+// changed. SQLite's own count is that of the last insert, update or
+// delete of the connection: a CREATE TABLE after them gives their count,
+// one connection's not another's, and a step's statements, run again on
+// another connection of the pool to be kept, would seem to give other
+// answers. In a transaction, the count is what total_changes() moved by;
+// on a pool, whose next statement may be on another connection, it is
+// SQLite's for a statement that changes rows, and 0 for any other.
+func sqliteExec(ctx context.Context, on querier, query string, args []any) (int64, []string, error) {
+	tx, pinned := on.(*sql.Tx)
+	if !pinned {
+		result, err := on.ExecContext(ctx, query, args...)
+		if err != nil {
+			return 0, nil, err
+		}
+		if !changesRows(query) {
+			return 0, nil, nil
+		}
+		changed, _ := result.RowsAffected()
+		return changed, nil, nil
+	}
+	var before, after int64
+	if err := tx.QueryRowContext(ctx, `SELECT total_changes()`).Scan(&before); err != nil {
+		return 0, nil, err
+	}
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return 0, nil, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT total_changes()`).Scan(&after); err != nil {
+		return 0, nil, err
+	}
+	return after - before, nil, nil
+}
+
+// changesRows says whether a statement inserts, updates or deletes rows,
+// by its first word: WITH may lead to any, and is taken to.
+func changesRows(query string) bool {
+	for {
+		query = strings.TrimSpace(query)
+		switch {
+		case strings.HasPrefix(query, "--"):
+			if end := strings.Index(query, "\n"); end >= 0 {
+				query = query[end+1:]
+				continue
+			}
+			return false
+		case strings.HasPrefix(query, "/*"):
+			if end := strings.Index(query, "*/"); end >= 0 {
+				query = query[end+2:]
+				continue
+			}
+			return false
+		}
+		break
+	}
+	end := strings.IndexFunc(query, func(r rune) bool { return !unicode.IsLetter(r) })
+	if end < 0 {
+		end = len(query)
+	}
+	switch strings.ToUpper(query[:end]) {
+	case "INSERT", "UPDATE", "DELETE", "REPLACE", "UPSERT", "WITH":
+		return true
+	}
+	return false
 }
 
 // --- The store's transaction of a step, on SQLite ---

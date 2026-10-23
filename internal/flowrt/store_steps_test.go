@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -247,5 +249,88 @@ func TestStepsWriteInAStoreInMemory(t *testing.T) {
 	inst := runFlow(t, rt, store, "x", "Billing", `{"$type": "Billing", "invoice": "inv-1", "cents": 4200}`)
 	if inst.Status != flowrt.Done || string(inst.Result) != settled {
 		t.Errorf("expected done with %s, got %s %s %s", settled, inst.Status, inst.Result, inst.Stopped)
+	}
+}
+
+// leading keeps a prospect with flow.store(), its table made by the step
+// itself, as appbot did.
+const leading = `
+import std.flow.{Flow};
+import std.flow;
+import std.sql.{Value};
+
+struct Lead { chat: String; }
+
+impl Flow<String> for Lead {
+    fn run() -> String {
+        return keep(self.chat);
+    }
+}
+
+step fn keep(chat: String) -> String {
+    let store = flow.store().expect("the store");
+    store.exec("CREATE TABLE IF NOT EXISTS leads (chat TEXT PRIMARY KEY, seen INTEGER NOT NULL)").expect("the table");
+    store.exec("INSERT INTO leads (chat, seen) VALUES (?, 1) ON CONFLICT (chat) DO UPDATE SET seen = seen + 1", [Value.Text(chat)]).expect("a lead");
+    return "kept";
+}
+
+fn main() {}
+`
+
+// On SQLite, what a statement that changes no rows says it changed is
+// what the last one of its connection did: the daemon writes on the
+// same connections meanwhile, and a step's statements, run again on
+// another to be kept, are not taken as answered otherwise for that.
+func TestAStepMakesItsTableInTheStoreWhileTheDaemonWrites(t *testing.T) {
+	store, err := flowrt.OpenSQLite(filepath.Join(t.TempDir(), "flows.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	db, _ := store.Database()
+	if _, err := db.Exec(`CREATE TABLE noise (n INTEGER); INSERT INTO noise VALUES (1), (2), (3), (4), (5)`); err != nil {
+		t.Fatal(err)
+	}
+	// The daemon's own writes, of a few rows each, on every connection
+	stop := make(chan struct{})
+	noisy := make(chan struct{})
+	go func() {
+		defer close(noisy)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			db.Exec(`UPDATE noise SET n = n + 1 WHERE n % ? = 0`, 1+i%3)
+		}
+	}()
+	defer func() { close(stop); <-noisy }()
+
+	rt := flowrt.New(compiled(t, leading), store, &lockedBuffer{})
+	rt.Workers = 4
+	rt.MaxTries = 20
+	var runs atomic.Int64
+	rt.Ran = func(string, string, bool) { runs.Add(1) }
+	for i := 0; i < 12; i++ {
+		if _, err := rt.Start(fmt.Sprintf("l%d", i), "Lead", []byte(fmt.Sprintf(`{"chat": "c%d"}`, i%4))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rt.RunUntilIdle(60 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 12; i++ {
+		if inst, _, _ := store.Get(fmt.Sprintf("l%d", i)); inst.Status != flowrt.Done {
+			t.Errorf("l%d is %s %s", i, inst.Status, inst.Stopped)
+		}
+	}
+	if n := runs.Load(); n > 12+4 {
+		t.Errorf("the steps ran %d times for 12: taken as answered otherwise, again and again", n)
+	}
+	var seen int
+	db.QueryRow(`SELECT SUM(seen) FROM leads`).Scan(&seen)
+	if seen != 12 {
+		t.Errorf("leads seen %d times, not 12", seen)
 	}
 }
