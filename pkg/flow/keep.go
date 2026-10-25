@@ -220,20 +220,36 @@ func (k *Keeper) started(ctx context.Context, step StepFunc, task *Task) Answer 
 	}
 	answer := step(ctx, task)
 
+	if answer.later {
+		// It acts still, and answers later (Daemon.Complete): the claim
+		// stays until the attempt's deadline, so that the step sent again
+		// meanwhile, or probed, is under way, not unseen
+		return answer
+	}
 	if answer.Value == nil {
 		// Not done: the claim goes, and the next attempt acts again
 		k.DB.ExecContext(context.Background(), k.q(`DELETE FROM flow_steps WHERE "key" = ? AND state = ?`), task.Key, claimed)
 		return answer
 	}
-	data, err := json.Marshal(answer)
-	if err != nil {
-		return Failure(err)
-	}
-	if _, err := k.DB.ExecContext(context.Background(), k.q(`UPDATE flow_steps SET state = ?, answer = ? WHERE "key" = ?`),
-		answered, string(data), task.Key); err != nil {
+	if err := k.Answered(context.Background(), task, answer); err != nil {
 		return Failure(err)
 	}
 	return answer
+}
+
+// Answered keeps the answer of a step under started, under its claim:
+// what Daemon.Complete does first, given the Keeper, for a step that
+// said ErrLater. Only a value is kept.
+func (k *Keeper) Answered(ctx context.Context, task *Task, answer Answer) error {
+	if answer.Value == nil {
+		return nil
+	}
+	data, err := json.Marshal(answer)
+	if err != nil {
+		return err
+	}
+	_, err = k.DB.ExecContext(ctx, k.q(`UPDATE flow_steps SET state = ?, answer = ? WHERE "key" = ?`), answered, string(data), task.Key)
+	return err
 }
 
 // probe says what became of an attempt under a key: its answer, nothing

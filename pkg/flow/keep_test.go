@@ -178,3 +178,40 @@ func TestStarted(t *testing.T) {
 		t.Errorf("the manifest says wire-1 is kept under started: %s", said)
 	}
 }
+
+// A step under started that answers later keeps its claim: sent again,
+// or probed, before its answer, it is under way, and does not act a
+// second time; its answer, kept by Daemon.Complete with the Keeper, is
+// what it gives after.
+func TestStartedThatAnswersLater(t *testing.T) {
+	_, k := shop(t)
+	var acted atomic.Int32
+	q := flow.NewQueue("billing", "s1")
+	q.Handle("wire-1", func(ctx context.Context, task *flow.Task) flow.Answer {
+		acted.Add(1)
+		return flow.AnswerOf(flow.ErrLater)
+	})
+	q.KeepStarted(k, "wire-1")
+
+	if status, _ := post(t, q, "POST", taskOf("wire-1", "later")); status != 202 {
+		t.Fatalf("it answers later: %d", status)
+	}
+	probe := taskOf("wire-1", "later")
+	probe.Probe = true
+	if _, said := post(t, q, "POST", probe); said != `{"working":true}` {
+		t.Errorf("probed before its answer: %s", said)
+	}
+	if status, said := post(t, q, "POST", taskOf("wire-1", "later")); status != 200 || said != `{"working":true}` {
+		t.Errorf("sent again before its answer: %d %s", status, said)
+	}
+	if acted.Load() != 1 {
+		t.Errorf("a step that answers later acted %d times", acted.Load())
+	}
+	task := taskOf("wire-1", "later")
+	if err := k.Answered(context.Background(), &task, flow.Answered(flow.Value(flow.Ok[string, string]("w-later")))); err != nil {
+		t.Fatal(err)
+	}
+	if _, said := post(t, q, "POST", probe); said != `{"value":{"Ok":"w-later"}}` {
+		t.Errorf("probed after its answer: %s", said)
+	}
+}

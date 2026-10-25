@@ -115,6 +115,14 @@ final class Answer
     }
 
     /**
+     * Whether the step answers later, on a request of its own.
+     */
+    public function isLater(): bool
+    {
+        return $this->status === 202;
+    }
+
+    /**
      * The answer a step's exception gives.
      */
     public static function fromThrowable(\Throwable $e): self

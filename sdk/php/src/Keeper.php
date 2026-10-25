@@ -109,16 +109,35 @@ final class Keeper
             return Answer::underWay();
         }
         $answer = $step($task);
+        if ($answer->isLater()) {
+            // It acts still, and answers later (Daemon::complete): the
+            // claim stays until the attempt's deadline, so that the step
+            // sent again meanwhile, or probed, is under way, not unseen
+            return $answer;
+        }
         if (!$answer->isValue()) {
             $this->db->prepare("DELETE FROM {$this->table} WHERE {$this->key} = ? AND state = ?")
                 ->execute([$task->key, self::CLAIMED]);
 
             return $answer;
         }
-        $this->db->prepare("UPDATE {$this->table} SET state = ?, answer = ? WHERE {$this->key} = ?")
-            ->execute([self::ANSWERED, Queue::json($answer->body), $task->key]);
+        $this->answered($task, $answer);
 
         return $answer;
+    }
+
+    /**
+     * Keeps the answer of a step under started, under its claim: what
+     * Daemon::complete does first, given the Keeper, for a step that threw
+     * Later. Only a value is kept.
+     */
+    public function answered(Task $task, Answer $answer): void
+    {
+        if (!$answer->isValue()) {
+            return;
+        }
+        $this->db->prepare("UPDATE {$this->table} SET state = ?, answer = ? WHERE {$this->key} = ?")
+            ->execute([self::ANSWERED, Queue::json($answer->body), $task->key]);
     }
 
     /**

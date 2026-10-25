@@ -33,8 +33,15 @@ type Daemon struct {
 
 // Complete gives the answer of a step that said ErrLater, on a request of
 // its own: once its work is done, before the task's deadline. It reports
-// whether the daemon had an answer already, the first standing.
-func (d Daemon) Complete(ctx context.Context, task *Task, answer Answer) (already bool, err error) {
+// whether the daemon had an answer already, the first standing. Given the
+// Keeper that keeps the step's answers, the answer is kept there first,
+// under the claim the step left: sent again, the step gives it.
+func (d Daemon) Complete(ctx context.Context, task *Task, answer Answer, keepers ...*Keeper) (already bool, err error) {
+	for _, k := range keepers {
+		if err := k.Answered(ctx, task, answer); err != nil {
+			return false, err
+		}
+	}
 	return d.post(ctx, task, answer)
 }
 

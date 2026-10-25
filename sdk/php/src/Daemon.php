@@ -17,12 +17,16 @@ final class Daemon
 
     /**
      * Gives the answer of a step: whether the daemon had one already, the
-     * first standing.
+     * first standing. Given the Keeper of the step's answers, the answer is
+     * kept there first.
      *
      * @throws AnswerRefused
      */
-    public function complete(Task $task, Answer $answer): bool
+    public function complete(Task $task, Answer $answer, ?Keeper $keeper = null): bool
     {
+        // With the Keeper of the step's answers, kept there first, under
+        // the claim the step left: sent again, the step gives it
+        $keeper?->answered($task, $answer);
         [$status, $said] = $this->post($task, $answer->body);
         if ($status === 200) {
             $fields = json_decode($said, true);

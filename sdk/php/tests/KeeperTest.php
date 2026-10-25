@@ -129,6 +129,22 @@ foreach (['sqlite' => ['"key"', '`key`'], 'mysql' => ['`key`', '"key"']] as $dri
     check($keeper->started(task('dead'), $dead)->body === ['unknown' => true], "{$driver}: started on a dead claim is unknown");
     check($keeper->started(task('dead', reclaim: 1), $dead)->body === ['value' => ['Ok' => 'w-dead']], "{$driver}: reclaimed, it acts");
 
+    // A step that answers later keeps its claim: sent again, or probed,
+    // before its answer, it is under way, and does not act a second time;
+    // its answer, kept by the Keeper, is what it gives after
+    $acts = 0;
+    $slow = function () use (&$acts): Answer {
+        $acts++;
+
+        return Answer::later();
+    };
+    check($keeper->started(task('slow'), $slow)->isLater(), "{$driver}: a later answer is later");
+    check($keeper->probe(task('slow', probe: true))->body === ['working' => true], "{$driver}: probed before its answer, it is under way");
+    check($keeper->started(task('slow'), $slow)->body === ['working' => true], "{$driver}: sent again before its answer, it is under way");
+    check($acts === 1, "{$driver}: a step that answers later acts once, acted {$acts}");
+    $keeper->answered(task('slow'), Answer::value(['Ok' => 'slow-1']));
+    check($keeper->started(task('slow'), $slow)->body === ['value' => ['Ok' => 'slow-1']], "{$driver}: sent again after, it gives its answer");
+
     $keeper->forget('a');
     check($keeper->probe(task('a', probe: true))->body === ['unseen' => true], "{$driver}: forgotten");
     // An answer under started keeps its claim's deadline, a minute ahead

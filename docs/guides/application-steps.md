@@ -137,6 +137,8 @@ A step that takes minutes, a batch, a person, answers **later** at once, then po
 flow.Daemon{URL: daemonURL}.Complete(ctx, task, flow.Value(result))
 ```
 
+A step kept under started keeps its claim while it works: sent again meanwhile, it is under way, and does not act twice. Give `Complete` its Keeper (`Complete(ctx, task, answer, keeper)` in Go, `complete(task, answer, keeper)` in TypeScript and PHP), and the answer is kept there too, for the step sent again after.
+
 `POST /api/attempts` takes `{"key", "attempt", "token", ...answer}`; the attempt's token is in the task, and is the only authorization needed. An answer that comes after the step's `within` is refused (`410`), and the step is run again or, if `Settled`, gives `Unknown` ([HTTP API](../reference/http-api.md#post-apiattempts)).
 
 ## The protocol

@@ -307,8 +307,14 @@ export class Daemon {
     this.url = url.replace(/\/$/, "");
   }
 
-  /** Gives the answer of a step that threw Later: whether one was there already. */
-  async complete(task: Task, said: Answer): Promise<boolean> {
+  /**
+   * Gives the answer of a step that threw Later: whether one was there
+   * already. With the Keeper that keeps the step's answers, the answer is
+   * kept there first, under the claim the step left: sent again, the step
+   * gives it without acting.
+   */
+  async complete(task: Task, said: Answer, keeper?: Keeper): Promise<boolean> {
+    if (keeper !== undefined) await keeper.answered(task, said);
     const response = await this.#post(task, said);
     const text = await response.text();
     if (response.status !== 200) throw new AnswerRefused(response.status, text);
@@ -430,12 +436,28 @@ export class Keeper {
       return answer.underWay();
     }
     const said = await step(task);
+    if (later in said) {
+      // It acts still, and answers later (Daemon.complete): the claim
+      // stays until the attempt's deadline, so that the step sent again
+      // meanwhile, or probed, is under way, not unseen
+      return said;
+    }
     if (!("value" in said)) {
       this.db.prepare(`DELETE FROM ${this.table} WHERE "key" = ? AND state = 'started'`).run(task.key);
       return said;
     }
-    this.db.prepare(`UPDATE ${this.table} SET state = 'answered', answer = ? WHERE "key" = ?`).run(JSON.stringify(said), task.key);
+    await this.answered(task, said);
     return said;
+  }
+
+  /**
+   * Keeps the answer of a step under started, under its claim: what
+   * Daemon.complete does first, given the Keeper, for a step that threw
+   * Later. Only a value is kept.
+   */
+  async answered(task: Task, said: Answer): Promise<void> {
+    if (!("value" in said)) return;
+    this.db.prepare(`UPDATE ${this.table} SET state = 'answered', answer = ? WHERE "key" = ?`).run(JSON.stringify(said), task.key);
   }
 
   /** What became of an attempt under its key. */
