@@ -607,28 +607,42 @@ func alwaysReturns(stmt ast.Stmt) bool {
 // breaksOut reports whether a loop body contains a break that leaves that
 // loop (breaks of nested loops do not count).
 func breaksOut(stmt ast.Stmt) bool {
-	switch s := stmt.(type) {
-	case *ast.BreakStmt:
-		return true
-	case *ast.BlockStmt:
-		for _, inner := range s.Stmts {
-			if breaksOut(inner) {
-				return true
-			}
+	// Every break under it, in statements and in what expressions hold, a
+	// match or a wait match written as a value: those of loops inside it
+	// leave those loops
+	if stmt == nil {
+		return false
+	}
+	inner := map[*ast.BreakStmt]bool{}
+	var all []*ast.BreakStmt
+	ast.Walk(stmt, func(ast.Expr) {}, func(s ast.Stmt) {
+		switch s := s.(type) {
+		case *ast.BreakStmt:
+			all = append(all, s)
+		case *ast.WhileStmt:
+			markBreaks(s.Body, inner)
+		case *ast.ForStmt:
+			markBreaks(s.Body, inner)
 		}
-	case *ast.IfStmt:
-		if breaksOut(s.Then) {
+	})
+	for _, b := range all {
+		if !inner[b] {
 			return true
-		}
-		return s.Else != nil && breaksOut(s.Else)
-	case *ast.MatchStmt:
-		for _, matchCase := range s.Cases {
-			if body, ok := matchCase.Body.(*ast.BlockStmt); ok && breaksOut(body) {
-				return true
-			}
 		}
 	}
 	return false
+}
+
+// markBreaks marks every break under a loop's body: they leave that loop.
+func markBreaks(body *ast.BlockStmt, marked map[*ast.BreakStmt]bool) {
+	if body == nil {
+		return
+	}
+	ast.Walk(body, func(ast.Expr) {}, func(s ast.Stmt) {
+		if b, ok := s.(*ast.BreakStmt); ok {
+			marked[b] = true
+		}
+	})
 }
 
 // --- AST walking ---

@@ -70,6 +70,20 @@ fn f(n: Node) -> Int { if n.next != null && clear(n) { return n.next.v; } return
 struct Node { v: Int; next: Node?; }
 fn ready(n: Node) -> Bool { return n.v > 0; }
 fn f(n: Node) -> Int { if n.next != null && ready(n) { return n.next.v; } return 0; }`, ""},
+		{"T6: a break inside a match written as a value", `
+fn f(c: Bool) -> Int {
+    while true {
+        let a = match c { case true: { break; } default: 1 };
+        println(a);
+    }
+}`, "can reach its end without returning"},
+		{"T6: a break of a loop inside does not leave this one", `
+fn f(xs: [Int]) -> Int {
+    while true {
+        for x in xs { if x > 0 { break; } }
+        if xs[0] > 3 { return 1; }
+    }
+}`, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			msgs, _ := checkSourceLoose(c.src)
