@@ -861,6 +861,12 @@ func (c *Checker) sameType(a, b Type) bool {
 func (c *Checker) checkCastExpr(e *ast.CastExpr) Type {
 	source := c.checkExpr(e.Expr)
 	target := c.resolveType(e.Type)
+	if param := c.unspecializedParam(e.Type); param != "" {
+		c.errorfWithSuggestion(e.Type.Token(), ErrInvalidCast,
+			"Cast in a function of its own, fn as<"+param+">(value: Any) -> "+param+" { return value as "+param+"; }, and call it from the method",
+			"a cast to %s, a type parameter of a method, cannot be checked when the program runs: methods are not made again for each type they are used with", describe(target))
+		return target
+	}
 	if source == nil || isUnknown(source) || isUnknown(target) {
 		return target
 	}
@@ -891,6 +897,12 @@ func (c *Checker) checkCastExpr(e *ast.CastExpr) Type {
 func (c *Checker) checkTypeTest(e *ast.TypeTestExpr) Type {
 	source := c.checkExpr(e.Expr)
 	target := c.resolveType(e.Type)
+	if param := c.unspecializedParam(e.Type); param != "" {
+		c.errorfWithSuggestion(e.Type.Token(), ErrInvalidCast,
+			"Test it in a function of its own, fn isA<"+param+">(value: Any) -> Bool { return value is "+param+"; }, and call it from the method",
+			"whether a value is a %s, a type parameter of a method, cannot be told when the program runs: methods are not made again for each type they are used with", describe(target))
+		return Bool
+	}
 	if isUnknown(target) {
 		return Bool
 	}
@@ -1280,4 +1292,41 @@ func mentionsSelf(t *ast.Type) bool {
 func isSelf(e ast.Expr) bool {
 	ident, ok := e.(*ast.Ident)
 	return ok && ident.Name == "self"
+}
+
+// unspecializedParam is a type parameter of the method being checked, its
+// own, that a written type names: a function generic of its own is made
+// again for each type it is used with, and what it casts to is known
+// then; a method is not, and its own type parameter is no type then.
+func (c *Checker) unspecializedParam(t *ast.Type) string {
+	if c.currentFn == nil || c.currentFn.Module == "std" || strings.HasPrefix(c.currentFn.Module, "std.") {
+		// The library casts what it made itself, of the type it knows
+		return ""
+	}
+	impl := c.impls[c.currentFn]
+	if impl == nil {
+		return ""
+	}
+	// The method's own: those of its impl, impl<T> Box<T>, are those of
+	// the struct, which is made again for each type it is used with
+	params := map[string]bool{}
+	for _, p := range c.currentFn.TypeParams {
+		params[p] = true
+	}
+	var found string
+	var walk func(*ast.Type)
+	walk = func(t *ast.Type) {
+		if t == nil || found != "" {
+			return
+		}
+		if params[t.Name] && len(t.Generics) == 0 {
+			found = t.Name
+			return
+		}
+		for _, inner := range append(append(append([]*ast.Type{t.ElemType}, t.Generics...), t.UnionTypes...), t.ParamTypes...) {
+			walk(inner)
+		}
+	}
+	walk(t)
+	return found
 }

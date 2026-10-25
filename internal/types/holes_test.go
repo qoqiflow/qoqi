@@ -52,6 +52,16 @@ fn f() -> Int { let s: String = id("a"); return id(1); }`, ""},
 		{"T3: ...in a function that calls it", `
 fn id<T>(x: T) -> T { return x; }
 fn f() -> Int { let g = (x: Int) -> id(x); return g(1); }`, ""},
+		{"T4: a cast to a method's own type parameter", `
+struct Box { v: Any; }
+impl Box { fn get<U>() -> U { return self.v as U; } }`, "a type parameter of a method, cannot be checked"},
+		{"T4: ...and a test of one", `
+struct Box { v: Any; }
+impl Box { fn holds<U>() -> Bool { return self.v is U; } }`, "a type parameter of a method, cannot be told"},
+		{"T4: a function generic of its own casts", `
+fn as<U>(v: Any) -> U { return v as U; }
+struct Box { v: Any; }
+impl Box { fn get<U>() -> U { return as<U>(self.v); } }`, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			msgs, _ := checkSourceLoose(c.src)
