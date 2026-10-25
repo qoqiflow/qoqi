@@ -593,3 +593,51 @@ func TestAFlowOfAModuleIsServedByTheProgramThatImportsIt(t *testing.T) {
 		t.Errorf("two flows Tally: got %v", err)
 	}
 }
+
+// named is a program of one flow, of that name.
+func named(flow string) string {
+	return `
+import std.flow.{Flow};
+
+struct ` + flow + ` { n: Int; }
+
+impl Flow<Int> for ` + flow + ` {
+    fn run() -> Int { return self.n; }
+}
+
+fn main() {}
+`
+}
+
+// Two names whose tables are the same, a-b and a_b, Shop and shop: the
+// second is refused, as it would run the instances of the first. Served
+// again from a store where both were deployed before that was refused,
+// the daemon serves one of them, and starts.
+func TestTwoProgramsDoNotShareTheirTables(t *testing.T) {
+	stores, kept := map[string]*flowrt.Memory{}, flowrt.NewMemory()
+	first := newEmptyDaemon(t, stores, kept)
+	if status, body := first.deploy(t, false, packageOf(t, "a-b", named("Alpha"))); status != http.StatusOK {
+		t.Fatalf("deploy a-b: %d %s", status, body)
+	}
+	for _, name := range []string{"a_b", "A-B"} {
+		if status, body := first.deploy(t, false, packageOf(t, name, named("Beta"))); status != http.StatusConflict || !strings.Contains(body, "tables of a-b") {
+			t.Errorf("deploy %s beside a-b: %d %s", name, status, body)
+		}
+	}
+	if status, body := first.deploy(t, false, packageOf(t, "a-b", named("Alpha"))); status != http.StatusOK {
+		t.Errorf("a-b again: %d %s", status, body)
+	}
+	first.stop()
+
+	// As a store of before had it: both deployed
+	beta := packageOf(t, "a_b", named("Beta"))
+	data, _ := json.Marshal(beta)
+	if _, err := kept.PutDeployment(flowrt.Deployed{Name: "a_b", Version: "v-beta", At: time.Now().UnixMilli(), Package: data}); err != nil {
+		t.Fatal(err)
+	}
+	again := newEmptyDaemon(t, stores, kept)
+	defer again.stop()
+	if flows := again.d.Flows; len(flows) != 1 {
+		t.Errorf("served again, one of the two: %v", flows)
+	}
+}

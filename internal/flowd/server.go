@@ -65,6 +65,7 @@ type Daemon struct {
 	sandboxes  sandboxes     // the trials of drafts, in memory
 
 	deploying sync.Mutex                   // one deploy at a time
+	restoring bool                         // Restore deploys what was served
 	pmu       sync.RWMutex                 // Programs, Flows and Schema, which a deploy changes
 	schemas   map[string]*Schema           // by program
 	sources   map[string]map[string]string // by program, its files

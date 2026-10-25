@@ -88,6 +88,9 @@ func (d *Daemon) Deploy(pkg *Package, dry bool) (*Report, error) {
 	if err := oneOfEachName(pkg.Name, pkg.Flows); err != nil {
 		return nil, &Refused{Program: pkg.Name, Why: []string{err.Error()}}
 	}
+	if other := d.sharingTables(pkg.Name, !d.restoring); other != "" {
+		return nil, &Refused{Program: pkg.Name, Why: []string{fmt.Sprintf("%s would keep its instances in the tables of %s, deployed here already: their names differ by case or by a sign only. Deploy it under another name", pkg.Name, other)}}
+	}
 	version := vm.Fingerprint(chunk)
 	report := &Report{Program: pkg.Name, Version: version}
 
@@ -306,10 +309,18 @@ func (d *Daemon) Restore() error {
 	if err != nil {
 		return err
 	}
+	// Against what is served alone: two programs whose tables are the
+	// same, deployed before it was refused, are served one only
+	d.restoring = true
+	defer func() { d.restoring = false }()
 	for _, dep := range deployed {
 		var pkg Package
 		if err := json.Unmarshal(dep.Package, &pkg); err != nil {
 			return fmt.Errorf("what was deployed of %s cannot be read: %v", dep.Name, err)
+		}
+		if other := d.sharingTables(pkg.Name, false); other != "" {
+			fmt.Fprintf(d.Log, "qoqi: %s is not served: its tables are those of %s, served already; deploy it under another name\n", pkg.Name, other)
+			continue
 		}
 		if _, err := d.Deploy(&pkg, false); err != nil {
 			return err
@@ -576,4 +587,28 @@ func (d *Daemon) undeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	answer(w, http.StatusOK, map[string]string{"removed": asked.Program})
+}
+
+// sharingTables is another program, served or deployed here before,
+// whose tables a program of that name would have: Shop for shop, a-b for
+// a_b. Its instances would be run twice, by both.
+func (d *Daemon) sharingTables(name string, deployedBefore bool) string {
+	tables := flowrt.TablesOf(name)
+	var names []string
+	for _, p := range d.programs() {
+		names = append(names, p.Name)
+	}
+	if deployedBefore && d.Deployments != nil {
+		if history, err := d.Deployments.History("", false); err == nil {
+			for _, deployed := range history {
+				names = append(names, deployed.Name)
+			}
+		}
+	}
+	for _, other := range names {
+		if other != name && flowrt.TablesOf(other) == tables {
+			return other
+		}
+	}
+	return ""
 }

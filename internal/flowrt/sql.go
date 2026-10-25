@@ -83,8 +83,19 @@ func (s *SQL) Kind() sqldb.Kind { return s.kind }
 // tables, named after it, in the same database, made if they are not
 // there.
 func (s *SQL) Program(name string) (*SQL, error) {
+	program := &SQL{db: s.db, kind: s.kind, prefix: s.prefix + TablesOf(name) + "_", holder: s.holder}
+	if err := program.makeTables(); err != nil {
+		return nil, fmt.Errorf("cannot make the tables of %s: %v", name, err)
+	}
+	return program, nil
+}
+
+// TablesOf is what the names of a program's tables start with: its name
+// in lower case, what is not a letter or a digit an underscore. Two names
+// may give the same, Shop and shop, a-b and a_b: the daemon serves one
+// of them only.
+func TablesOf(name string) string {
 	var prefix strings.Builder
-	prefix.WriteString(s.prefix)
 	for _, c := range strings.ToLower(name) {
 		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
 			prefix.WriteRune(c)
@@ -92,11 +103,7 @@ func (s *SQL) Program(name string) (*SQL, error) {
 			prefix.WriteRune('_')
 		}
 	}
-	program := &SQL{db: s.db, kind: s.kind, prefix: prefix.String() + "_", holder: s.holder}
-	if err := program.makeTables(); err != nil {
-		return nil, fmt.Errorf("cannot make the tables of %s: %v", name, err)
-	}
-	return program, nil
+	return prefix.String()
 }
 
 func (s *SQL) makeTables() error {
