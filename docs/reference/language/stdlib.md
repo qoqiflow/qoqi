@@ -277,7 +277,7 @@ while !stack.isEmpty() {        // until nothing is left
 Two things to know:
 
 - **`null` from an array of optionals.** In a `[Int?]` an item can itself be `null`, and `pop` then gives `null` for that item as it does for an empty array. Ask `isEmpty` (or `len`) before, as the loop above does, instead of waiting for `null`.
-- **Not inside `for ... in` over the same array.** That loop counts the items once, before it starts; an array made shorter under it is read past its end, which stops the program (`index out of bounds`). Use `while` with an index that only moves on when nothing was removed, go down from the end, or loop over `items.copy()`:
+- **Not inside `for ... in` over the same array, to go over what is left.** That loop goes over the items there when it began, those pushed after not among them, and ends where it is when the array is made shorter under it: the items that moved into a place it passed are not seen. Use `while` with an index that only moves on when nothing was removed, go down from the end, or loop over `items.copy()`:
 
 ```rust
 let i = 0;

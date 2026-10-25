@@ -112,13 +112,32 @@ func (d *Desugarer) desugarForStmt(forStmt *ast.ForStmt) ast.Stmt {
 	lenIdent := d.createIdent(lenVar, pos)
 	d.typeInfo.Types[lenIdent] = types.Int
 
-	// Create while condition: __iter_N < __len_N
+	// Create while condition: __iter_N < __len_N && __iter_N <
+	// __len(collection). The items there when the loop began, those
+	// pushed after not among them; and the length read again at each
+	// turn: the body may take items away, or give the variable another
+	// array, and the loop then ends where it is, rather than read past
+	// the end. No variable is added: the shape of a stage in the loop
+	// is what it was
 	iterVarExpr := d.createIdent(iterVar, pos)
 	lenVarExpr := d.createIdent(lenVar, pos)
 	d.typeInfo.Types[iterVarExpr] = types.Int
 	d.typeInfo.Types[lenVarExpr] = types.Int
+	before := d.createBinaryExpr(iterVarExpr, "<", lenVarExpr, pos)
+	d.typeInfo.Types[before] = types.Bool
 
-	whileCond := d.createBinaryExpr(iterVarExpr, "<", lenVarExpr, pos)
+	iterVarNow := d.createIdent(iterVar, pos)
+	d.typeInfo.Types[iterVarNow] = types.Int
+	liveLength := &ast.CallExpr{
+		BaseNode: ast.BaseNode{Pos: pos},
+		Func:     d.createIdent(resolve.LengthFunction, pos),
+		Args:     []ast.Expr{iterableExpr},
+	}
+	d.typeInfo.Types[liveLength] = types.Int
+	now := d.createBinaryExpr(iterVarNow, "<", liveLength, pos)
+	d.typeInfo.Types[now] = types.Bool
+
+	whileCond := d.createBinaryExpr(before, "&&", now, pos)
 	d.typeInfo.Types[whileCond] = types.Bool
 
 	// Create loop variable initialization: let item = collection[__iter_N];

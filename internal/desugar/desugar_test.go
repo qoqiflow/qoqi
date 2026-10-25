@@ -130,8 +130,10 @@ func TestDesugarForLoop(t *testing.T) {
 
 	// Check while condition
 	condBinary, ok := whileStmt.Cond.(*ast.BinaryExpr)
-	if !ok || condBinary.Op != "<" {
-		t.Error("Expected while condition to be __iter_N < __len_N")
+	if !ok || condBinary.Op != "&&" {
+		t.Error("Expected while condition to be __iter_N < __len_N && __iter_N < __len(collection)")
+	} else if first, ok := condBinary.Left.(*ast.BinaryExpr); !ok || first.Op != "<" {
+		t.Error("Expected the first half of the condition to be __iter_N < __len_N")
 	}
 
 	// Check while body contains the loop variable initialization and original body

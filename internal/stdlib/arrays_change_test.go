@@ -488,12 +488,28 @@ func TestArraysRemovingWhileLooping(t *testing.T) {
 		"cba []",
 	)
 
-	// `for ... in` counts the items once, before it starts: an array made
-	// shorter under it is read past its end, and the program is stopped
-	expectFailure(t, "import std.arrays;", `
+	// `for ... in` goes over the items there when it began, those pushed
+	// after not among them, and ends where it is when the array is made
+	// shorter under it, or the variable given another
+	expect(t, "import std.arrays;", `
 		let xs = [1, 2, 3, 4];
-		for x in xs { xs.pop(); }
-	`, "index out of bounds: 2 (length 2)")
+		let seen: [Int] = [];
+		for x in xs { seen.push(x); xs.pop(); }
+		println(seen, xs);
+
+		let ys = [1, 2];
+		for y in ys { ys.push(y * 10); }
+		println(ys);
+
+		let zs = [1, 2, 3];
+		let got: [Int] = [];
+		for z in zs { got.push(z); zs = [9]; }
+		println(got, zs);
+	`,
+		"[1, 2] [1, 2]",
+		"[1, 2, 10, 20]",
+		"[1] [9]",
+	)
 }
 
 // A program of several parts on arrays changed in place: an interpreter
