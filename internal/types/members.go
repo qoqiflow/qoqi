@@ -599,6 +599,15 @@ func (c *Checker) widen(expr ast.Expr, expected, typ Type) Type {
 // checkExprExpecting is checkExprAs before a whole number is taken for a
 // Float.
 func (c *Checker) checkExprExpecting(expr ast.Expr, expected Type) Type {
+	if lit, ok := expr.(*ast.StructInitExpr); ok && len(lit.TypeArgs) == 0 && expected != nil {
+		// Box { v: 1 } where a Box<Int?> is expected: of what is expected
+		if want, ok := withoutNull(expected).(*StructType); ok && want.Name == lit.Name && len(want.TypeArgs) > 0 {
+			if c.literalArgs == nil {
+				c.literalArgs = map[*ast.StructInitExpr][]Type{}
+			}
+			c.literalArgs[lit] = want.TypeArgs
+		}
+	}
 	if fn, ok := expr.(*ast.FnExpr); ok && fn.Short {
 		// item -> item.name takes its types from what is expected here
 		typ := c.checkShortFn(fn, expected)

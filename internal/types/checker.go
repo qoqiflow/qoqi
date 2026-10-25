@@ -53,6 +53,7 @@ const (
 	ErrAmbiguousVariant  = "E2041" // A variant written alone that several enums have, and nothing says which
 	ErrPrivateField      = "E2042" // A field of a struct of another module that is not pub
 	ErrSelfOfATrait      = "E2045" // A method that takes Self, called on a value known only by its trait
+	ErrTypeArgCount      = "E2046" // A generic struct or enum written without its type arguments, or with others
 )
 
 type Checker struct {
@@ -113,6 +114,10 @@ type Checker struct {
 	bounds map[string][]*ast.Type
 	// The types whose requirements were checked, each once
 	boundsChecked map[*ast.Type]bool
+	argCountSaid  map[*ast.Type]bool // the types told of their type arguments once
+	// The type arguments a generic struct written without them takes
+	// from where it stands, Box { v: 1 } as a Box<Int?>
+	literalArgs map[*ast.StructInitExpr][]Type
 
 	// Flow typing (see flow.go): variables currently known to be non-null,
 	// and how often each variable has been assigned so far
@@ -1529,6 +1534,17 @@ func (c *Checker) checkStructInitExpr(e *ast.StructInitExpr) Type {
 		return result
 	}
 
+	if len(typeArgs) == 0 && len(decl.TypeParams) > 0 {
+		// Box { v: 1 }: of what is expected there, or worked out from its
+		// fields, a Box<Int>; without, it would be a Box of anything
+		if expected, ok := c.literalArgs[e]; ok && len(expected) == len(decl.TypeParams) {
+			typeArgs = expected
+		} else {
+			typeArgs = c.structTypeArgsOf(decl, e, names)
+		}
+		result.TypeArgs = typeArgs
+	}
+
 	for _, name := range names {
 		value := e.Fields[name]
 		fieldType, ok := c.fieldType(result, name)
@@ -1988,6 +2004,7 @@ func (c *Checker) resolveType(n *ast.Type) Type {
 			return trait
 		}
 		c.checkTypeBounds(n, typeArgs)
+		c.checkTypeArgCount(n, typeArgs)
 		return &StructType{Name: n.Name, BaseName: n.Name, TypeArgs: typeArgs}
 
 	case ast.TypeArray, ast.TypeVariadic:
@@ -2228,4 +2245,64 @@ func (c *Checker) layout(t Type, seen map[string]bool) string {
 		return strings.Join(parts, " | ")
 	}
 	return describe(t)
+}
+
+// checkTypeArgCount says of a generic struct or enum written with none
+// of its type arguments, or with too many or too few: a Box with nothing
+// said of what it holds would hold anything, and give it as anything.
+func (c *Checker) checkTypeArgCount(n *ast.Type, args []Type) {
+	var params []string
+	what := ""
+	if decl := c.structs[n.Name]; decl != nil {
+		params, what = decl.TypeParams, "struct"
+	} else if decl := c.enums[n.Name]; decl != nil {
+		params, what = decl.TypeParams, "enum"
+	}
+	if len(params) == len(args) || what == "" || c.argCountSaid[n] {
+		return
+	}
+	if c.argCountSaid == nil {
+		c.argCountSaid = map[*ast.Type]bool{}
+	}
+	c.argCountSaid[n] = true
+	written := displayName(n.Name) + "<" + strings.Join(params, ", ") + ">"
+	if len(args) == 0 {
+		c.errorfWithSuggestion(n.Token(), ErrTypeArgCount,
+			fmt.Sprintf("Say what it is of: %s", written),
+			"%s %s takes type arguments, %s: written without them, it would hold anything", what, displayName(n.Name), written)
+		return
+	}
+	c.errorf(n.Token(), ErrTypeArgCount, "%s %s takes %d type arguments, %s, not %d", what, displayName(n.Name), len(params), written, len(args))
+}
+
+// structTypeArgsOf works out the type arguments of a generic struct from
+// the values its fields are given: unknown, those none of them says.
+func (c *Checker) structTypeArgsOf(decl *ast.StructDecl, e *ast.StructInitExpr, names []string) []Type {
+	isParam := map[string]bool{}
+	own := map[string]Type{}
+	for _, p := range decl.TypeParams {
+		isParam[p] = true
+		own[p] = NewTypeParam(p)
+	}
+	found := map[string]Type{}
+	for _, name := range names {
+		field := findField(decl, name)
+		if field == nil {
+			continue
+		}
+		restore := c.bind(own)
+		declared := c.resolveType(field.Type)
+		restore()
+		if given := c.checkExpr(e.Fields[name]); given != nil && !isUnknown(given) {
+			c.unify(declared, given, isParam, found)
+		}
+	}
+	args := make([]Type, len(decl.TypeParams))
+	for i, p := range decl.TypeParams {
+		args[i] = Unknown
+		if t, ok := found[p]; ok && t != nil {
+			args[i] = t
+		}
+	}
+	return args
 }

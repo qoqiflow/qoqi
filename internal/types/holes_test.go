@@ -31,6 +31,18 @@ trait S {
 		{"T1: what takes no Self is called through the trait", `
 trait S { fn size() -> Int; }
 fn f(xs: [S]) -> Int { return xs[0].size(); }`, ""},
+		{"T2: a generic struct written without what it is of", `
+struct Box<T> { v: T; }
+fn f(b: Box) -> Int { return 1; }`, "takes type arguments"},
+		{"T2: a literal without them is of what its fields are", `
+struct Box<T> { v: T; }
+fn f() -> Int { let b: Box<String> = Box { v: 1 }; let c = Box { v: 2 }; let d: Box<String> = c; return 1; }`, "cannot assign type Box<Int> to Box<String>"},
+		{"T2: ...or of what is expected there", `
+struct Box<T> { v: T; }
+fn f() -> Box<Int?> { let b: Box<Int?> = Box { v: 1 }; return Box { v: null }; }`, ""},
+		{"T2: too many", `
+struct Box<T> { v: T; }
+fn f(b: Box<Int, String>) -> Int { return 1; }`, "takes 1 type arguments"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			msgs, _ := checkSourceLoose(c.src)
