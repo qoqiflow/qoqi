@@ -600,3 +600,29 @@ func TestATrialFromADraftLetsTheSpanPass(t *testing.T) {
 		t.Fatalf("what it printed, at %s: %+v", trial.Clock, trial.Instance.Output)
 	}
 }
+
+// An operator reads a program's qoqi.json without the secrets written in
+// it; an admin, who edits and deploys it, reads them.
+func TestAnOperatorReadsNoSecret(t *testing.T) {
+	d, server := kept(t)
+	signIn := func(name string, admin bool) *browser {
+		body, _ := json.Marshal(map[string]any{"name": name, "password": "given long password", "admin": admin})
+		call(t, d, server, "POST", "/api/users", string(body))
+		b := newBrowser(t, server)
+		b.do(t, "POST", "/api/auth/login", `{"name": "`+name+`", "password": "given long password"}`)
+		b.do(t, "POST", "/api/users/"+name+"/password", `{"password": "a password of `+name+`", "current": "given long password"}`)
+		return b
+	}
+	ada, op := signIn("ada", true), signIn("op", false)
+	project, _ := json.Marshal(map[string]string{"text": `{"queues": {"billing": {"url": "env:BILLING_URL", "secret": "s3cr3t-literal"}, "mail": {"url": "env:MAIL_URL", "secret": "env:MAIL_SECRET"}}}`})
+	if status, said := ada.do(t, "PUT", "/api/workspace/greet/files/qoqi.json", string(project)); status != 200 {
+		t.Fatalf("ada saves qoqi.json: %d %s", status, said)
+	}
+	if _, said := ada.do(t, "GET", "/api/workspace/greet", ""); !strings.Contains(said, "s3cr3t-literal") {
+		t.Errorf("ada reads the secret she wrote: %s", said)
+	}
+	_, said := op.do(t, "GET", "/api/workspace/greet", "")
+	if strings.Contains(said, "s3cr3t-literal") || !strings.Contains(said, "hidden") || !strings.Contains(said, "env:MAIL_SECRET") {
+		t.Errorf("op reads: %s", said)
+	}
+}

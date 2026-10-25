@@ -31,7 +31,13 @@ final class Queue
 
     public function __construct(public readonly string $name, string ...$secrets)
     {
-        $this->secrets = array_values($secrets);
+        $this->secrets = array_values(array_filter($secrets, fn (string $s): bool => $s !== ''));
+        if ($this->secrets === []) {
+            // getenv() of a variable not set gives false, (string) false
+            // nothing: a queue whose secret is nothing would take a
+            // request anyone signs
+            throw new \InvalidArgumentException("the queue {$name} has no secret: give it the one of its qoqi.json");
+        }
     }
 
     /**

@@ -214,7 +214,46 @@ func (d *Daemon) draft(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "program", "there is no program "+name+", deployed or written here")
 		return
 	}
+	if principalOf(r).Operator {
+		// An operator reads the code, not the secrets written in it: an
+		// admin, who edits and deploys it, does
+		for i, f := range opened.Files {
+			if f.File == projectFile {
+				opened.Files[i].Text = withoutSecrets(f.Text)
+			}
+		}
+	}
 	answer(w, http.StatusOK, opened)
+}
+
+// hiddenSecret is what an operator is shown of a secret written in a
+// qoqi.json, rather than read from the environment.
+const hiddenSecret = "(hidden: an admin reads it)"
+
+// withoutSecrets is a qoqi.json, the secrets of its queues written there
+// hidden; those it reads from the environment, "env:NAME", as they are.
+func withoutSecrets(text string) string {
+	var config map[string]json.RawMessage
+	if json.Unmarshal([]byte(text), &config) != nil {
+		// Not JSON: nothing in it can be told a secret, and none is shown
+		return "{}\n"
+	}
+	var queues map[string]map[string]json.RawMessage
+	if json.Unmarshal(config["queues"], &queues) != nil {
+		return text
+	}
+	for _, q := range queues {
+		var secret string
+		if json.Unmarshal(q["secret"], &secret) == nil && secret != "" && !strings.HasPrefix(secret, "env:") {
+			q["secret"], _ = json.Marshal(hiddenSecret)
+		}
+	}
+	config["queues"], _ = json.Marshal(queues)
+	out, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return "{}\n"
+	}
+	return string(out) + "\n"
 }
 
 // discard takes a draft away: the program is what was deployed of it,

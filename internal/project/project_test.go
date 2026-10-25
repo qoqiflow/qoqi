@@ -315,3 +315,23 @@ func TestInstalledPackages(t *testing.T) {
 		}
 	}
 }
+
+// A queue whose secret is nothing would have the daemon sign with a key
+// anyone has: refused, written so or read so from the environment.
+func TestAQueueHasASecret(t *testing.T) {
+	t.Setenv("QOQI_EMPTY_SECRET", "")
+	for _, secret := range []string{"", "   "} {
+		cfg := &Config{Path: "qoqi.json", Queues: map[string]QueueConfig{"billing": {URL: "http://127.0.0.1:9/q", Secret: secret}}}
+		if _, _, err := cfg.Queue("billing"); err == nil || !strings.Contains(err.Error(), "no secret") {
+			t.Errorf("secret %q: %v", secret, err)
+		}
+	}
+	cfg := &Config{Path: "qoqi.json", Queues: map[string]QueueConfig{"billing": {URL: "http://127.0.0.1:9/q", Secret: "env:QOQI_EMPTY_SECRET"}}}
+	if _, _, err := cfg.Queue("billing"); err == nil {
+		t.Error("a secret read from a variable set to nothing")
+	}
+	cfg.Queues["billing"] = QueueConfig{URL: "http://127.0.0.1:9/q", Secret: "a secret of its own"}
+	if _, secret, err := cfg.Queue("billing"); err != nil || secret != "a secret of its own" {
+		t.Errorf("a secret: %q %v", secret, err)
+	}
+}

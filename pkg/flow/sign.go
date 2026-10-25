@@ -63,6 +63,11 @@ func Verify(header string, now time.Time, method, path, queue string, body []byt
 		return fmt.Errorf("%w: it was signed %v from this clock, more than %v", ErrSignature, d.Round(time.Second), Skew)
 	}
 	for _, secret := range secrets {
+		if secret == "" {
+			// A secret of nothing is one anyone has: a forged request
+			// would pass
+			continue
+		}
 		want := mac(secret, at, method, path, queue, body)
 		for _, g := range given {
 			if hmac.Equal([]byte(g), []byte(want)) {

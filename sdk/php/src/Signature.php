@@ -61,6 +61,11 @@ final class Signature
             throw new SignatureError('the request was signed too far from this clock');
         }
         foreach ($secrets as $secret) {
+            if ($secret === '') {
+                // A secret of nothing is one anyone has: a forged request
+                // would pass
+                continue;
+            }
             $want = self::mac($secret, $at, $method, $path, $queue, $body);
             foreach ($given as $signature) {
                 if (hash_equals($want, $signature)) {

@@ -156,6 +156,8 @@ export async function verify(header: string, now: number, method: string, path: 
   if (at === undefined || given.length === 0) throw new SignatureError(`${signatureHeader} is missing, or not t=..., v1=...`);
   if (Math.abs(now - at) > skew) throw new SignatureError("the request was signed too far from this clock");
   for (const secret of secrets) {
+    // A secret of nothing is one anyone has: a forged request would pass
+    if (secret === "") continue;
     const want = await mac(secret, at, method, path, queue, body);
     if (given.some((g) => same(g, want))) return;
   }
@@ -185,9 +187,14 @@ export class Queue {
   #onceAll: Keeper | undefined;
   #startedAll: Keeper | undefined;
 
-  constructor(name: string, ...secrets: string[]) {
+  constructor(name: string, ...secrets: (string | undefined)[]) {
     this.name = name;
-    this.secrets = secrets;
+    this.secrets = secrets.filter((s): s is string => typeof s === "string" && s !== "");
+    if (this.secrets.length === 0) {
+      // process.env of a variable not set gives undefined: a queue whose
+      // secret is nothing would take a request anyone signs
+      throw new Error(`the queue ${name} has no secret: give it the one of its qoqi.json`);
+    }
   }
 
   /** Says what carries out the steps of a shape. */

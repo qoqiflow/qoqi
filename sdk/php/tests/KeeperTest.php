@@ -160,6 +160,21 @@ foreach (['sqlite' => ['"key"', '`key`'], 'mysql' => ['`key`', '"key"']] as $dri
     }
 }
 
+// A secret of nothing is one anyone has: a queue is not made with one,
+// and a request signed with one is refused
+try {
+    new \Qoqi\Flow\Queue('billing', (string) getenv('QOQI_NO_SUCH_SECRET'));
+    check(false, 'a queue made with a secret of nothing');
+} catch (\InvalidArgumentException) {
+}
+$now = (int) (microtime(true) * 1000);
+$forged = "t={$now}, v1=" . hash_hmac('sha256', "{$now}\nPOST\n/q\nbilling\n{}", '');
+try {
+    \Qoqi\Flow\Signature::verify($forged, $now, 'POST', '/q', 'billing', '{}', ['', 'the real one']);
+    check(false, 'a request signed with a secret of nothing');
+} catch (\Qoqi\Flow\SignatureError) {
+}
+
 if ($failures > 0) {
     fwrite(STDERR, "{$failures} failed\n");
     exit(1);

@@ -124,6 +124,14 @@ func (c *Config) Queue(name string) (url, secret string, err error) {
 	if secret, err = fromEnvironment(q.Secret, name, "secret"); err != nil {
 		return "", "", err
 	}
+	if strings.TrimSpace(secret) == "" {
+		// Signed with a secret of nothing, a request anyone writes is the
+		// daemon's to the application
+		return "", "", fmt.Errorf("the queue %s has no secret: give it one, or \"env:NAME\"", name)
+	}
+	if url == "" {
+		return "", "", fmt.Errorf("the queue %s has no url: give it one, or \"env:NAME\"", name)
+	}
 	return url, secret, nil
 }
 

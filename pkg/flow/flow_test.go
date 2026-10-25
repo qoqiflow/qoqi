@@ -153,3 +153,20 @@ func TestAResult(t *testing.T) {
 		t.Errorf("null is nil: %v %v", opt, e)
 	}
 }
+
+// A secret of nothing is one anyone has: a request signed with it is
+// refused, whatever else the queue is given.
+func TestASecretOfNothingSignsNothing(t *testing.T) {
+	now := time.Now()
+	body := []byte(`{}`)
+	forged := flow.Sign("", now, "POST", "/q", "billing", body)
+	if err := flow.Verify(forged, now, "POST", "/q", "billing", body, ""); err == nil {
+		t.Error("a request signed with a secret of nothing, against a secret of nothing")
+	}
+	if err := flow.Verify(forged, now, "POST", "/q", "billing", body, "", "the real one"); err == nil {
+		t.Error("a request signed with a secret of nothing, beside the real one")
+	}
+	if err := flow.Verify(flow.Sign("the real one", now, "POST", "/q", "billing", body), now, "POST", "/q", "billing", body, "", "the real one"); err != nil {
+		t.Errorf("the real one: %v", err)
+	}
+}
