@@ -32,6 +32,13 @@ func release(t *testing.T) (dir string) {
 	sum := sha256.Sum256(data)
 	os.WriteFile(filepath.Join(dir, "release", "checksums.txt"), []byte(hex.EncodeToString(sum[:])+"  "+name+".tar.gz\n"), 0o644)
 	os.MkdirAll(filepath.Join(dir, "bin"), 0o755)
+	// What install.sh runs, and nothing else: a gh of the machine, as the
+	// runners of GitHub have, is not found
+	for _, tool := range []string{"sh", "cp", "tar", "gzip", "mktemp", "grep", "cut", "uname", "mkdir", "mv", "chmod", "rm", "basename", "sha256sum", "shasum"} {
+		if found, err := exec.LookPath(tool); err == nil {
+			os.Symlink(found, filepath.Join(dir, "bin", tool))
+		}
+	}
 	// curl -fsSL URL -o FILE: the file of the release of that name
 	os.WriteFile(filepath.Join(dir, "bin", "curl"), []byte(`#!/bin/sh
 while [ $# -gt 0 ]; do
@@ -53,7 +60,7 @@ func install(t *testing.T, dir string, gh string, env ...string) (string, error)
 		os.WriteFile(filepath.Join(dir, "bin", "gh"), []byte("#!/bin/sh\nexit "+gh+"\n"), 0o755)
 	}
 	cmd := exec.Command("sh", "../../install.sh")
-	cmd.Env = append([]string{"PATH=" + filepath.Join(dir, "bin") + ":/usr/bin:/bin", "HOME=" + dir, "QOQI_INSTALL=" + filepath.Join(dir, "installed")}, env...)
+	cmd.Env = append([]string{"PATH=" + filepath.Join(dir, "bin"), "HOME=" + dir, "QOQI_INSTALL=" + filepath.Join(dir, "installed")}, env...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
