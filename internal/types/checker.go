@@ -122,6 +122,8 @@ type Checker struct {
 	// callee is the name of the function a call calls, while it is
 	// checked: a generic one called is told its types by the call
 	callee *ast.Ident
+	// The names of the methods made again for each type (madeForEachType)
+	eachType map[string]bool
 
 	// Flow typing (see flow.go): variables currently known to be non-null,
 	// and how often each variable has been assigned so far

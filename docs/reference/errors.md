@@ -92,7 +92,7 @@ See [resuming with a fix](../concepts/failures.md#resuming-with-a-fix).
 | `E2018` | A field left out of a struct literal |
 | `E2019` | A method declared twice |
 | `E2020` | An empty array with nothing to say its type |
-| `E2021` | A cast that can never succeed, or one that cannot be checked when the program runs: to a type parameter of a method of its own (`fn get<U>()`), which is not made again for each type |
+| `E2021` | A cast that can never succeed, or one that cannot be checked when the program runs: to a type parameter of a method of a trait impl, which a call through the trait cannot make again for each type; a cast that keeps or changes an array or generic struct as a view of a wider one (`items as [Int]` from `[Any]`) |
 | `E2022` | An assignment to a constant |
 | `E2023` | Code that can never run (a warning) |
 | `E2024` | Type arguments on a method that takes none, or the wrong number |

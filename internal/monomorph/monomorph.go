@@ -16,6 +16,10 @@ const (
 	ErrTypeArgMismatch       = "E3003" // Number of type arguments doesn't match number of type parameters
 )
 
+// maxRounds is how many times what is made may make more: generic
+// functions and methods made for each type, calling each other.
+const maxRounds = 16
+
 // InstantiationKey uniquely identifies a monomorphized instance.
 // We use a string representation for the key to make it comparable.
 type InstantiationKey string
@@ -72,6 +76,11 @@ type Monomorphizer struct {
 
 	// Tracks which instantiations we're currently generating (for cycle detection)
 	generating map[InstantiationKey]bool
+
+	// The methods made again for each type, by struct and name, and the
+	// names of those made, by what they were made for (see methods.go)
+	specialized map[string]map[string]*needed
+	madeMethods map[string]string
 }
 
 // NewMonomorphizer creates a new monomorphizer.
@@ -104,20 +113,38 @@ func (m *Monomorphizer) SetSourceLines(lines map[int]string) {
 func (m *Monomorphizer) Monomorphize() (*ast.Program, *MonomorphizationInfo) {
 	// Collect all generic declarations
 	m.collectGenerics()
+	m.collectSpecialized()
 
-	// Phase 1: Discover all instantiations
-	m.discoverInstantiations()
+	// Until nothing more is made: a method made for its types may call a
+	// generic function with them, and a function made for its types call
+	// a method made again for each type
+	for round := 0; round < maxRounds; round++ {
+		madeMethods := m.specializeMethods()
+		if round > 0 && !madeMethods {
+			// What the round before made calls no method made for its
+			// types that was not made: nothing new to find
+			break
+		}
 
-	// Phase 2: Resolve dependencies and determine instantiation order
-	orderedKeys := m.resolveDependencies()
+		// Phase 1: Discover all instantiations
+		m.discoverInstantiations()
 
-	// Phase 3: Generate monomorphized instances
-	for _, key := range orderedKeys {
-		m.generateInstance(key)
+		// Phase 2: Resolve dependencies and determine instantiation order
+		orderedKeys := m.resolveDependencies()
+
+		// Phase 3: Generate monomorphized instances
+		for _, key := range orderedKeys {
+			m.generateInstance(key)
+		}
+
+		// Phase 4: Rewrite call sites
+		m.rewriteCallSites()
+
+		if m.errs.HasErrors() || len(m.specialized) == 0 {
+			// A cycle said, or no method made again for each type: once
+			break
+		}
 	}
-
-	// Phase 4: Rewrite call sites
-	m.rewriteCallSites()
 
 	// Build the result info
 	info := NewMonomorphizationInfo()
@@ -132,7 +159,9 @@ func (m *Monomorphizer) collectGenerics() {
 		switch d := decl.(type) {
 		case *ast.FnDecl:
 			if len(d.TypeParams) > 0 {
-				m.generics[d.Name] = d
+				// As it is now: what it is made from, again in each round,
+				// before its calls are rewritten
+				m.generics[d.Name] = (&ast.Cloner{}).Fn(d)
 			}
 		case *ast.StructDecl:
 			if len(d.TypeParams) > 0 {

@@ -1080,6 +1080,12 @@ type MemberExpr struct {
 	// For a value read from a tuple being taken apart, `let (a, b) = pair;`:
 	// how many names were written, which has to be what the tuple holds
 	TupleSize int
+
+	// Receiver is, for a call of a method that is made again for each type
+	// it is used with (it casts to a type parameter of its impl, or of its
+	// own), the type of the value it is called on, as the checker found
+	// it: Box<T> in a generic function, Box<Int> once that is made for Int
+	Receiver *Type
 }
 
 func (e *MemberExpr) exprNode() {}

@@ -255,6 +255,7 @@ func (c *Cloner) Expr(expr Expr) Expr {
 		copy := *e
 		copy.Expr = c.Expr(e.Expr)
 		copy.TypeArgs = c.types(e.TypeArgs)
+		copy.Receiver = c.Type(e.Receiver)
 		return &copy
 	case *IndexExpr:
 		copy := *e

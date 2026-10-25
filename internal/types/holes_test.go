@@ -52,12 +52,17 @@ fn f() -> Int { let s: String = id("a"); return id(1); }`, ""},
 		{"T3: ...in a function that calls it", `
 fn id<T>(x: T) -> T { return x; }
 fn f() -> Int { let g = (x: Int) -> id(x); return g(1); }`, ""},
-		{"T4: a cast to a method's own type parameter", `
-struct Box { v: Any; }
-impl Box { fn get<U>() -> U { return self.v as U; } }`, "a type parameter of a method, cannot be checked"},
-		{"T4: ...and a test of one", `
-struct Box { v: Any; }
-impl Box { fn holds<U>() -> Bool { return self.v is U; } }`, "a type parameter of a method, cannot be told"},
+		{"T4: a method of the struct's own casts: it is made for each type", `
+struct Box<T> { v: Any; }
+impl<T> Box<T> { fn get<U>() -> U { return self.v as U; } fn mine() -> T { return self.v as T; } }`, ""},
+		{"T4: a method of a trait's impl does not cast to its type parameters", `
+trait Holds { fn get() -> Int; }
+struct Box<T> { v: Any; }
+impl<T> Holds for Box<T> { fn get() -> Int { let t = self.v as T; return 1; } }`, "a type parameter of a method of a trait, cannot be checked"},
+		{"T4: ...nor tests them", `
+trait Holds { fn holds() -> Bool; }
+struct Box<T> { v: Any; }
+impl<T> Holds for Box<T> { fn holds() -> Bool { return self.v is T; } }`, "a type parameter of a method of a trait, cannot be told"},
 		{"T4: a function generic of its own casts", `
 fn as<U>(v: Any) -> U { return v as U; }
 struct Box { v: Any; }

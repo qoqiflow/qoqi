@@ -155,3 +155,45 @@ func Walk(node Node, visitExpr func(Expr), visitStmt func(Stmt)) {
 		walkExpr(n)
 	}
 }
+
+// CastsToParams says whether a method casts to, or tests, a type
+// parameter of its own or of its impl: what makes it one made again for
+// each type it is used with.
+func CastsToParams(method *FnDecl, implParams []string) bool {
+	params := map[string]bool{}
+	for _, p := range implParams {
+		params[p] = true
+	}
+	for _, p := range method.TypeParams {
+		params[p] = true
+	}
+	if len(params) == 0 || method.Body == nil {
+		return false
+	}
+	found := false
+	Walk(method.Body, func(e Expr) {
+		switch e := e.(type) {
+		case *CastExpr:
+			found = found || Mentions(e.Type, params)
+		case *TypeTestExpr:
+			found = found || Mentions(e.Type, params)
+		}
+	}, func(Stmt) {})
+	return found
+}
+
+// Mentions says whether a written type names one of the names given.
+func Mentions(t *Type, names map[string]bool) bool {
+	if t == nil {
+		return false
+	}
+	if names[t.Name] {
+		return true
+	}
+	for _, inner := range append(append(append([]*Type{t.ElemType}, t.Generics...), t.UnionTypes...), t.ParamTypes...) {
+		if Mentions(inner, names) {
+			return true
+		}
+	}
+	return t.ReturnType != nil && Mentions(t.ReturnType, names)
+}

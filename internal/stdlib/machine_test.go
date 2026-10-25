@@ -1790,3 +1790,54 @@ func TestCapturedFirstArgumentOutlivesTheCall(t *testing.T) {
 	}
 	expectLines(t, out, "16", "6", "1", "41 kept! 42")
 }
+
+// A method that casts to a type parameter, of its impl or of its own, is
+// made again for each type it is called with: the cast checks that type,
+// and refuses what is not one, as a generic function's does.
+func TestMethodsCastToTheirTypes(t *testing.T) {
+	out, err := runWith(t, 16<<20, `
+		import std.result;
+		import std.result.{Result};
+
+		struct Box<T> { v: Any; }
+		impl<T> Box<T> {
+			fn get() -> T { return self.v as T; }
+			fn as<U>() -> U { return self.v as U; }
+			fn holds<U>() -> Bool { return self.v is U; }
+			fn twice() -> [T] { return [self.get(), self.get()]; }
+		}
+		fn unbox<T>(b: Box<T>) -> T { return b.get(); }
+
+		fn main() {
+			let text = Box<String> { v: "c" };
+			println(text.get(), text.twice(), unbox(text), text.holds<String>(), text.holds<Int>());
+			let n: Int = Box<Int> { v: 3 }.as();
+			println(n);
+			for tried in [
+				result.attempt(() -> Box<Int> { v: "three" }.get()),
+				result.attempt(() -> unbox(Box<Int> { v: "three" })),
+				result.attempt(() -> Box<String> { v: "s" }.as<Int>()),
+			] {
+				match tried {
+					case Result.Ok(v): println("got", v);
+					case Result.Err(failure): println(failure.message);
+				}
+			}
+		}
+	`, nil)
+	if err != nil {
+		t.Fatalf("runtime error: %v\nafter printing:\n%s", err, out)
+	}
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	want := []string{`c ["c", "c"] c true false`, "3"}
+	for i, w := range want {
+		if i >= len(lines) || lines[i] != w {
+			t.Fatalf("line %d: want %s, got:\n%s", i+1, w, out)
+		}
+	}
+	for i := 2; i < 5; i++ {
+		if i >= len(lines) || !strings.Contains(lines[i], "cannot cast String to Int") {
+			t.Errorf("line %d: expected a refusal, got:\n%s", i+1, out)
+		}
+	}
+}

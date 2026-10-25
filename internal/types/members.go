@@ -217,6 +217,11 @@ func (c *Checker) methodTypeArgs(recv Type, member *ast.MemberExpr, e *ast.CallE
 // struct or trait, or a call of a function stored in a field.
 func (c *Checker) checkMethodCall(e *ast.CallExpr, member *ast.MemberExpr, expected Type) Type {
 	recv := c.checkExpr(member.Expr)
+	if recv != nil && !isUnknown(recv) && c.madeForEachType()[member.Name] {
+		// A method of that name is made again for each type it is used
+		// with: what it is called on says which, once it is known
+		member.Receiver = TypeToAST(recv, member.BaseNode)
+	}
 
 	fail := func(format string, args ...interface{}) Type {
 		c.errorf(member.Token(), ErrUnknownMethod, format, args...)
@@ -864,7 +869,7 @@ func (c *Checker) checkCastExpr(e *ast.CastExpr) Type {
 	if param := c.unspecializedParam(e.Type); param != "" {
 		c.errorfWithSuggestion(e.Type.Token(), ErrInvalidCast,
 			"Cast in a function of its own, fn as<"+param+">(value: Any) -> "+param+" { return value as "+param+"; }, and call it from the method",
-			"a cast to %s, a type parameter of a method, cannot be checked when the program runs: methods are not made again for each type they are used with", describe(target))
+			"a cast to %s, a type parameter of a method of a trait, cannot be checked when the program runs: called through the trait, it is not made again for each type", describe(target))
 		return target
 	}
 	if source == nil || isUnknown(source) || isUnknown(target) {
@@ -912,7 +917,7 @@ func (c *Checker) checkTypeTest(e *ast.TypeTestExpr) Type {
 	if param := c.unspecializedParam(e.Type); param != "" {
 		c.errorfWithSuggestion(e.Type.Token(), ErrInvalidCast,
 			"Test it in a function of its own, fn isA<"+param+">(value: Any) -> Bool { return value is "+param+"; }, and call it from the method",
-			"whether a value is a %s, a type parameter of a method, cannot be told when the program runs: methods are not made again for each type they are used with", describe(target))
+			"whether a value is a %s, a type parameter of a method of a trait, cannot be told when the program runs: called through the trait, it is not made again for each type", describe(target))
 		return Bool
 	}
 	if isUnknown(target) {
@@ -1306,10 +1311,11 @@ func isSelf(e ast.Expr) bool {
 	return ok && ident.Name == "self"
 }
 
-// unspecializedParam is a type parameter of the method being checked, its
-// own, that a written type names: a function generic of its own is made
-// again for each type it is used with, and what it casts to is known
-// then; a method is not, and its own type parameter is no type then.
+// unspecializedParam is a type parameter that a written type names, of a
+// method of a trait's impl being checked, its own or its impl's: a method
+// of a struct's own, as a generic function, is made again for each type
+// it is used with, and what it casts to is known then; one of a trait is
+// called through the trait too, where its types are not known.
 func (c *Checker) unspecializedParam(t *ast.Type) string {
 	if c.currentFn == nil || c.currentFn.Module == "std" || strings.HasPrefix(c.currentFn.Module, "std.") {
 		// The library casts what it made itself, of the type it knows
@@ -1319,10 +1325,19 @@ func (c *Checker) unspecializedParam(t *ast.Type) string {
 	if impl == nil {
 		return ""
 	}
-	// The method's own: those of its impl, impl<T> Box<T>, are those of
-	// the struct, which is made again for each type it is used with
+	if impl.TraitName == "" {
+		// A method of the struct's own is made again for each type it is
+		// called with, where the call says them (see monomorph/methods.go)
+		return ""
+	}
+	// A method of a trait is called through the trait too, on a value
+	// whose types are not known then: its casts to its type parameters,
+	// or to those of its impl, would check nothing
 	params := map[string]bool{}
 	for _, p := range c.currentFn.TypeParams {
+		params[p] = true
+	}
+	for _, p := range impl.TypeParams {
 		params[p] = true
 	}
 	var found string
@@ -1406,4 +1421,24 @@ func itemOf(t Type) Type {
 		return array.ElementType
 	}
 	return t
+}
+
+// madeForEachType are the names of the methods of the program that are
+// made again for each type they are used with: a method of a generic
+// impl, or generic of its own, that casts to, or tests, one of those type
+// parameters. The library's are not.
+func (c *Checker) madeForEachType() map[string]bool {
+	if c.eachType != nil {
+		return c.eachType
+	}
+	c.eachType = map[string]bool{}
+	for method, impl := range c.impls {
+		if method.Module == "std" || strings.HasPrefix(method.Module, "std.") {
+			continue
+		}
+		if ast.CastsToParams(method, impl.TypeParams) {
+			c.eachType[method.Name] = true
+		}
+	}
+	return c.eachType
 }

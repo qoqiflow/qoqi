@@ -192,7 +192,8 @@ its name and type arguments, and so does every type annotation mentioning
     its methods, which belong to `Box`, would not be found.
 *   Nothing is gained at runtime: a struct value does not carry its type
     arguments, so one `Box` serves all instantiations. Likewise the methods
-    of `impl<T> Box<T>` are compiled once, not per instantiation.
+    of `impl<T> Box<T>` are compiled once, not per instantiation, except
+    one that casts to or tests a type parameter (below).
 
 The concrete struct declarations (`Box_Int`) are still generated in phase 3
 and appended to the program; they are currently unused. Generic *functions*
@@ -207,6 +208,17 @@ the arguments nor the expected result type determine a type parameter.
 **Function expressions and casts** are traversed: a generic call inside a
 lambda is discovered and rewritten, and the type in `value as T` is
 substituted when a generic function is instantiated.
+
+**Methods that cast to their type parameters** (`internal/monomorph/methods.go`)
+are made again for each type they are called with, since `value as T` in
+`impl<T> Box<T> { fn get() -> T }` cannot be checked once for every `T`. The
+checker marks such a call with the receiver's type (`MemberExpr.Receiver`),
+and the pass clones the method with the impl's parameters and the method's own
+replaced (`get$Int`), then points the call at the copy. A copy may itself call
+generic functions or other such methods, so the passes run again until nothing
+new is made (at most 16 rounds). Methods of a trait impl are not made again:
+a call through the trait does not know the type, so a cast to their type
+parameters is refused (`E2021`).
 
 ## Name Mangling Scheme
 
