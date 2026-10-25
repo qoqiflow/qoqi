@@ -59,9 +59,9 @@ else
 fi
 [ -n "$expected" ] && [ "$expected" = "$actual" ] || fail "the download does not match its checksum"
 
-# Releases before v0.2.2 have no attestation
+# Releases before v0.2.3 have no attestation (v0.2.2 was never built)
 case "$version" in
-    v0.1.* | v0.2.0 | v0.2.1) attested=false ;;
+    v0.1.* | v0.2.0 | v0.2.1 | v0.2.2) attested=false ;;
     *) attested=true ;;
 esac
 if [ "$verify" != 0 ]; then
@@ -69,7 +69,7 @@ if [ "$verify" != 0 ]; then
         [ "$verify" = 1 ] && fail "QOQI_VERIFY=1 needs gh, to check the attestation: https://cli.github.com"
         echo "Not checked against its attestation: install gh to have it checked"
     elif ! $attested; then
-        [ "$verify" = 1 ] && fail "$version has no attestation: v0.2.2 and later have one"
+        [ "$verify" = 1 ] && fail "$version has no attestation: v0.2.3 and later have one"
         echo "Not checked against its attestation: $version has none"
     else
         gh attestation verify "$work/$name.tar.gz" --repo "$repo" >/dev/null 2>&1 \

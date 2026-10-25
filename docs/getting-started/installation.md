@@ -11,7 +11,7 @@ $ curl -fsSL https://qoqi.dev/install.sh | sh
 $ qoqi version
 ```
 
-`QOQI_VERSION=v0.2.2` picks a release, `QOQI_INSTALL=/usr/local/bin` the folder. The download is checked against the checksums of its release, and, where [gh](https://cli.github.com) is installed, against its attestation, signed by GitHub for the release workflow of the repository (from v0.2.2): `QOQI_VERIFY=1` requires that check, `QOQI_VERIFY=0` skips it. By hand: `gh attestation verify qoqi-linux-x86_64.tar.gz --repo qoqiflow/qoqi`. The binaries, Windows' too, are also on [the releases](https://github.com/qoqiflow/qoqi/releases).
+`QOQI_VERSION=v0.2.3` picks a release, `QOQI_INSTALL=/usr/local/bin` the folder. The download is checked against the checksums of its release, and, where [gh](https://cli.github.com) is installed, against its attestation, signed by GitHub for the release workflow of the repository (from v0.2.3): `QOQI_VERIFY=1` requires that check, `QOQI_VERIFY=0` skips it. By hand: `gh attestation verify qoqi-linux-x86_64.tar.gz --repo qoqiflow/qoqi`. The binaries, Windows' too, are also on [the releases](https://github.com/qoqiflow/qoqi/releases).
 
 ## From the source
 

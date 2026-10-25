@@ -46,7 +46,7 @@ Yes, on PostgreSQL or MySQL. Daemons share one store; an instance is held by one
 
 ## Is it ready for production? Who uses it?
 
-It is at v0.2.2. The language, the runtime and the daemon work end to end, and they are tested by crashing them on purpose after every write (`everyCrash`). It does not have years of production behind it yet. Start with a flow that matters but does not hold the company up, and tell us how it goes.
+It is at v0.2.3. The language, the runtime and the daemon work end to end, and they are tested by crashing them on purpose after every write (`everyCrash`). It does not have years of production behind it yet. Start with a flow that matters but does not hold the company up, and tell us how it goes.
 
 ## How is it licensed? Is there hosting?
 

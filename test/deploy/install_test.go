@@ -82,7 +82,7 @@ func TestInstallChecksTheAttestation(t *testing.T) {
 		{"without gh", "", []string{"QOQI_VERSION=v9.9.9"}, true, "install gh"},
 		{"without gh, required", "", []string{"QOQI_VERSION=v9.9.9", "QOQI_VERIFY=1"}, false, "needs gh"},
 		{"skipped", "1", []string{"QOQI_VERSION=v9.9.9", "QOQI_VERIFY=0"}, true, "Installed"},
-		{"a release of before", "1", []string{"QOQI_VERSION=v0.2.1"}, true, "has none"},
+		{"a release of before", "1", []string{"QOQI_VERSION=v0.2.2"}, true, "has none"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			os.RemoveAll(filepath.Join(dir, "installed"))
