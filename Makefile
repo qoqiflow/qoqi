@@ -1,4 +1,4 @@
-.PHONY: help build all clean test test-unit test-e2e test-race bench fuzz console console-check console-dev site site-dev site-deploy server-setup
+.PHONY: help build all clean test test-unit test-e2e test-race bench fuzz console console-check console-dev sdk-check site site-dev site-deploy server-setup
 
 # The go on the PATH, or where the official installer puts it
 GO ?= $(shell command -v go 2>/dev/null || echo /usr/local/go/bin/go)
@@ -16,6 +16,7 @@ help:
 	@echo "  make fuzz               Search for inputs that break the compiler or the machine (FUZZ_TIME=60s each)"
 	@echo "  make console            Build the console of qoqi serve into qoqi (needs node)"
 	@echo "  make console-check      Typecheck and test the console, without building it"
+	@echo "  make sdk-check          Test the SDKs of TypeScript and PHP (needs node, php)"
 	@echo "  make console-dev        Serve the console from its source, against a daemon on :7070"
 	@echo "  make site               Build qoqi.dev, the landing page and docs/, into website/dist"
 	@echo "  make site-dev           Serve qoqi.dev at http://127.0.0.1:8080, built again at each page"
@@ -43,6 +44,12 @@ console: console/node_modules/.package-lock.json
 
 console-check: console/node_modules/.package-lock.json
 	@cd console && $(NPM) run typecheck && $(NPM) test
+
+# The SDKs of TypeScript and PHP, on SQLite: node 23.6 or later, php 8.2
+# or later with pdo_sqlite. Go's are among the Go tests
+sdk-check:
+	@node --test sdk/ts/test/*.test.ts
+	@php sdk/php/tests/KeeperTest.php
 
 console-dev: console/node_modules/.package-lock.json
 	@cd console && $(NPM) run dev
