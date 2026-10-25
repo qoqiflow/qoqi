@@ -89,6 +89,18 @@ struct Node { v: Int; }
 fn f(n: Node?) -> Int { let panic = fn(s: String) { }; if n == null { panic("x"); } return n.v; }`, "nothing may be named so"},
 		{"T7: ...a parameter", `
 fn f(panic: fn(String)) -> Int { return 1; }`, "nothing may be named so"},
+		{"T9: a cast to an array of something, kept", `
+fn f(e: Any) -> Int { let xs = e as [Int]; return xs[0]; }`, "kept or changed"},
+		{"T9: ...or of a generic struct", `
+struct Box<T> { v: T; }
+fn f(e: Any) -> Box<Int> { return e as Box<Int>; }`, "kept or changed"},
+		{"T9: read there and then", `
+struct Box<T> { v: T; }
+fn f(e: Any, b: Any) -> Int { let s = 0; for n in e as [Int] { s = s + n; } return s + (e as [Int])[0] + (b as Box<Int>).v; }`, ""},
+		{"T9: ...but not a view read of it", `
+fn f(e: Any) -> Int { let row = (e as [[Int]])[0]; return row[0]; }`, "kept or changed"},
+		{"T9: an array of Any, and a null taken away", `
+fn f(e: Any, t: [Int]?) -> Int { let xs = e as [Any]; let ys = t as [Int]; return 1; }`, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			msgs, _ := checkSourceLoose(c.src)

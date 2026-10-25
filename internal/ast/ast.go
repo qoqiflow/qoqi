@@ -1028,6 +1028,12 @@ type CastExpr struct {
 	BaseNode
 	Expr Expr
 	Type *Type
+
+	// Fresh says the cast gives no view of the value that lasts: the value
+	// is made there, what a step by a queue answered, or it is read there
+	// and then, its items gone over, one indexed, a field read. Said by
+	// the parser, or by the checker, which the passes after it read again
+	Fresh bool
 }
 
 func (e *CastExpr) exprNode() {}

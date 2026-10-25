@@ -1007,6 +1007,7 @@ func (c *Checker) checkForStmt(s *ast.ForStmt) {
 	}
 
 	// Check that the iterable is actually iterable (array or string)
+	c.readOnce(s.Iterable, itemOf)
 	iterType := c.checkExpr(s.Iterable)
 	if iterType != nil {
 		switch t := iterType.(type) {
@@ -1488,6 +1489,10 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) Type {
 		// Shape.Circle(2.0): a value of an enum, not a method call
 		return c.checkVariant(member, e, expected)
 	} else if ok {
+		if member.Name == "len" && len(e.Args) == 0 {
+			// (value as [Int]).len(): a number, read there and then
+			c.readOnce(member.Expr, func(Type) Type { return Int })
+		}
 		result = c.checkMethodCall(e, member, expected)
 	} else {
 		c.inferFunctionTypeArgs(e, expected)
@@ -1626,6 +1631,14 @@ func (c *Checker) checkMemberExpr(e *ast.MemberExpr) Type {
 	if self := c.typeNamed(e.Expr); self != nil {
 		return c.methodOfType(e, self)
 	}
+	c.readOnce(e.Expr, func(t Type) Type {
+		if st, ok := t.(*StructType); ok {
+			if field, ok := c.fieldType(st, e.Name); ok {
+				return field
+			}
+		}
+		return t
+	})
 	recv := c.checkExpr(e.Expr)
 
 	// A field tested against null is known to hold a value
@@ -1768,6 +1781,7 @@ func asWritten(expr ast.Expr) string {
 
 // checkIndexExpr types `expr[index]`.
 func (c *Checker) checkIndexExpr(e *ast.IndexExpr) Type {
+	c.readOnce(e.Expr, itemOf)
 	recv := c.checkExpr(e.Expr)
 
 	// A struct that says what its brackets give: the key is what it asks

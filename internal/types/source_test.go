@@ -214,7 +214,7 @@ func TestCheckAcceptsValidPrograms(t *testing.T) {
 			impl T for P { fn m() -> Int { return self.x; } }
 			fn f(t: T) -> Int { return (t as P).x; }`},
 		{"cast to a wider type", `fn f(n: Int) -> Any { let a = n as Any; let o = n as Int?; return a; }`},
-		{"cast to an array or optional", `fn f(v: Any) -> Int { let xs = v as [Int]; let s = v as String?; return __len(xs); }`},
+		{"cast to an array of Any or optional", `fn f(v: Any) -> Int { let xs = v as [Any]; let s = v as String?; return __len(xs); }`},
 		{"method of a generic struct", `struct Box<T> { value: T; }
 			impl<T> Box<T> { fn get() -> T { return self.value; } fn set(v: T) -> Void { self.value = v; } }
 			fn main() -> Int { let b = Box<Int> { value: 1 }; b.set(2); return b.get() + 1; }`},
@@ -662,21 +662,35 @@ func TestCastDescriptors(t *testing.T) {
 		{"Box<Int>", "Box<Int>", ""},
 	}
 
+	// What is checked is asked with is: a cast to an array or a generic
+	// struct of something is refused (it would give the same value a view
+	// of its own), and is and as describe a type alike
 	for _, tt := range tests {
 		t.Run(tt.source+" as "+tt.target, func(t *testing.T) {
-			src := decls + "fn f(v: " + tt.source + ") -> Void { let r = v as " + tt.target + "; }"
+			op := "as"
+			if tt.want != "" {
+				op = "is"
+			}
+			src := decls + "fn f(v: " + tt.source + ") -> Void { let r = v " + op + " " + tt.target + "; }"
 			msgs, info, prog := checkSource(t, src)
 			if len(msgs) != 0 {
 				t.Fatalf("unexpected errors: %v", msgs)
 			}
 
-			var cast *ast.CastExpr
+			var value ast.Expr
 			for _, decl := range prog.Decls {
 				if fn, ok := decl.(*ast.FnDecl); ok && fn.Name == "f" {
-					cast = fn.Body.Stmts[0].(*ast.LetStmt).Value.(*ast.CastExpr)
+					value = fn.Body.Stmts[0].(*ast.LetStmt).Value
 				}
 			}
-			got, checked := info.Casts[cast]
+			var got string
+			var checked bool
+			switch e := value.(type) {
+			case *ast.CastExpr:
+				got, checked = info.Casts[e]
+			case *ast.TypeTestExpr:
+				got, checked = info.Tests[e]
+			}
 			if checked != (tt.want != "") || got != tt.want {
 				t.Errorf("expected descriptor %q, got %q (checked: %v)", tt.want, got, checked)
 			}

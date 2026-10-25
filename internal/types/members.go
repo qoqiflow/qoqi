@@ -875,6 +875,18 @@ func (c *Checker) checkCastExpr(e *ast.CastExpr) Type {
 	widens, narrows := c.assignable(target, source), c.assignable(source, target)
 	c.castingArrays = false
 
+	if narrows && !widens && c.aliases(target) != nil && !e.Fresh && !c.inLibrary() && !c.assignable(target, withoutNull(source)) {
+		// The value is the same array, or struct, after the cast as before:
+		// another cast of it, of other items, could put in it what this
+		// one says it cannot hold. A null taken away, [Token]? as [Token],
+		// gives the same view, and is not refused
+		c.errorfWithSuggestion(e.Type.Token(), ErrInvalidCast,
+			"Read it there and then, for x in value as [Int], (value as Box<Int>).field; or make a new one of what it holds, each item cast: (value as [Any]).map(item -> item as Int)",
+			"a cast to %s, kept or changed, gives the very %s it was a view of its own, which a cast of it to another type could change under it: its items are checked once, not after", describe(target), describe(c.aliases(target)))
+		// Still checked when it runs: a pass after this one, which says
+		// nothing, must not make it a cast that checks nothing
+	}
+
 	switch {
 	case widens:
 		// Always succeeds: nothing to check at runtime
@@ -1329,4 +1341,69 @@ func (c *Checker) unspecializedParam(t *ast.Type) string {
 	}
 	walk(t)
 	return found
+}
+
+// aliases is what in a type is held by reference and holds values of a
+// type said: an array of other than Any, a generic struct of other than
+// Any. A cast to such a type gives the same array or struct a view of
+// its own, and another view of it, cast otherwise, may put in it what
+// this one says it does not hold. nil when there is none.
+func (c *Checker) aliases(t Type) Type {
+	switch t := t.(type) {
+	case *ArrayType:
+		if !t.ElementType.Equals(Any) {
+			return t
+		}
+	case *StructType:
+		if c.enums[t.Name] != nil {
+			// A value of an enum is not changed once made
+			return nil
+		}
+		for _, arg := range t.TypeArgs {
+			if !arg.Equals(Any) {
+				return t
+			}
+		}
+	case *UnionType:
+		for _, member := range t.Types {
+			if found := c.aliases(member); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
+}
+
+// inLibrary says whether the function being checked is of the standard
+// library, which casts what it made itself, of the type it knows.
+func (c *Checker) inLibrary() bool {
+	return c.currentFn != nil && (c.currentFn.Module == "std" || strings.HasPrefix(c.currentFn.Module, "std."))
+}
+
+// readOnce marks a cast that is read there and then, the iterable of a
+// for, what is indexed, what a field is read of, when what is read of
+// it gives nothing a view of the value: the items or the field of a type
+// that is not itself an array or a generic struct of something.
+func (c *Checker) readOnce(e ast.Expr, read func(Type) Type) {
+	cast, ok := e.(*ast.CastExpr)
+	if !ok {
+		return
+	}
+	target := c.resolveType(cast.Type)
+	if c.aliases(target) == nil {
+		return
+	}
+	if got := read(target); got != target && c.aliases(got) == nil {
+		// Kept on the cast: the passes after desugaring check it again,
+		// out of the for it was the iterable of
+		cast.Fresh = true
+	}
+}
+
+// itemOf is what a for gives, or an index, of an array: its items.
+func itemOf(t Type) Type {
+	if array, ok := t.(*ArrayType); ok {
+		return array.ElementType
+	}
+	return t
 }

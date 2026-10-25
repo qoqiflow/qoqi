@@ -634,7 +634,7 @@ func (p *Parser) parseStepDecl() *ast.FnDecl {
 	var sent ast.Expr = &ast.CallExpr{BaseNode: base(queue), Func: &ast.MemberExpr{BaseNode: base(queue), Expr: module, Name: deliver}, Args: args}
 	var stmt ast.Stmt = &ast.ExprStmt{BaseNode: base(queue), Expr: sent}
 	if decl.ReturnType != nil {
-		stmt = &ast.ReturnStmt{BaseNode: base(queue), Value: &ast.CastExpr{BaseNode: base(queue), Expr: sent, Type: (&ast.Cloner{}).Type(decl.ReturnType)}}
+		stmt = &ast.ReturnStmt{BaseNode: base(queue), Value: &ast.CastExpr{BaseNode: base(queue), Expr: sent, Type: (&ast.Cloner{}).Type(decl.ReturnType), Fresh: true}}
 	}
 	decl.Body = &ast.BlockStmt{BaseNode: base(queue), Stmts: []ast.Stmt{stmt}}
 	p.stages = true

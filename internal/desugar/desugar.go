@@ -386,7 +386,7 @@ func (d *Desugarer) desugarExprAsWritten(expr ast.Expr) ast.Expr {
 	case *ast.FnExpr:
 		return d.desugarFnExpr(expr)
 	case *ast.CastExpr:
-		return &ast.CastExpr{BaseNode: expr.BaseNode, Expr: d.desugarExpr(expr.Expr), Type: expr.Type}
+		return &ast.CastExpr{BaseNode: expr.BaseNode, Expr: d.desugarExpr(expr.Expr), Type: expr.Type, Fresh: expr.Fresh}
 	case *ast.TypeTestExpr:
 		return &ast.TypeTestExpr{BaseNode: expr.BaseNode, Expr: d.desugarExpr(expr.Expr), Type: expr.Type}
 	case *ast.Ident:

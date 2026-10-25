@@ -1419,7 +1419,7 @@ func TestCastsToTypeParameters(t *testing.T) {
 
 		fn opt<T>(value: Any) -> T? { return value as T?; }
 		fn must<T>(value: Any) -> T { return value as T; }
-		fn items<T>(value: Any) -> [T] { return value as [T]; }
+		fn items<T>(value: Any) -> [T] { return (value as [Any]).map(item -> item as T); }
 		fn outer<T>(value: Any) -> T? { return opt<T>(value); }
 		fn deep<T>(value: Any) -> T { return must<T>(outer<T>(value)); }
 		fn isOne<T>(value: Any) -> Bool { return value is T; }

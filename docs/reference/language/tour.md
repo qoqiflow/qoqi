@@ -740,7 +740,7 @@ fn tagged(notes: [Note], tag: String?) -> [Note] {
 
 A value of type `Any` cannot be used until it is cast or tested. A cast that cannot possibly succeed (`1 as String`) is a compile error; one that can fail stops the program with `cannot cast String to Int` and the source location.
 
-Casts look inside the value: `v as [Int]` checks every element and reports the first that does not fit (`element 2: String is not an Int`), and `v as Box<Int>` checks the fields that depend on the type argument.
+Casts look inside the value: `v as [Int]` checks every element and reports the first that does not fit (`element 2: String is not an Int`), and `v as Box<Int>` checks the fields that depend on the type argument. They are checked once, and the array or the struct stays the one it was: another cast of it, to `[Int?]`, could put a `null` in it later. So a cast to an array or a generic struct of something is read there and then (`for n in v as [Int]`, `(v as [Int])[0]`, `(v as Box<Int>).value`, `(v as [Int]).len()`), or makes a new one of what it holds: `(v as [Any]).map(item -> item as Int)`. One kept, `let xs = v as [Int]`, is refused (`E2021`).
 
 ### Tuples
 

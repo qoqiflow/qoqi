@@ -17,8 +17,8 @@ fn main() -> Int {
     println(sum([1, 2, 3]));
 
     let boxed: Any = Box<String> { value: "text" };
-    let text = boxed as Box<String>;
-    println(text.value);
+    let text = (boxed as Box<String>).value;
+    println(text);
 
     let mixed: [Any] = [1, 2, "three"];
     println(sum(mixed));

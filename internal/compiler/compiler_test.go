@@ -471,7 +471,7 @@ func TestCastsVerifyElementsAndFields(t *testing.T) {
 		println(areas([Square { side: 2 }, Square { side: 3 }]));
 
 		let nested: Any = [[1], [2, 3]];
-		println((nested as [[Int]])[1][1]);
+		println(((nested as [Any])[1] as [Int])[1]);
 		let mixed: [Any] = [1, null];
 		println((mixed as [Int?])[1] == null);
 	`, "6 0\n9\n4\n13\n3\ntrue\n")
@@ -1233,11 +1233,11 @@ func TestRuntimeErrorsPointAtSource(t *testing.T) {
 		{"cast of null", "let n: Int? = null;\nreturn n as Int;", "cannot cast null to Int", 4},
 		{"cast to the wrong struct", "let v: Any = Empty {};\nlet o = v as Other;\nreturn 0;", "cannot cast Empty to Other", 4},
 		{"cast to another function type", "let v: Any = fn(s: String) -> String { return s; };\nlet f = v as fn(Int) -> Int;\nreturn 0;", "cannot cast function to fn(Int) -> Int: it is a fn(String) -> String", 4},
-		{"cast of an array of functions", "let v: [Any] = [toString, 3];\nlet fs = v as [fn(Any) -> String];\nreturn 0;", "element 1: Int is not a fn(Any) -> String", 4},
-		{"cast of an array with a wrong element", "let v: [Any] = [1, \"two\", 3];\nlet xs = v as [Int];\nreturn 0;", "cannot cast array to [Int]: element 1: String is not an Int", 4},
-		{"cast of a nested array", "let v: [[Any]] = [[1], [true]];\nlet xs = v as [[Int]];\nreturn 0;", "element 1: element 0: Bool is not an Int", 4},
-		{"cast of a generic struct with another argument", "let v: Any = Holder<String> { item: \"s\" };\nlet h = v as Holder<Int>;\nreturn 0;", "cannot cast Holder to Holder: field 'item': String is not an Int", 4},
-		{"cast of an array of the wrong structs", "let v: [Any] = [Empty {}, Other {}];\nlet xs = v as [Empty];\nreturn 0;", "element 1: Other is not an Empty", 4},
+		{"cast of an array of functions", "let v: [Any] = [toString, 3];\nlet fs = (v as [fn(Any) -> String]).len();\nreturn 0;", "element 1: Int is not a fn(Any) -> String", 4},
+		{"cast of an array with a wrong element", "let v: [Any] = [1, \"two\", 3];\nlet xs = (v as [Int]).len();\nreturn 0;", "cannot cast array to [Int]: element 1: String is not an Int", 4},
+		{"cast of a nested array", "let v: [[Any]] = [[1], [true]];\nlet xs = (v as [[Int]]).len();\nreturn 0;", "element 1: element 0: Bool is not an Int", 4},
+		{"cast of a generic struct with another argument", "let v: Any = Holder<String> { item: \"s\" };\nlet h = (v as Holder<Int>).item;\nreturn 0;", "cannot cast Holder to Holder: field 'item': String is not an Int", 4},
+		{"cast of an array of the wrong structs", "let v: [Any] = [Empty {}, Other {}];\nlet xs = (v as [Empty]).len();\nreturn 0;", "element 1: Other is not an Empty", 4},
 	}
 
 	for _, tt := range tests {
@@ -1932,7 +1932,7 @@ func TestArraysKeepTheirElementType(t *testing.T) {
 		println(shapes(widened), mine.len());
 
 		let anything: [Any] = [1, 2];
-		let ints = anything as [Int];
+		let ints = anything.map(item -> item as Int);
 		let wider = [1, 2] as [Int?];
 		println(ints[0] + ints[1], wider);
 	`, `[1, null, 3] 2 13 16 1

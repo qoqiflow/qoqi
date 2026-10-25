@@ -409,12 +409,15 @@ func TestEnumCastDescriptors(t *testing.T) {
 			let b = v as Color;
 			let c = v as Option<Int>;
 			let d = v as Named;
-			let e = v as [Color];
+			let e = v is [Color];
 			return 0;
 		}`)
 
 	var got []string
 	for _, descriptor := range info.Casts {
+		got = append(got, descriptor)
+	}
+	for _, descriptor := range info.Tests {
 		got = append(got, descriptor)
 	}
 	joined := strings.Join(got, " ")
