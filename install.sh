@@ -5,11 +5,19 @@
 #
 # QOQI_VERSION picks a release (default: the latest), QOQI_INSTALL the
 # folder the binary goes in (default: ~/.local/bin).
+#
+# The download is checked against the checksums of its release. Those
+# come from the same place, and say only that it arrived whole: where gh
+# is installed, the binary is also checked against its attestation,
+# signed by GitHub for the release workflow of the repository, which no
+# one who changed the release could make. QOQI_VERIFY=1 requires that
+# check, QOQI_VERIFY=0 skips it.
 set -eu
 
 repo="qoqiflow/qoqi"
 version="${QOQI_VERSION:-latest}"
 target="${QOQI_INSTALL:-$HOME/.local/bin}"
+verify="${QOQI_VERIFY:-auto}"
 
 fail() {
     echo "qoqi: $*" >&2
@@ -50,6 +58,25 @@ else
     actual="$(shasum -a 256 "$work/$name.tar.gz" | cut -d' ' -f1)"
 fi
 [ -n "$expected" ] && [ "$expected" = "$actual" ] || fail "the download does not match its checksum"
+
+# Releases before v0.2.2 have no attestation
+case "$version" in
+    v0.1.* | v0.2.0 | v0.2.1) attested=false ;;
+    *) attested=true ;;
+esac
+if [ "$verify" != 0 ]; then
+    if ! command -v gh >/dev/null 2>&1; then
+        [ "$verify" = 1 ] && fail "QOQI_VERIFY=1 needs gh, to check the attestation: https://cli.github.com"
+        echo "Not checked against its attestation: install gh to have it checked"
+    elif ! $attested; then
+        [ "$verify" = 1 ] && fail "$version has no attestation: v0.2.2 and later have one"
+        echo "Not checked against its attestation: $version has none"
+    else
+        gh attestation verify "$work/$name.tar.gz" --repo "$repo" >/dev/null 2>&1 \
+            || fail "the download is not attested by the release workflow of $repo: it may not be what was released"
+        echo "Checked against its attestation, by the release workflow of $repo"
+    fi
+fi
 
 tar -xzf "$work/$name.tar.gz" -C "$work"
 mkdir -p "$target"

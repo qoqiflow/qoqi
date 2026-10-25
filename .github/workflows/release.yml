@@ -8,6 +8,10 @@ on:
 
 permissions:
   contents: write
+  # The binaries are attested, signed by GitHub for this workflow of
+  # this repository: install.sh checks it with gh
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -44,6 +48,10 @@ jobs:
             fi
           done
           (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
+      - name: Attest where they come from
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*.tar.gz, dist/*.zip"
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
