@@ -624,3 +624,60 @@ fn main() -> Int {
 		`2 ["before", "tidied", "outer tidied"]`,
 	)
 }
+
+// A text holds any bytes, as fromHex gives them: frozen and taken up, it
+// has the same, and so has a key of a dictionary.
+func TestFreezeBytes(t *testing.T) {
+	expectFrozenAnywhere(t, `
+import std.time;
+import std.encoding;
+import std.dict.{Dict};
+
+fn main() -> Int {
+    let b = encoding.fromHex("ff00fe") ?? "";
+    let seen: Dict<Int> = {};
+    seen[b] = 1;
+    seen["$bytes:x"] = 2;
+    wait time.after(10.milliseconds());
+    println(encoding.toHex(b), seen[b], seen["$bytes:x"], seen.keys().len());
+    return 0;
+}`,
+		"ff00fe 1 2 2",
+	)
+}
+
+// The same as data: what a step is given or returns.
+func TestDataOfBytes(t *testing.T) {
+	chunk := compiled(t, `
+import std.encoding;
+import std.dict.{Dict};
+
+struct Signed { mac: String; by: Dict<Int>; }
+
+fn main() -> Signed {
+    let b = encoding.fromHex("ff00fe") ?? "";
+    let by: Dict<Int> = {};
+    by[b] = 7;
+    return Signed { mac: b, by: by };
+}`)
+	m := vm.NewVM()
+	v, err := m.Exec(chunk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := m.DataOf(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) || !strings.Contains(string(data), `"$bytes"`) {
+		t.Fatalf("written as %s", data)
+	}
+	back, err := m.ValueOfData(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := m.DataOf(back)
+	if err != nil || string(again) != string(data) {
+		t.Errorf("read back and written again: %s, not %s (%v)", again, data, err)
+	}
+}

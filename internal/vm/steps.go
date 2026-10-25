@@ -2,6 +2,7 @@ package vm
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -635,6 +637,7 @@ func (vm *VM) start(chunk *Chunk, function, key string, attempt int, args [][]by
 //	Int, Bool, String     a number, a boolean, a text
 //	Float                 a number with a point or an exponent, 2.0;
 //	                      {"$float": "NaN"} and the infinities
+//	                      a String whose bytes are not UTF-8: {"$bytes": base64}
 //	null                  null
 //	an array              an array
 //	a struct              an object, with "$type": {"$type": "Point", "x": 1}
@@ -694,7 +697,12 @@ func dataOf(v Value, inside map[*ObjHeader]bool) (any, error) {
 	defer delete(inside, h)
 	switch h.Type {
 	case ObjTypeString:
-		return (*StringObj)(unsafe.Pointer(h)).Data(), nil
+		text := (*StringObj)(unsafe.Pointer(h)).Data()
+		if !utf8.ValidString(text) {
+			// JSON holds UTF-8: bytes that are not would come back changed
+			return ordered{keys: []string{"$bytes"}, values: map[string]any{"$bytes": base64.StdEncoding.EncodeToString([]byte(text))}}, nil
+		}
+		return text, nil
 	case ObjTypeArray:
 		a := (*ArrayObj)(unsafe.Pointer(h))
 		items := make([]any, 0, len(a.elements))
@@ -729,7 +737,7 @@ func dataOf(v Value, inside map[*ObjHeader]bool) (any, error) {
 		sort.Strings(keys)
 		at := ordered{}
 		for _, k := range keys {
-			at.add(k, i.at[k])
+			at.add(keyOut(k), i.at[k])
 		}
 		return ordered{keys: []string{"$index"}, values: map[string]any{"$index": at}}, nil
 	case ObjTypeFunction, ObjTypeExternFunction:
@@ -871,6 +879,13 @@ func (vm *VM) valueOfData(d any) (Value, error) {
 		}
 		return v, nil
 	case *ordered:
+		if b, ok := d.values["$bytes"].(string); ok && len(d.keys) == 1 {
+			raw, err := base64.StdEncoding.DecodeString(b)
+			if err != nil {
+				return valueNull, fmt.Errorf("a text of bytes: %v", err)
+			}
+			return vm.newString(string(raw))
+		}
 		if f, ok := d.values["$float"]; ok {
 			switch fmt.Sprint(f) {
 			case "NaN":
@@ -892,7 +907,11 @@ func (vm *VM) valueOfData(d any) (Value, error) {
 				if err != nil {
 					return valueNull, err
 				}
-				i.at[k] = int32(n)
+				key, err := keyIn(k)
+				if err != nil {
+					return valueNull, err
+				}
+				i.at[key] = int32(n)
 			}
 			return vm.pin(valueOf(&i.header)), nil
 		}
@@ -998,4 +1017,29 @@ func (vm *VM) Pin(v Value) Value {
 // Chunk is the bytecode the program runs.
 func (vm *VM) Chunk() *Chunk {
 	return vm.chunk
+}
+
+// bytesKey marks a key written in base64: a key of an index whose bytes
+// are not UTF-8, which JSON would change, or one that starts so itself.
+const bytesKey = "$bytes:"
+
+// keyOut is a key of an index as JSON holds it.
+func keyOut(k string) string {
+	if !utf8.ValidString(k) || strings.HasPrefix(k, bytesKey) {
+		return bytesKey + base64.StdEncoding.EncodeToString([]byte(k))
+	}
+	return k
+}
+
+// keyIn is a key of an index as keyOut wrote it.
+func keyIn(k string) (string, error) {
+	rest, ok := strings.CutPrefix(k, bytesKey)
+	if !ok {
+		return k, nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(rest)
+	if err != nil {
+		return "", fmt.Errorf("a key of bytes %q: %v", k, err)
+	}
+	return string(raw), nil
 }

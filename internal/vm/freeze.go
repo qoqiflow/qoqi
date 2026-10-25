@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -126,6 +127,7 @@ type frozenObject struct {
 	Kind string `json:"kind"` // string, array, object, function, upvalue, extern, index
 
 	Text    string            `json:"text,omitempty"`    // string
+	Bytes   []byte            `json:"bytes,omitempty"`   // string: its bytes, when they are not UTF-8
 	Items   []json.RawMessage `json:"items,omitempty"`   // array; object: its values
 	Type    string            `json:"type,omitempty"`    // object
 	Variant bool              `json:"variant,omitempty"` // object
@@ -358,6 +360,10 @@ func (w *freezer) object(h *ObjHeader) frozenObject {
 	switch h.Type {
 	case ObjTypeString:
 		s := (*StringObj)(unsafe.Pointer(h))
+		if text := s.Data(); !utf8.ValidString(text) {
+			// JSON holds UTF-8: bytes that are not would come back changed
+			return frozenObject{Kind: "string", Bytes: []byte(text)}
+		}
 		return frozenObject{Kind: "string", Text: s.Data()}
 	case ObjTypeArray:
 		a := (*ArrayObj)(unsafe.Pointer(h))
@@ -405,7 +411,7 @@ func (w *freezer) object(h *ObjHeader) frozenObject {
 		i := (*IndexObj)(unsafe.Pointer(h))
 		at := make(map[string]int32, len(i.at))
 		for k, v := range i.at {
-			at[k] = v
+			at[keyOut(k)] = v
 		}
 		return frozenObject{Kind: "index", At: at}
 	}
@@ -701,7 +707,11 @@ func (t *thawer) make() error {
 		var h *ObjHeader
 		switch o.Kind {
 		case "string":
-			s, _, err := heap.AllocString(o.Text)
+			text := o.Text
+			if o.Bytes != nil {
+				text = string(o.Bytes)
+			}
+			s, _, err := heap.AllocString(text)
 			if err != nil {
 				return err
 			}
@@ -815,7 +825,11 @@ func (t *thawer) fill() error {
 		case "index":
 			i := (*IndexObj)(unsafe.Pointer(h))
 			for k, v := range o.At {
-				i.at[k] = v
+				key, err := keyIn(k)
+				if err != nil {
+					return err
+				}
+				i.at[key] = v
 			}
 		}
 	}
