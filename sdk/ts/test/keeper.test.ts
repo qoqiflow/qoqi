@@ -35,3 +35,29 @@ test("a step that answers later acts once", async () => {
   await k.answered(task("slow"), answer.value({ Ok: "slow-1" }));
   assert.deepEqual(await k.started(task("slow"), slow), { value: { Ok: "slow-1" } });
 });
+
+// A step under once holds the connection's transaction while it acts: a
+// claim written meanwhile for a step under started is not in it, and
+// stays when the once step fails and rolls back.
+test("a claim survives a step under once that fails", async () => {
+  const [k, db] = keeper();
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const failing = k.once(task("o"), async () => {
+    db.prepare("INSERT INTO shipped (id) VALUES ('o')").run();
+    await held;
+    throw new Error("the carrier refused");
+  });
+  let acted = 0;
+  const claimed = k.started(task("s"), async () => {
+    acted++;
+    return answer.value({ Ok: "s-1" });
+  });
+  release();
+  await assert.rejects(failing, /the carrier refused/);
+  assert.deepEqual(await claimed, { value: { Ok: "s-1" } });
+  assert.equal(acted, 1);
+  assert.deepEqual(await k.probe({ ...task("s"), probe: true }), { value: { Ok: "s-1" } });
+  const shipped = db.prepare("SELECT COUNT(*) AS n FROM shipped WHERE id = 'o'").get() as { n: number };
+  assert.equal(shipped.n, 0);
+});

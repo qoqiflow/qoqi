@@ -265,7 +265,7 @@ export class Queue {
     }
     const [once, started] = this.#keeping(task.shape);
     const keeper = started ?? once;
-    if (task.probe) return json(200, keeper === undefined ? answer.unseen() : keeper.probe(task));
+    if (task.probe) return json(200, keeper === undefined ? answer.unseen() : await keeper.probe(task));
     const step = this.#steps.get(task.shape);
     if (step === undefined) return json(200, { unknown_shape: task.shape });
     const run = async (t: Task): Promise<Answer> => {
@@ -366,9 +366,18 @@ interface Row {
 export class Keeper {
   readonly db: Database;
   readonly table: string;
-  // Steps under once go one at a time: they share the connection, and its
-  // transaction
+  // What uses the connection goes one at a time: a step under once holds
+  // its transaction open while it acts, and a claim written meanwhile
+  // would be in it, rolled back with it. A step under started acts
+  // without holding it. Steps under once that should not wait for each
+  // other each have a Keeper of their own, on a connection of its own
   #turn: Promise<unknown> = Promise.resolve();
+
+  #exclusive<T>(work: () => T | Promise<T>): Promise<T> {
+    const turn = this.#turn.then(work, work);
+    this.#turn = turn.catch(() => undefined);
+    return turn;
+  }
 
   constructor(db: Database, table = "flow_steps") {
     this.db = db;
@@ -415,26 +424,28 @@ export class Keeper {
       }
       return said;
     };
-    const turn = this.#turn.then(run, run);
-    this.#turn = turn.catch(() => undefined);
-    return turn;
+    return this.#exclusive(run);
   }
 
   async started(task: Task, step: (task: Task) => Promise<Answer>): Promise<Answer> {
-    const row = this.#row(task.key);
-    if (row?.state === "answered") return JSON.parse(row.answer) as Answer;
-    if (row !== undefined && Date.now() < row.beat) return answer.underWay();
-    if (row !== undefined && !task.reclaim) return answer.unknown();
-    if (row !== undefined) {
-      // A person said the dead claim did nothing: it is dropped
-      this.db.prepare(`DELETE FROM ${this.table} WHERE "key" = ? AND state = 'started'`).run(task.key);
-    }
-    try {
-      this.db.prepare(`INSERT INTO ${this.table} ("key", state, answer, beat) VALUES (?, 'started', '', ?)`).run(task.key, task.until);
-    } catch {
-      // The loser of a race for the claim does not act
-      return answer.underWay();
-    }
+    const claimed = await this.#exclusive((): Answer | undefined => {
+      const row = this.#row(task.key);
+      if (row?.state === "answered") return JSON.parse(row.answer) as Answer;
+      if (row !== undefined && Date.now() < row.beat) return answer.underWay();
+      if (row !== undefined && !task.reclaim) return answer.unknown();
+      if (row !== undefined) {
+        // A person said the dead claim did nothing: it is dropped
+        this.db.prepare(`DELETE FROM ${this.table} WHERE "key" = ? AND state = 'started'`).run(task.key);
+      }
+      try {
+        this.db.prepare(`INSERT INTO ${this.table} ("key", state, answer, beat) VALUES (?, 'started', '', ?)`).run(task.key, task.until);
+      } catch {
+        // The loser of a race for the claim does not act
+        return answer.underWay();
+      }
+      return undefined;
+    });
+    if (claimed !== undefined) return claimed;
     const said = await step(task);
     if (later in said) {
       // It acts still, and answers later (Daemon.complete): the claim
@@ -443,7 +454,7 @@ export class Keeper {
       return said;
     }
     if (!("value" in said)) {
-      this.db.prepare(`DELETE FROM ${this.table} WHERE "key" = ? AND state = 'started'`).run(task.key);
+      await this.#exclusive(() => this.db.prepare(`DELETE FROM ${this.table} WHERE "key" = ? AND state = 'started'`).run(task.key));
       return said;
     }
     await this.answered(task, said);
@@ -455,22 +466,39 @@ export class Keeper {
    * Daemon.complete does first, given the Keeper, for a step that threw
    * Later. Only a value is kept.
    */
-  async answered(task: Task, said: Answer): Promise<void> {
-    if (!("value" in said)) return;
-    this.db.prepare(`UPDATE ${this.table} SET state = 'answered', answer = ? WHERE "key" = ?`).run(JSON.stringify(said), task.key);
+  answered(task: Task, said: Answer): Promise<void> {
+    return this.#exclusive(() => {
+      if (!("value" in said)) return;
+      this.db.prepare(`UPDATE ${this.table} SET state = 'answered', answer = ? WHERE "key" = ?`).run(JSON.stringify(said), task.key);
+    });
   }
 
   /** What became of an attempt under its key. */
-  probe(task: Task): Answer {
-    const row = this.#row(task.key);
-    if (row === undefined) return answer.unseen();
-    if (row.state === "answered") return JSON.parse(row.answer) as Answer;
-    if (Date.now() < row.beat) return answer.underWay();
-    return answer.unknown();
+  probe(task: Task): Promise<Answer> {
+    return this.#exclusive(() => {
+      const row = this.#row(task.key);
+      if (row === undefined) return answer.unseen();
+      if (row.state === "answered") return JSON.parse(row.answer) as Answer;
+      if (Date.now() < row.beat) return answer.underWay();
+      return answer.unknown();
+    });
   }
 
   /** Drops what is under a key: a person said what happened. */
-  forget(key: string): void {
-    this.db.prepare(`DELETE FROM ${this.table} WHERE "key" = ?`).run(key);
+  forget(key: string): Promise<void> {
+    return this.#exclusive(() => {
+      this.db.prepare(`DELETE FROM ${this.table} WHERE "key" = ?`).run(key);
+    });
+  }
+
+  /**
+   * Drops the answers older than the daemon keeps an ended instance.
+   *
+   * @param keep milliseconds, as a task's keep says
+   */
+  sweep(keep: number): Promise<void> {
+    return this.#exclusive(() => {
+      this.db.prepare(`DELETE FROM ${this.table} WHERE state = 'answered' AND beat < ?`).run(Date.now() - keep);
+    });
   }
 }
