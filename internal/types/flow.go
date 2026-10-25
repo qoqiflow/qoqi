@@ -439,14 +439,12 @@ func (c *Checker) collectFacts(cond ast.Expr, outcome bool, known facts) {
 		case "&&":
 			// Both sides are true only when the whole is true
 			if outcome {
-				c.collectFacts(e.Left, true, known)
-				c.collectFacts(e.Right, true, known)
+				c.collectBoth(e, true, known)
 			}
 		case "||":
 			// Both sides are false only when the whole is false
 			if !outcome {
-				c.collectFacts(e.Left, false, known)
-				c.collectFacts(e.Right, false, known)
+				c.collectBoth(e, false, known)
 			}
 		case "==", "!=":
 			tested := nullTested(e)
@@ -458,6 +456,23 @@ func (c *Checker) collectFacts(cond ast.Expr, outcome bool, known facts) {
 			}
 		}
 	}
+}
+
+// collectBoth learns what both sides of && or || say. What the left
+// says of a field holds after the right only if the right writes no field:
+// n.next != null && clear(n) leaves n.next as clear left it.
+func (c *Checker) collectBoth(e *ast.BinaryExpr, outcome bool, known facts) {
+	left := newFacts()
+	c.collectFacts(e.Left, outcome, left)
+	for sym, t := range left.vars {
+		known.vars[sym] = t
+	}
+	if !c.mayWriteFields(e.Right) {
+		for key, fact := range left.paths {
+			known.paths[key] = fact
+		}
+	}
+	c.collectFacts(e.Right, outcome, known)
 }
 
 // learn records that an expression has the given type, if it is something

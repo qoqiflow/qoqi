@@ -62,6 +62,14 @@ impl Box { fn holds<U>() -> Bool { return self.v is U; } }`, "a type parameter o
 fn as<U>(v: Any) -> U { return v as U; }
 struct Box { v: Any; }
 impl Box { fn get<U>() -> U { return as<U>(self.v); } }`, ""},
+		{"T5: what && learnt of a field, its right side writes", `
+struct Node { v: Int; next: Node?; }
+fn clear(n: Node) -> Bool { n.next = null; return true; }
+fn f(n: Node) -> Int { if n.next != null && clear(n) { return n.next.v; } return 0; }`, "may be null"},
+		{"T5: ...and kept when it writes none", `
+struct Node { v: Int; next: Node?; }
+fn ready(n: Node) -> Bool { return n.v > 0; }
+fn f(n: Node) -> Int { if n.next != null && ready(n) { return n.next.v; } return 0; }`, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			msgs, _ := checkSourceLoose(c.src)
