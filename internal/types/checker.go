@@ -54,6 +54,7 @@ const (
 	ErrPrivateField      = "E2042" // A field of a struct of another module that is not pub
 	ErrSelfOfATrait      = "E2045" // A method that takes Self, called on a value known only by its trait
 	ErrTypeArgCount      = "E2046" // A generic struct or enum written without its type arguments, or with others
+	ErrGenericValue      = "E2047" // A generic function taken as a value, its type parameters said by nothing
 )
 
 type Checker struct {
@@ -118,6 +119,9 @@ type Checker struct {
 	// The type arguments a generic struct written without them takes
 	// from where it stands, Box { v: 1 } as a Box<Int?>
 	literalArgs map[*ast.StructInitExpr][]Type
+	// callee is the name of the function a call calls, while it is
+	// checked: a generic one called is told its types by the call
+	callee *ast.Ident
 
 	// Flow typing (see flow.go): variables currently known to be non-null,
 	// and how often each variable has been assigned so far
@@ -1187,6 +1191,19 @@ func (c *Checker) declaredIdentType(id *ast.Ident) Type {
 		}
 	case resolve.SymbolFunc:
 		if fn, ok := sym.Decl.(*ast.FnDecl); ok {
+			if len(fn.TypeParams) > 0 && len(id.TypeArgs) != len(fn.TypeParams) && id != c.callee {
+				// Taken as a value, it is called later with what nothing
+				// here says: its type parameters would be anything, and
+				// what it requires of them unchecked
+				params := make([]string, len(fn.Params))
+				for i, p := range fn.Params {
+					params[i] = p.Name
+				}
+				c.errorfWithSuggestion(id.Token(), ErrGenericValue,
+					fmt.Sprintf("Write a function that calls it, of the types it is used with: (%s) -> %s(%s)", strings.Join(params, ", "), id.Name, strings.Join(params, ", ")),
+					"'%s' is generic: taken as a value, nothing says what its %s %s", id.Name, strings.Join(fn.TypeParams, ", "), map[bool]string{true: "is", false: "are"}[len(fn.TypeParams) == 1])
+				return Unknown
+			}
 			return c.functionType(fn, id)
 		}
 	case resolve.SymbolEnum:
@@ -1475,7 +1492,10 @@ func (c *Checker) checkCallExpr(e *ast.CallExpr) Type {
 	} else {
 		c.inferFunctionTypeArgs(e, expected)
 		c.checkCallBounds(e)
-		result = c.callValue(e, c.checkExpr(e.Func))
+		c.callee, _ = e.Func.(*ast.Ident)
+		callee := c.checkExpr(e.Func)
+		c.callee = nil
+		result = c.callValue(e, callee)
 		if c.isBuiltinCall(e, resolve.PushFunction) {
 			c.checkPush(e)
 		}

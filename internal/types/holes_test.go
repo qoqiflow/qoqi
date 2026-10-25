@@ -43,6 +43,15 @@ fn f() -> Box<Int?> { let b: Box<Int?> = Box { v: 1 }; return Box { v: null }; }
 		{"T2: too many", `
 struct Box<T> { v: T; }
 fn f(b: Box<Int, String>) -> Int { return 1; }`, "takes 1 type arguments"},
+		{"T3: a generic function taken as a value", `
+fn id<T>(x: T) -> T { return x; }
+fn f() -> Int { let g = id; return 1; }`, "is generic: taken as a value"},
+		{"T3: ...called, its types are the call's", `
+fn id<T>(x: T) -> T { return x; }
+fn f() -> Int { let s: String = id("a"); return id(1); }`, ""},
+		{"T3: ...in a function that calls it", `
+fn id<T>(x: T) -> T { return x; }
+fn f() -> Int { let g = (x: Int) -> id(x); return g(1); }`, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			msgs, _ := checkSourceLoose(c.src)

@@ -117,6 +117,7 @@ See [resuming with a fix](../concepts/failures.md#resuming-with-a-fix).
 | `E2044` | `wait` on what cannot be waited for |
 | `E2045` | A method that takes `Self` called on a value known only by its trait: any other implementor would be taken. Call it where the type is known, or on a type parameter, `fn f<T: Trait>(a: T, b: T)` |
 | `E2046` | A generic struct or enum written without its type arguments (`Box` for `Box<T>`), or with too many or too few |
+| `E2047` | A generic function taken as a value: nothing says what its type parameters are. Write a function that calls it, `(x: Int) -> id(x)` |
 | `E3001` | A generic function or type whose type arguments cannot be worked out |
 | `E3002` | Generic types that would make each other forever |
 | `E3003` | The wrong number of type arguments |
