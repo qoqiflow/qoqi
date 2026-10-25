@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS instances (
     awaits  TEXT NOT NULL DEFAULT '',
     held_by    TEXT NOT NULL DEFAULT '',
     held_until INTEGER NOT NULL DEFAULT 0,
-    held_as    TEXT NOT NULL DEFAULT ''
+    held_as    TEXT NOT NULL DEFAULT '',
+    changed    BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS instances_due ON instances(status, wake_at);
 CREATE TABLE IF NOT EXISTS versions (
@@ -80,7 +81,9 @@ CREATE TABLE IF NOT EXISTS deploys (
 CREATE INDEX IF NOT EXISTS deploys_by_name ON deploys(name, seq);
 `
 
-// Columns a file made before them has not: added, once.
+// Columns a file made before them has not: added, once. An index on an
+// added column is made here, after it, never in the schema: the schema
+// runs first, on a table that may not have the column yet.
 var added = []string{
 	`ALTER TABLE instances ADD COLUMN cancel TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE steps ADD COLUMN undo TEXT NOT NULL DEFAULT ''`,
@@ -93,6 +96,8 @@ var added = []string{
 	`ALTER TABLE instances ADD COLUMN held_by TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE instances ADD COLUMN held_until INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE instances ADD COLUMN held_as TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE instances ADD COLUMN changed INTEGER NOT NULL DEFAULT 0`,
+	`CREATE INDEX IF NOT EXISTS instances_changed ON instances(changed)`,
 }
 
 // Columns a server's tables made before them have not: added, once.
@@ -101,11 +106,15 @@ var addedOnServers = map[sqldb.Kind][]string{
 		`ALTER TABLE instances ADD COLUMN IF NOT EXISTS held_by TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE instances ADD COLUMN IF NOT EXISTS held_until BIGINT NOT NULL DEFAULT 0`,
 		`ALTER TABLE instances ADD COLUMN IF NOT EXISTS held_as TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE instances ADD COLUMN IF NOT EXISTS changed BIGINT NOT NULL DEFAULT 0`,
+		`CREATE INDEX IF NOT EXISTS instances_changed ON instances(changed)`,
 	},
 	sqldb.MySQL: {
 		`ALTER TABLE instances ADD COLUMN held_by VARCHAR(255) NOT NULL DEFAULT ''`,
 		`ALTER TABLE instances ADD COLUMN held_until BIGINT NOT NULL DEFAULT 0`,
 		`ALTER TABLE instances ADD COLUMN held_as VARCHAR(64) NOT NULL DEFAULT ''`,
+		`ALTER TABLE instances ADD COLUMN changed BIGINT NOT NULL DEFAULT 0`,
+		`CREATE INDEX instances_changed ON instances(changed)`,
 	},
 }
 
@@ -120,7 +129,8 @@ CREATE TABLE IF NOT EXISTS instances (
     awaits  TEXT NOT NULL DEFAULT '',
     held_by    TEXT NOT NULL DEFAULT '',
     held_until BIGINT NOT NULL DEFAULT 0,
-    held_as    TEXT NOT NULL DEFAULT ''
+    held_as    TEXT NOT NULL DEFAULT '',
+    changed    BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS instances_due ON instances(status, wake_at);
 CREATE TABLE IF NOT EXISTS versions (
@@ -187,7 +197,9 @@ CREATE TABLE IF NOT EXISTS instances (
     held_by    VARCHAR(255) NOT NULL DEFAULT '',
     held_until BIGINT NOT NULL DEFAULT 0,
     held_as    VARCHAR(64) NOT NULL DEFAULT '',
-    INDEX instances_due (status, wake_at)
+    changed    BIGINT NOT NULL DEFAULT 0,
+    INDEX instances_due (status, wake_at),
+    INDEX instances_changed (changed)
 )` + mysqlTable + `;
 CREATE TABLE IF NOT EXISTS versions (
     fingerprint VARCHAR(255) PRIMARY KEY,
@@ -258,7 +270,7 @@ func schemaOf(kind sqldb.Kind) []string {
 
 // tables are the names of the tables, and of the indexes, of a program's
 // store: the ones a prefix goes before.
-var tables = regexp.MustCompile(`\b(instances_due|instances|steps|versions|messages_waiting|messages|attempts_under_way|attempts)\b`)
+var tables = regexp.MustCompile(`\b(instances_due|instances_changed|instances|steps|versions|messages_waiting|messages|attempts_under_way|attempts)\b`)
 
 var (
 	// Words MySQL keeps for itself that are columns here: quoted there

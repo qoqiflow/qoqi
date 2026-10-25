@@ -122,6 +122,13 @@ func (s *SQL) makeTables() error {
 // holds is refused. The programs it opens after share it as well.
 func (s *SQL) ShareAs(holder string) { s.holder = holder }
 
+// changeStamp is when a write that changes what can be seen of an
+// instance is made, kept in its column changed: a daemon looks at those
+// changed since it last looked (ChangedSince), not at all of them.
+func changeStamp() int64 {
+	return time.Now().UnixMilli()
+}
+
 // ErrNotHeld is a save of an instance whose lease another daemon has
 // taken: this one stopped holding it, too long without a word, and the
 // other runs it now.
@@ -368,8 +375,8 @@ func (s *SQL) Create(inst *Instance) (bool, *Instance, error) {
 	if err != nil {
 		return false, nil, err
 	}
-	n, err := s.exec(s.q(`INSERT INTO instances (id, flow, status, wake_at, row) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`),
-		inst.ID, inst.Flow, string(inst.Status), inst.WakeAt, data)
+	n, err := s.exec(s.q(`INSERT INTO instances (id, flow, status, wake_at, row, changed) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`),
+		inst.ID, inst.Flow, string(inst.Status), inst.WakeAt, data, changeStamp())
 	if err != nil {
 		return false, nil, err
 	}
@@ -401,11 +408,11 @@ func (s *SQL) Save(inst *Instance) error {
 		}
 		// A cancellation asked while it ran makes one that sleeps or
 		// stopped due at once, to act on it
-		_, err := tx.Exec(s.q(`INSERT INTO instances (id, flow, status, wake_at, row, awaits) VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT (id) DO UPDATE SET flow = excluded.flow, row = excluded.row, awaits = excluded.awaits,
+		_, err := tx.Exec(s.q(`INSERT INTO instances (id, flow, status, wake_at, row, awaits, changed) VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET flow = excluded.flow, row = excluded.row, awaits = excluded.awaits, changed = excluded.changed,
 			status = CASE WHEN instances.cancel != '' AND ? = '' AND excluded.status IN ('waiting', 'stopped') THEN 'waiting' ELSE excluded.status END,
 			wake_at = CASE WHEN instances.cancel != '' AND ? = '' AND excluded.status IN ('waiting', 'stopped') THEN 0 ELSE excluded.wake_at END`),
-			inst.ID, inst.Flow, string(inst.Status), inst.WakeAt, data, awaited, untilTaken(inst), untilTaken(inst))
+			inst.ID, inst.Flow, string(inst.Status), inst.WakeAt, data, awaited, changeStamp(), untilTaken(inst), untilTaken(inst))
 		if err != nil {
 			return err
 		}
@@ -429,7 +436,7 @@ func (s *SQL) Save(inst *Instance) error {
 		if inst.Status == Done || inst.Status == Failed {
 			// Those that wait for it are due, in the same write
 			quoted, _ := json.Marshal(inst.ID)
-			if _, err := tx.Exec(s.q(`UPDATE instances SET wake_at = 0 WHERE status = 'waiting' AND instr(awaits, ?) > 0`), string(quoted)); err != nil {
+			if _, err := tx.Exec(s.q(`UPDATE instances SET wake_at = 0, changed = ? WHERE status = 'waiting' AND instr(awaits, ?) > 0`), changeStamp(), string(quoted)); err != nil {
 				return err
 			}
 		}
@@ -446,8 +453,8 @@ func (s *SQL) makeStarted(tx *sql.Tx, by string, child *Instance) error {
 	if err != nil {
 		return err
 	}
-	result, err := tx.Exec(s.q(`INSERT INTO instances (id, flow, status, wake_at, row) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`),
-		child.ID, child.Flow, string(child.Status), child.WakeAt, data)
+	result, err := tx.Exec(s.q(`INSERT INTO instances (id, flow, status, wake_at, row, changed) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`),
+		child.ID, child.Flow, string(child.Status), child.WakeAt, data, changeStamp())
 	if err != nil {
 		return err
 	}
@@ -484,7 +491,7 @@ var ErrStartedMeanwhile = errors.New("a name was taken meanwhile")
 // be written alone.
 func (s *SQL) wakeIfAnswered(tx *sql.Tx, inst *Instance) error {
 	wake := func() error {
-		_, err := tx.Exec(s.q(`UPDATE instances SET wake_at = 0 WHERE id = ?`), inst.ID)
+		_, err := tx.Exec(s.q(`UPDATE instances SET wake_at = 0, changed = ? WHERE id = ?`), changeStamp(), inst.ID)
 		return err
 	}
 	for _, name := range inst.Awaits {
@@ -587,10 +594,10 @@ func (s *SQL) Cancel(id, reason string, now int64) error {
 	// The first reason stands; one that waits or stopped is due at once.
 	// wake_at is set before status: MySQL reads, in an assignment, what
 	// those before it wrote
-	_, err = s.exec(s.q(`UPDATE instances SET cancel = ?,
+	_, err = s.exec(s.q(`UPDATE instances SET cancel = ?, changed = ?,
 		wake_at = CASE WHEN status IN ('waiting', 'stopped') THEN ? ELSE wake_at END,
 		status = CASE WHEN status IN ('waiting', 'stopped') THEN 'waiting' ELSE status END
-		WHERE id = ? AND cancel = '' AND status NOT IN ('done', 'failed')`), reason, now, id)
+		WHERE id = ? AND cancel = '' AND status NOT IN ('done', 'failed')`), reason, changeStamp(), now, id)
 	return err
 }
 
@@ -674,6 +681,21 @@ func (s *SQL) List(flow string, status Status) []*Instance {
 	if err != nil {
 		return nil
 	}
+	return instancesOf(rows)
+}
+
+// ChangedSince gives the instances written since a moment, by the index
+// on changed: what a daemon that looked at them all then has not seen.
+func (s *SQL) ChangedSince(since int64) []*Instance {
+	rows, err := s.db.Query(s.q(`SELECT id, flow, status, wake_at, row, cancel FROM instances WHERE changed >= ? ORDER BY id`), since)
+	if err != nil {
+		return nil
+	}
+	return instancesOf(rows)
+}
+
+// instancesOf reads the instances of a query of List or ChangedSince.
+func instancesOf(rows *sql.Rows) []*Instance {
 	defer rows.Close()
 	var out []*Instance
 	for rows.Next() {
@@ -736,7 +758,7 @@ func (s *SQL) Send(id, inbox, key string, data []byte, capacity int) (bool, erro
 		if _, err := tx.Exec(s.q(`INSERT INTO messages (instance, inbox, key, data) VALUES (?, ?, ?, ?)`), id, inbox, key, string(data)); err != nil {
 			return err
 		}
-		_, err := tx.Exec(s.q(`UPDATE instances SET wake_at = 0 WHERE id = ? AND status = 'waiting'`), id)
+		_, err := tx.Exec(s.q(`UPDATE instances SET wake_at = 0, changed = ? WHERE id = ? AND status = 'waiting'`), changeStamp(), id)
 		return err
 	})
 	return already, err

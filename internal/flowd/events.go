@@ -156,10 +156,10 @@ func (h *hub) output(id string, limit int) []Line {
 	return out
 }
 
-// observe sends an event for every instance that changed since it was
-// last looked at, and says those whose status changed.
-func (h *hub) observe(store flowrt.Store, program string) []Happened {
-	instances := store.List("", "")
+// observe sends an event for every instance given that changed since it
+// was last looked at, and says those whose status changed. Given those
+// written lately, or all of them (see Daemon.look).
+func (h *hub) observe(instances []*flowrt.Instance, program string) []Happened {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var happened []Happened

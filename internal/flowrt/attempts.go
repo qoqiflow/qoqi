@@ -352,7 +352,7 @@ func (s *SQL) AnswerAttempt(key string, attempt int, token string, answer []byte
 				return err
 			}
 			if a.State == Answered {
-				if _, err := tx.Exec(s.q(`UPDATE instances SET wake_at = 0 WHERE id = ? AND status = 'waiting'`), a.Instance); err != nil {
+				if _, err := tx.Exec(s.q(`UPDATE instances SET wake_at = 0, changed = ? WHERE id = ? AND status = 'waiting'`), changeStamp(), a.Instance); err != nil {
 					return err
 				}
 			}

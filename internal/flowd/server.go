@@ -55,6 +55,8 @@ type Daemon struct {
 	// happened. Without it, the daemon answers to its token alone
 	Keep *Keep
 
+	looks map[string]look // by program: when its instances were last looked at
+
 	accountsMu sync.Mutex // one change of the users at a time
 	logins     throttle
 	steps      stepCounts
@@ -253,7 +255,7 @@ func (d *Daemon) Run(ctx context.Context, tick time.Duration) error {
 		}
 		for _, p := range d.programs() {
 			_, err := p.Runtime.RunDue()
-			d.keepWhatHappened(d.hub.observe(p.Runtime.Store, p.Name))
+			d.keepWhatHappened(d.hub.observe(d.look(p), p.Name))
 			if err != nil {
 				d.mu.Lock()
 				d.failure = err
@@ -271,6 +273,44 @@ func (d *Daemon) Run(ctx context.Context, tick time.Duration) error {
 		case <-timer.C:
 		}
 	}
+}
+
+// How far back a look reaches before the last one, for writes stamped
+// before it and committed after; and how often every instance is looked
+// at, for a write a look missed, of a daemon whose clock runs ahead.
+const (
+	lookBack = 5 * time.Second
+	lookAll  = time.Minute
+)
+
+// look is when a program's instances were last looked at.
+type look struct {
+	at  int64     // the last look, in milliseconds
+	all time.Time // the last look at all of them
+}
+
+// look gives the instances of a program to look at for what changed:
+// those written since the last look (and lookBack before it), by the
+// store's index; all of them at the first look and every lookAll. A look
+// at every instance, at each tick, read each one's state twenty times a
+// second: most of what an idle daemon did, and more with each instance.
+// Run alone calls it.
+func (d *Daemon) look(p Program) []*flowrt.Instance {
+	if d.looks == nil {
+		d.looks = map[string]look{}
+	}
+	now := time.Now()
+	last, seen := d.looks[p.Name]
+	var instances []*flowrt.Instance
+	if !seen || now.Sub(last.all) >= lookAll {
+		instances = p.Runtime.Store.List("", "")
+		last.all = now
+	} else {
+		instances = p.Runtime.Store.ChangedSince(last.at - lookBack.Milliseconds())
+	}
+	last.at = now.UnixMilli()
+	d.looks[p.Name] = last
+	return instances
 }
 
 // drain lets the workers finish the instances they run, for a while: one

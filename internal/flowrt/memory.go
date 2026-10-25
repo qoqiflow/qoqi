@@ -43,6 +43,11 @@ type Store interface {
 	// List gives the instances, by name, of a flow and in a status when
 	// those are given ("" for any).
 	List(flow string, status Status) []*Instance
+	// ChangedSince gives at least the instances written since a moment,
+	// in milliseconds of the wall clock: their status, their wake, their
+	// cancellation, their state. Leases are not changes. A store may give
+	// more than those, never fewer.
+	ChangedSince(since int64) []*Instance
 	// Send keeps a message for an inbox of an instance, and makes the
 	// instance due if it waits. A key sent to that inbox before gives
 	// already, and nothing is kept; an instance that has ended is
@@ -420,6 +425,13 @@ func (m *Memory) Keys(prefix string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// ChangedSince gives every instance: Memory keeps no time of change, and
+// more than the changed ones is right. It serves tests and trials, whose
+// instances are few.
+func (m *Memory) ChangedSince(since int64) []*Instance {
+	return m.List("", "")
 }
 
 func (m *Memory) List(flow string, status Status) []*Instance {
