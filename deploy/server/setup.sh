@@ -68,14 +68,9 @@ if $first; then systemctl stop caddy; fi
 systemctl restart qoqi-demo
 
 # The console starts with admin, admin: it is given a password of its own,
-# kept for root alone, to be changed at the first sign in
-if [ ! -s /root/qoqi-demo-admin ]; then
-    for _ in $(seq 30); do [ -s /var/lib/qoqi/daemon.json ] && break; sleep 1; done
-    head -c 18 /dev/urandom | base64 | tr -d '/+=' > /root/qoqi-demo-admin
-    chmod 600 /root/qoqi-demo-admin
-    sudo -u qoqi QOQI_PATH=/var/lib/qoqi /usr/local/bin/qoqi users passwd admin --password-stdin < /root/qoqi-demo-admin
-    echo "The password of admin on demo.qoqi.dev is in /root/qoqi-demo-admin"
-fi
+# kept for root alone, to be changed at the first sign in. Caddy starts
+# again only once it has it (set -e)
+sh "$here/demo-admin.sh"
 systemctl start caddy
 
 echo "== done"

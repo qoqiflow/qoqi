@@ -66,7 +66,7 @@ test-unit:
 	@$(GO) test -timeout $(TEST_TIMEOUT) ./internal/... ./pkg/...
 
 test-e2e:
-	@$(GO) test -timeout $(TEST_TIMEOUT) ./test/e2e ./test/fuzz ./test/bench
+	@$(GO) test -timeout $(TEST_TIMEOUT) ./test/e2e ./test/fuzz ./test/bench ./test/deploy
 
 # The race detector also checks every conversion of a number into a
 # pointer, which is how the VM keeps its objects in its values: that
