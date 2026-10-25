@@ -52,6 +52,7 @@ const (
 	ErrMatchValue        = "E2040" // A match that gives a value with a case that gives none
 	ErrAmbiguousVariant  = "E2041" // A variant written alone that several enums have, and nothing says which
 	ErrPrivateField      = "E2042" // A field of a struct of another module that is not pub
+	ErrSelfOfATrait      = "E2045" // A method that takes Self, called on a value known only by its trait
 )
 
 type Checker struct {

@@ -115,6 +115,7 @@ See [resuming with a fix](../concepts/failures.md#resuming-with-a-fix).
 | `E2042` | A field of a struct of another module that is not `pub` |
 | `E2043` | A waitable made and thrown away: put `wait` before it |
 | `E2044` | `wait` on what cannot be waited for |
+| `E2045` | A method that takes `Self` called on a value known only by its trait: any other implementor would be taken. Call it where the type is known, or on a type parameter, `fn f<T: Trait>(a: T, b: T)` |
 | `E3001` | A generic function or type whose type arguments cannot be worked out |
 | `E3002` | Generic types that would make each other forever |
 | `E3003` | The wrong number of type arguments |

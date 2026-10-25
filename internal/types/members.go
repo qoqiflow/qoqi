@@ -263,6 +263,15 @@ func (c *Checker) checkMethodCall(e *ast.CallExpr, member *ast.MemberExpr, expec
 
 	case *BehaviorType:
 		if ft, ok := c.methodType(t, member.Name, c.methodTypeArgs(t, member, e, expected)); ok {
+			if decl := c.methodDecl(t, member.Name); decl != nil && takesSelf(decl) && !isSelf(member.Expr) {
+				// Self is the receiver's own type, which a value known by
+				// its trait does not say: any other implementor would pass
+				c.errorfWithSuggestion(member.Token(), ErrSelfOfATrait,
+					fmt.Sprintf("Call it where the type is known, or on a type parameter: fn f<T: %s>(a: T, b: T)", displayName(t.Name)),
+					"'%s' takes a %s of the receiver's own type (Self), which a value known as a %s does not say", member.Name, displayName(t.Name), displayName(t.Name))
+				c.checkArgsOnly(e)
+				return Unknown
+			}
 			c.info.Types[member] = ft
 			return c.checkArgs(e, ft)
 		}
@@ -1228,4 +1237,38 @@ func describe(t Type) string {
 		}
 	}
 	return t.String()
+}
+
+// takesSelf says whether a method takes a value of the receiver's own
+// type, Self, or one made of it: [Self], Self?.
+func takesSelf(decl *ast.FnDecl) bool {
+	for _, param := range decl.Params {
+		if mentionsSelf(param.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+func mentionsSelf(t *ast.Type) bool {
+	if t == nil {
+		return false
+	}
+	if t.Name == "Self" {
+		return true
+	}
+	for _, inner := range append(append(append([]*ast.Type{t.ElemType}, t.Generics...), t.UnionTypes...), t.ParamTypes...) {
+		if mentionsSelf(inner) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSelf says whether an expression is self: in a method of a trait, its
+// Self is the type of the value it is called on, and of other values of
+// Self there.
+func isSelf(e ast.Expr) bool {
+	ident, ok := e.(*ast.Ident)
+	return ok && ident.Name == "self"
 }
