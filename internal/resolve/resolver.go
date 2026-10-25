@@ -17,6 +17,7 @@ const (
 	ErrUnusableName  = "E1003" // A pattern names a value where nothing could use the name
 	ErrUnused        = "E1004" // A variable, a parameter or a name of a pattern nothing uses (a warning)
 	ErrNotAConstant  = "E1005" // A name a case compares with that is not a constant
+	ErrPanicName     = "E1006" // A variable, a parameter or a function named panic
 )
 
 type Resolver struct {
@@ -141,6 +142,13 @@ func (r *Resolver) resolveTopLevel(prog *ast.Program) {
 }
 
 func (r *Resolver) declare(name string, kind SymbolKind, node ast.Node) {
+	if name == "panic" && r.ownCode {
+		// What follows a call of panic is known never to run, by its name:
+		// a panic of the program's own would make that wrong
+		d := errors.NewDiagnosticFromToken(errors.SeverityError, ErrPanicName, "panic is the language's: it ends the program, and nothing may be named so", node.Token(), r.sourceLines)
+		d.Suggestion = "Give it another name: fail, abort, stop"
+		r.errs.Add(d)
+	}
 	sym := &Symbol{
 		Name: name,
 		Kind: kind,

@@ -84,6 +84,11 @@ fn f(xs: [Int]) -> Int {
         if xs[0] > 3 { return 1; }
     }
 }`, ""},
+		{"T7: a variable named panic", `
+struct Node { v: Int; }
+fn f(n: Node?) -> Int { let panic = fn(s: String) { }; if n == null { panic("x"); } return n.v; }`, "nothing may be named so"},
+		{"T7: ...a parameter", `
+fn f(panic: fn(String)) -> Int { return 1; }`, "nothing may be named so"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			msgs, _ := checkSourceLoose(c.src)

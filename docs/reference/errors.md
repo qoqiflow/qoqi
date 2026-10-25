@@ -71,6 +71,7 @@ See [resuming with a fix](../concepts/failures.md#resuming-with-a-fix).
 | `E1003` | A pattern names a value where nothing could use the name |
 | `E1004` | A variable, parameter or name of a pattern nothing uses (a warning) |
 | `E1005` | A name alone as the pattern of a case that is not a constant declared at the top level (a variable, a parameter, a function): compare it in a condition, `case Int if n == limit:` |
+| `E1006` | A variable, a parameter or a function named `panic`: what follows a call of `panic` is known never to run, by its name |
 | `E2001` | Types do not match |
 | `E2002` | `return` outside a function |
 | `E2003` | A return of the wrong type |
