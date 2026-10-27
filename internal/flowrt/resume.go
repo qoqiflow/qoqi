@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/qoqiflow/qoqi/internal/vm"
@@ -41,12 +42,7 @@ func (r *Runtime) Resume(id string) error {
 			return err
 		}
 	}
-	if w.untake {
-		// What it took since its stage, it takes again
-		if err := r.Store.Untake(id, w.Pass); err != nil {
-			return err
-		}
-	}
+	// What it took since its stage, given back by the same write
 	return r.Store.Save(w)
 }
 
@@ -82,28 +78,42 @@ func (r *Runtime) resumed(id string) (*Instance, []string, error) {
 		return w, forget, nil
 	}
 
-	newest, err := r.newestVersion()
+	back, err := r.backToStage(inst, w)
 	if err != nil {
 		return nil, nil, err
+	}
+	if back == nil {
+		return nil, nil, fmt.Errorf("%s: stage %s of %s is not in the newest version as it was, and no migrate fn takes an instance there: cancel %s, or serve the version it runs", ErrStageGone, inst.AtStage.Name, inst.Flow, id)
+	}
+	return back, nil, nil
+}
+
+// backToStage is an instance taken back to its last stage, in the newest
+// version, to be played again from there: through a migration, if that
+// version changed the stage; from the beginning of run, before its first
+// stage. w is the instance as it is to be written, inst as it was. Nil
+// when the newest version has not the stage as it was, and no migration
+// takes the instance there.
+func (r *Runtime) backToStage(inst, w *Instance) (*Instance, error) {
+	newest, err := r.newestVersion()
+	if err != nil {
+		return nil, err
 	}
 	at := w.AtStage
 	if at != nil && w.Version != "" && w.Version != newest {
 		old, err := r.chunkOf(inst)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if !sameShape(old, r.Chunk, w.Flow, at.Name) {
 			moved, err := r.migrate(old, w.Flow, at)
-			if err != nil {
-				return nil, nil, err
-			}
-			if moved == nil {
-				return nil, nil, fmt.Errorf("%s: stage %s of %s is not in the newest version as it was, and no migrate fn takes an instance there: cancel %s, or serve the version it runs", ErrStageGone, at.Name, w.Flow, id)
+			if err != nil || moved == nil {
+				return nil, err
 			}
 			at = moved
 		}
 	}
-	w.Version, w.State, w.Counts, w.Replaying = newest, nil, map[string]int{}, true
+	w.Version, w.State, w.Counts, w.Replaying, w.Found = newest, nil, map[string]int{}, true, nil
 	w.untake = true
 	// What its tasks drew since the stage, they are given back, in order:
 	// what a replay stopped before giving back follows what it drew
@@ -128,7 +138,7 @@ func (r *Runtime) resumed(id string) (*Instance, []string, error) {
 		// Before its first stage: from the beginning of run
 		w.Pass, w.Undos = 0, nil
 	}
-	return w, nil, nil
+	return w, nil
 }
 
 // End ends a stopped instance as it is, with no more undos: for when a
@@ -187,6 +197,13 @@ type DryRun struct {
 	Forget []string `json:"forget,omitempty"`
 	// Stopped is what would stop it again, if anything would
 	Stopped string `json:"stopped,omitempty"`
+
+	// For a move (see move.go): the messages given back to it, those it
+	// took, whether it would end, and, still replaying where it stops,
+	// the steps done that it has not asked for again
+	given, took []int64
+	ended       bool
+	left        []string
 }
 
 // errDry stops a dry run where something would leave.
@@ -203,19 +220,34 @@ func (r *Runtime) DryResume(id string) (*DryRun, error) {
 	if err != nil {
 		return nil, err
 	}
+	return r.dryRun(w, forget)
+}
+
+// dryRun runs an instance as it is to be written, w, in memory, up to the
+// first step that would leave or the first wait that would wait: what it
+// would take, and do then. What it took since its stage, w being taken
+// back there, it takes again; the results of forget are not found.
+func (r *Runtime) dryRun(w *Instance, forget []string) (*DryRun, error) {
 	report := &DryRun{Forget: forget}
-	store := &dryStore{Store: r.Store, instances: map[string]*Instance{id: w}, forgotten: map[string]bool{}}
+	store := &dryStore{Store: r.Store, instances: map[string]*Instance{w.ID: w}, forgotten: map[string]bool{}}
 	for _, key := range forget {
 		store.forgotten[key] = true
 	}
+	if w.untake {
+		store.retaking, store.retake = w.ID, r.Store.Taken(w.ID, w.Pass)
+		for _, msg := range store.retake {
+			report.given = append(report.given, msg.Seq)
+		}
+	}
 	dry := &Runtime{Chunk: r.Chunk, Store: store, Out: io.Discard, Now: r.Now, MaxTries: r.MaxTries, Replace: r.Replace, dry: report}
-	if err := dry.take(id); err != nil && !errors.Is(err, errDry) {
+	if err := dry.take(w.ID); err != nil && !errors.Is(err, errDry) {
 		return nil, err
 	}
-	if after, ok := store.instances[id]; ok && after.Status == Stopped {
+	after, ok := store.instances[w.ID]
+	if ok && after.Status == Stopped {
 		report.Stopped = after.Stopped
 	}
-	if after, ok := store.instances[id]; ok && len(report.Next) == 0 {
+	if ok && len(report.Next) == 0 {
 		switch after.Status {
 		case Done:
 			report.Next = append(report.Next, "it would end: "+string(after.Result))
@@ -223,14 +255,42 @@ func (r *Runtime) DryResume(id string) (*DryRun, error) {
 			report.Next = append(report.Next, "it would end, failed")
 		}
 	}
+	if ok && after.ended() {
+		// Ended, its replay checked at the end: what it took was written
+		report.ended = true
+		for _, taken := range after.Taking {
+			report.took = append(report.took, taken.Seq)
+		}
+	}
 	return report, nil
 }
 
-// dryStore reads a store and keeps what is written to it to itself.
+// dryStore reads a store and keeps what is written to it to itself. The
+// messages an instance taken back to its stage took since, retake, it
+// finds in their inboxes again.
 type dryStore struct {
 	Store
 	instances map[string]*Instance
 	forgotten map[string]bool
+	retaking  string
+	retake    []Message
+}
+
+func (d *dryStore) Messages(id, inbox string) []Message {
+	out := d.Store.Messages(id, inbox)
+	if id != d.retaking {
+		return out
+	}
+	var again []Message
+	for _, msg := range d.retake {
+		if msg.Inbox == inbox {
+			again = append(again, msg)
+		}
+	}
+	// In the order they came
+	all := append(again, out...)
+	sort.Slice(all, func(i, j int) bool { return all[i].Seq < all[j].Seq })
+	return all
 }
 
 func (d *dryStore) Get(id string) (*Instance, bool, error) {
@@ -269,7 +329,6 @@ func (d *dryStore) Mark(key string, attempt int, _ AttemptState, _ string) (Atte
 func (d *dryStore) ForgetResult(string) error          { return nil }
 func (d *dryStore) Cancel(string, string, int64) error { return nil }
 func (d *dryStore) PutVersion(string, []byte) error    { return nil }
-func (d *dryStore) Untake(string, int) error           { return nil }
 func (d *dryStore) Send(string, string, string, []byte, int) (bool, error) {
 	return false, nil
 }

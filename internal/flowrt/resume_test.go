@@ -287,3 +287,79 @@ func TestEnding(t *testing.T) {
 		t.Errorf("expected failed, got %s %q", inst.Status, inst.Ended)
 	}
 }
+
+// A resume that waits before its next stage: what it found by key
+// before the wait is kept with it, and the end of its replay, after the
+// wait, does not take it for something not asked for.
+func TestAResumeThatWaits(t *testing.T) {
+	waits := func(mistake string) string {
+		return `
+import std.flow.{Flow};
+import std.time;
+
+struct Note { n: Int; }
+
+impl Flow<Int> for Note {
+    fn run() -> Int {
+        stage writing;
+        let at = write(self.n);
+        ` + mistake + `
+        wait time.after(1.hours());
+        return at;
+    }
+}
+
+step fn write(n: Int) -> Int {
+    println("WORLD write", n);
+    return n + 4;
+}
+
+fn main() {}
+`
+	}
+	var out bytes.Buffer
+	store := flowrt.NewMemory()
+	clock := handClock(1_000_000)
+	rt := noticeRuntime(t, waits(`let wrong = [1][at];`), store, clock, &out)
+	if _, err := rt.Start("n1", "Note", []byte(`{"n": 1}`)); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, rt)
+	if inst, _, _ := store.Get("n1"); inst.Status != flowrt.Stopped {
+		t.Fatalf("expected it stopped by its mistake, got %s", inst.Status)
+	}
+
+	fixed := noticeRuntime(t, waits(``), store, clock, &out)
+	if err := fixed.Resume("n1"); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, fixed)
+	if inst, _, _ := store.Get("n1"); inst.Status != flowrt.Waiting || !inst.Replaying {
+		t.Fatalf("expected it waiting, still replaying, got %s %q", inst.Status, inst.Stopped)
+	}
+	clock.Add(60 * 60 * 1000)
+	settle(t, fixed)
+	inst, _, _ := store.Get("n1")
+	if inst.Status != flowrt.Done || string(inst.Result) != "5" {
+		t.Fatalf("expected done with 5, got %s %s %q", inst.Status, inst.Result, inst.Stopped)
+	}
+	if got := worldLines(out.String()); strings.Join(got, "|") != "WORLD write 1" {
+		t.Errorf("expected one write, got %v", got)
+	}
+}
+
+// settle runs what is due until nothing is: the clock, a test's, does
+// not move meanwhile.
+func settle(t *testing.T, rt *flowrt.Runtime) {
+	t.Helper()
+	for range 20 {
+		n, err := rt.RunDue()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			return
+		}
+	}
+	t.Fatal("still due after 20 rounds")
+}

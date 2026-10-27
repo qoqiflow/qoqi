@@ -85,6 +85,10 @@ type Instance struct {
 	// has not passed the next one yet: what its steps are asked is
 	// compared with what they were, and what they gave has to be taken
 	Replaying bool
+	// Found are, while it replays, the keys of the steps it found done:
+	// kept with it, so that a replay that waits, or is taken up again
+	// after its process stopped, knows at its next stage what it asked
+	Found []string
 
 	// Drawn are the values its tasks drew without a step since AtStage,
 	// the time and random numbers, by task, in the order each drew them:
@@ -150,6 +154,7 @@ func (i *Instance) copy() *Instance {
 	c.Undos = append([]vm.Undo(nil), i.Undos...)
 	c.Children = append([]string(nil), i.Children...)
 	c.Awaits = append([]string(nil), i.Awaits...)
+	c.Found = append([]string(nil), i.Found...)
 	if i.AtStage != nil {
 		at := *i.AtStage
 		c.AtStage = &at
@@ -1082,6 +1087,20 @@ func (r *Runtime) takeHeld(id string) error {
 	pass, atStage := inst.Pass, inst.AtStage
 	// A replay: what was kept since the stage, and what it took of it
 	replaying, taken := inst.Replaying, map[string]bool{}
+	for _, key := range inst.Found {
+		taken[key] = true
+	}
+	found := func() []string {
+		if !replaying {
+			return nil
+		}
+		keys := make([]string, 0, len(taken))
+		for key := range taken {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		return keys
+	}
 	// What its tasks drew since the stage, and what a replay gives back
 	drawn, giving := copyDrawn(inst.Drawn), copyDrawn(inst.Giving)
 
@@ -1121,7 +1140,7 @@ func (r *Runtime) takeHeld(id string) error {
 		w.Counts, w.Tries, w.Retried, w.Working = copyCounts(counts), copyCounts(tries), copyMoments(retried), copyMoments(working)
 		w.Undos = append([]vm.Undo(nil), undos...)
 		w.Children, w.Awaits = append([]string(nil), children...), m.Awaited()
-		w.Pass, w.AtStage, w.Replaying = pass, atStage, replaying
+		w.Pass, w.AtStage, w.Replaying, w.Found = pass, atStage, replaying, found()
 		w.Drawn, w.Giving = copyDrawn(drawn), copyDrawn(giving)
 		w.Taking, taking = taking, nil
 		w.Starting, starting = starting, nil
@@ -1579,7 +1598,7 @@ func (r *Runtime) takeHeld(id string) error {
 	at := inst.copy()
 	at.Counts, at.Tries, at.Retried, at.Working = copyCounts(counts), copyCounts(tries), copyMoments(retried), copyMoments(working)
 	at.Children, at.Awaits = children, nil
-	at.Pass, at.AtStage, at.Replaying = pass, atStage, replaying
+	at.Pass, at.AtStage, at.Replaying, at.Found = pass, atStage, replaying, found()
 	at.Drawn, at.Giving = drawn, giving
 	at.Taking = taking
 	at.Starting = starting
@@ -1587,7 +1606,7 @@ func (r *Runtime) takeHeld(id string) error {
 	if err == nil {
 		// Run ended: a replay ends here too
 		err = replayed()
-		at.Replaying, at.Giving = replaying, giving
+		at.Replaying, at.Giving, at.Found = replaying, giving, found()
 	}
 	var frozen *vm.FrozenError
 	var stop *cancelled

@@ -344,6 +344,7 @@ type row struct {
 	Pass     int              `json:"pass,omitempty"`
 	Version  string           `json:"version,omitempty"`
 	Taken    bool             `json:"cancelTaken,omitempty"`
+	Found    []string         `json:"found,omitempty"`
 	Replay   bool             `json:"replaying,omitempty"`
 	Ended    string           `json:"ended,omitempty"`
 	AtStage  *AtStage         `json:"atStage,omitempty"`
@@ -354,7 +355,7 @@ type row struct {
 }
 
 func rowOf(inst *Instance) (string, error) {
-	r := row{Birth: inst.Birth, Fields: inst.Fields, State: inst.State, Counts: inst.Counts, Tries: inst.Tries, Retried: inst.Retried, Working: inst.Working, Result: inst.Result, Stopped: inst.Stopped, Phase: inst.Phase, Undos: inst.Undos, Parent: inst.Parent, Children: inst.Children, Awaits: inst.Awaits, Pass: inst.Pass, AtStage: inst.AtStage, Version: inst.Version, Replay: inst.Replaying, Ended: inst.Ended, Taken: inst.CancelTaken, Drawn: inst.Drawn, Giving: inst.Giving}
+	r := row{Birth: inst.Birth, Fields: inst.Fields, State: inst.State, Counts: inst.Counts, Tries: inst.Tries, Retried: inst.Retried, Working: inst.Working, Result: inst.Result, Stopped: inst.Stopped, Phase: inst.Phase, Undos: inst.Undos, Parent: inst.Parent, Children: inst.Children, Awaits: inst.Awaits, Pass: inst.Pass, AtStage: inst.AtStage, Version: inst.Version, Replay: inst.Replaying, Found: inst.Found, Ended: inst.Ended, Taken: inst.CancelTaken, Drawn: inst.Drawn, Giving: inst.Giving}
 	data, err := json.Marshal(r)
 	return string(data), err
 }
@@ -367,7 +368,7 @@ func instanceOf(id, flow, status string, wakeAt int64, data, cancel string) (*In
 	return &Instance{
 		ID: id, Birth: r.Birth, Flow: flow, Status: Status(status), WakeAt: wakeAt,
 		Fields: r.Fields, State: r.State, Counts: r.Counts, Tries: r.Tries, Retried: r.Retried, Working: r.Working,
-		Result: r.Result, Stopped: r.Stopped, Phase: r.Phase, Undos: r.Undos, Cancel: cancel, Parent: r.Parent, Children: r.Children, Awaits: r.Awaits, Pass: r.Pass, AtStage: r.AtStage, Version: r.Version, Replaying: r.Replay, Ended: r.Ended, CancelTaken: r.Taken, Drawn: r.Drawn, Giving: r.Giving,
+		Result: r.Result, Stopped: r.Stopped, Phase: r.Phase, Undos: r.Undos, Cancel: cancel, Parent: r.Parent, Children: r.Children, Awaits: r.Awaits, Pass: r.Pass, AtStage: r.AtStage, Version: r.Version, Replaying: r.Replay, Found: r.Found, Ended: r.Ended, CancelTaken: r.Taken, Drawn: r.Drawn, Giving: r.Giving,
 	}, nil
 }
 
@@ -426,6 +427,12 @@ func (s *SQL) Save(inst *Instance) error {
 		// The instances it started since its last write: made with this one
 		for _, child := range inst.Starting {
 			if err := s.makeStarted(tx, inst.ID, child); err != nil {
+				return err
+			}
+		}
+		if inst.untake {
+			// Taken back to its stage: what it took since, it takes again
+			if _, err := tx.Exec(s.q(`UPDATE messages SET taken = 0 WHERE instance = ? AND taken = 1 AND pass >= ?`), inst.ID, inst.Pass); err != nil {
 				return err
 			}
 		}
@@ -772,7 +779,15 @@ func (s *SQL) Send(id, inbox, key string, data []byte, capacity int) (bool, erro
 }
 
 func (s *SQL) Messages(id, inbox string) []Message {
-	rows, err := s.db.Query(s.q(`SELECT seq, data FROM messages WHERE instance = ? AND inbox = ? AND taken = 0 ORDER BY seq`), id, inbox)
+	return s.messages(`SELECT seq, inbox, data FROM messages WHERE instance = ? AND inbox = ? AND taken = 0 ORDER BY seq`, id, inbox)
+}
+
+func (s *SQL) Taken(id string, fromPass int) []Message {
+	return s.messages(`SELECT seq, inbox, data FROM messages WHERE instance = ? AND taken = 1 AND pass >= ? ORDER BY seq`, id, fromPass)
+}
+
+func (s *SQL) messages(query string, args ...any) []Message {
+	rows, err := s.db.Query(s.q(query), args...)
 	if err != nil {
 		return nil
 	}
@@ -781,17 +796,12 @@ func (s *SQL) Messages(id, inbox string) []Message {
 	for rows.Next() {
 		var msg Message
 		var data string
-		if rows.Scan(&msg.Seq, &data) == nil {
+		if rows.Scan(&msg.Seq, &msg.Inbox, &data) == nil {
 			msg.Data = []byte(data)
 			out = append(out, msg)
 		}
 	}
 	return out
-}
-
-func (s *SQL) Untake(id string, fromPass int) error {
-	_, err := s.exec(s.q(`UPDATE messages SET taken = 0 WHERE instance = ? AND taken = 1 AND pass >= ?`), id, fromPass)
-	return err
 }
 
 // untilTaken is what makes an instance due for its cancellation: its

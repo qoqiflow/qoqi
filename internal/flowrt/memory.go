@@ -56,9 +56,11 @@ type Store interface {
 	// Messages are the messages of an inbox not taken yet, in the order
 	// they came.
 	Messages(id, inbox string) []Message
-	// Untake gives back to their inboxes the messages an instance took
-	// from a pass on: an instance resumed from its stage takes them again.
-	Untake(id string, fromPass int) error
+	// Taken are the messages an instance took from a pass on, in the
+	// order they came: those an instance played again from its stage
+	// takes again. A save of an instance taken back to its stage gives
+	// them back to their inboxes, in the same write
+	Taken(id string, fromPass int) []Message
 
 	// PutAttempt writes an attempt of a step by a queue before it
 	// leaves, and gives up the one before it under its key. Attempt
@@ -112,10 +114,11 @@ var (
 	ErrFull  = errors.New("the inbox is full")
 )
 
-// Message is a message an instance has not taken yet.
+// Message is a message of an inbox of an instance.
 type Message struct {
-	Seq  int64
-	Data []byte
+	Seq   int64
+	Inbox string
+	Data  []byte
 }
 
 // Taken is a message an instance took, in a pass: marked taken by the
@@ -214,6 +217,14 @@ func (m *Memory) Save(inst *Instance) error {
 			m.instances[child.ID] = child.copy()
 		}
 	}
+	if inst.untake {
+		// Taken back to its stage: what it took since, it takes again
+		for _, msg := range m.messages[inst.ID] {
+			if msg.taken && msg.pass >= inst.Pass {
+				msg.taken = false
+			}
+		}
+	}
 	for _, taken := range inst.Taking {
 		for _, msg := range m.messages[inst.ID] {
 			if msg.seq == taken.Seq {
@@ -222,7 +233,7 @@ func (m *Memory) Save(inst *Instance) error {
 		}
 	}
 	saved := inst.copy()
-	saved.Taking, saved.Starting = nil, nil
+	saved.Taking, saved.Starting, saved.untake = nil, nil, false
 	saved.Cancel = ""
 	if old, ok := m.instances[inst.ID]; ok {
 		saved.Cancel = old.Cancel
@@ -502,21 +513,22 @@ func (m *Memory) Messages(id, inbox string) []Message {
 	var out []Message
 	for _, msg := range m.messages[id] {
 		if msg.inbox == inbox && !msg.taken {
-			out = append(out, Message{Seq: msg.seq, Data: append([]byte(nil), msg.data...)})
+			out = append(out, Message{Seq: msg.seq, Inbox: inbox, Data: append([]byte(nil), msg.data...)})
 		}
 	}
 	return out
 }
 
-func (m *Memory) Untake(id string, fromPass int) error {
+func (m *Memory) Taken(id string, fromPass int) []Message {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var out []Message
 	for _, msg := range m.messages[id] {
 		if msg.taken && msg.pass >= fromPass {
-			msg.taken = false
+			out = append(out, Message{Seq: msg.seq, Inbox: msg.inbox, Data: append([]byte(nil), msg.data...)})
 		}
 	}
-	return nil
+	return out
 }
 
 // Deployed is a deploy of a program: its version, when, what was
