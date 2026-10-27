@@ -20,7 +20,8 @@ const (
 
 	// WarnLoopWithoutStage is a loop of run that waits, with no stage in
 	// it or around it: the instance keeps all it did since it started,
-	// and never moves to a new version.
+	// and moves to a new version only by being played again from its
+	// start.
 	WarnLoopWithoutStage = "W0011"
 )
 
@@ -140,7 +141,7 @@ func (s *stageWalk) loop(at token.Token, body *ast.BlockStmt, inDefer bool, loop
 			at = firstToken(body)
 		}
 		d := errors.NewDiagnosticFromToken(errors.SeverityWarning, WarnLoopWithoutStage,
-			fmt.Sprintf("a loop of %s waits with no stage in it: the instance keeps everything it did since it started, and never moves to a new version", name(s.run)),
+			fmt.Sprintf("a loop of %s waits with no stage in it: the instance keeps everything it did since it started, and moves to a new version only by being played again from its start", name(s.run)),
 			at, s.c.linesOf(at))
 		d.Function = name(s.run)
 		d.Suggestion = "Write `stage <name>;` at the top of the loop's body, named after what the flow is doing there"

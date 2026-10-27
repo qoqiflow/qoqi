@@ -37,6 +37,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/auth/auth';
 import { api, ApiError } from '@/lib/api';
+import { movesSaid } from '@/lib/describe';
 import { useWorkspace } from '@/lib/queries';
 import { relative, useNow } from '@/lib/time';
 import type { Checked, DraftDeploy, Problem, TestRun, WorkspaceProgram } from '@/lib/types';
@@ -755,8 +756,17 @@ function DeployDialog({
                   ? `A new program: the daemon starts to serve ${plan.flows.join(', ')}.`
                   : report.same
                     ? 'This is the version served already: there is nothing to deploy.'
-                    : `In place of version ${report.before?.replace(/^sha256:/, '').slice(0, 8)}: ${report.moving} instance${report.moving === 1 ? '' : 's'} alive move${report.moving === 1 ? 's' : ''} to it at their next stage.`}
+                    : movesSaid(report, true)}
               </p>
+            )}
+            {(report?.staying?.length ?? 0) > 0 && (
+              <ul className="grid gap-1 rounded-lg bg-muted p-3 text-xs">
+                {report!.staying!.slice(0, 5).map((m) => (
+                  <li key={m.id}>
+                    <span className="font-mono">{m.id}</span>: {m.why}
+                  </li>
+                ))}
+              </ul>
             )}
             {(report?.changes?.length ?? 0) > 0 && (
               <div className="grid gap-1">

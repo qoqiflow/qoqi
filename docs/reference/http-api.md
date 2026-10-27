@@ -53,7 +53,7 @@ The instances, sorted by name. `?flow=Expense`, `?status=waiting`.
 ]
 ```
 
-Besides `id`, `flow`, `status` and `birth`, a field is there when it has a value: `wakeAt`, `fields`, `result`, `stopped` (why), `steps`, `undos`, `cancel`, `parent`, `children`, `stage`, `pass`, `version`, `ended`.
+Besides `id`, `flow`, `status` and `birth`, a field is there when it has a value: `wakeAt`, `fields`, `result`, `stopped` (why), `steps`, `undos`, `cancel`, `parent`, `children`, `stage`, `pass`, `version`, `behind` (alive on an older version than the one served), `ended`.
 
 ### `POST /api/instances`
 
@@ -71,7 +71,7 @@ Starts one: `{"flow": "Expense", "id": "expense:1", "fields": {"id": "1", "autho
 
 ### `GET /api/instances/{id}`
 
-The instance, and for people: `tasks` (where each is, its calls and their lines), `kept` (what its steps returned, by key), `tries`, `retries`, `output` (its last 200 lines). `404` if there is none.
+The instance, and for people: `tasks` (where each is, its calls and their lines), `kept` (what its steps returned, by key), `tries`, `retries`, `output` (its last 200 lines), and for one `behind`, `stays`: why it does not move to the version served while it waits ([versions](../concepts/versioning.md)). `404` if there is none.
 
 ### `GET /api/instances/{id}/result`
 
@@ -120,7 +120,7 @@ The flows served, with how many instances are in each status: `[{"name": "Expens
 
 ### `POST /api/deploy`
 
-What `qoqi deploy` sends: `{"programs": [...], "dry": false}`, each program compiled by the command. The answer is `{"reports": [{"program", "version", "before", "new", "same", "changes", "moving", "lock"}]}`. `409 refused` when a version changes the shape of a stage that an alive instance may be at, with no migration.
+What `qoqi deploy` sends: `{"programs": [...], "dry": false}`, each program compiled by the command. The answer is `{"reports": [{"program", "version", "before", "new", "same", "changes", "moved", "moving", "staying", "lock"}]}`: `moved`, the instances alive on another version that moved to it while they waited (dry, that would); `moving`, those that move at their next stage, and `staying`, the first 50 of them, `{"id", "flow", "from", "moved", "why"}`. `409 refused` when a version changes the shape of a stage that an alive instance may be at, with no migration.
 
 ### `POST /api/undeploy`
 

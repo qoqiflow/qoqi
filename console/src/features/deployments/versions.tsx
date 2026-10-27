@@ -131,7 +131,8 @@ function DiffPanel({ to, earlier }: { to: DeployView; earlier: DeployView[] }) {
         )}
         <span className="ml-auto text-xs text-muted-foreground">
           {to.flows?.join(', ')} · deployed {clock(to.at)}
-          {to.moving > 0 && ` · ${to.moving} instances were to move to it`}
+          {to.moved > 0 && ` · ${to.moved} instances moved to it`}
+          {to.moving > 0 && ` · ${to.moving} were to move to it at their next stage`}
         </span>
       </div>
       <DeployActions deploy={to} />

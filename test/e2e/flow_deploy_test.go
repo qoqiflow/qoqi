@@ -95,7 +95,7 @@ func TestDeployingToADaemonThatRuns(t *testing.T) {
 
 	// A second, said first, then sent: the instance greets with it
 	os.WriteFile(program, []byte(greeter("Bonjour")), 0o644)
-	if got, code := flowCommand(t, dir, "deploy", "greeter.qi", "--dry"); code != 0 || !strings.Contains(got, "would be deployed") || !strings.Contains(got, "1 instances move") {
+	if got, code := flowCommand(t, dir, "deploy", "greeter.qi", "--dry"); code != 0 || !strings.Contains(got, "would be deployed") || !strings.Contains(got, "1 instances would move to it") {
 		t.Fatalf("dry: %d %s", code, got)
 	}
 	flowCommand(t, dir, "send", "g", "names", `"lin"`, "--key", "2")
@@ -189,7 +189,7 @@ func TestWatching(t *testing.T) {
 
 	// Fixed, and greeting otherwise: deployed as it is saved
 	os.WriteFile(program, []byte(greeter("Hi")), 0o644)
-	waitOut(t, watched, "instances move to it at their next stage")
+	waitOut(t, watched, "instances moved to it")
 	flowCommand(t, dir, "send", "g", "names", `"bo"`, "--key", "3")
 	waitOut(t, out, "Hi bo")
 }

@@ -790,11 +790,14 @@ func (r *Runtime) RunDue() (int, error) {
 	if r.Workers <= 1 {
 		ran := 0
 		for _, id := range ids {
-			if r.isAside(id) {
+			if r.isAside(id) || !r.hold(id) {
+				// Put aside, or held by a move
 				continue
 			}
 			ran++
-			if err := r.faulted(id, r.take(id)); err != nil {
+			err := r.faulted(id, r.take(id))
+			r.release(id)
+			if err != nil {
 				return 0, err
 			}
 		}
@@ -1004,12 +1007,12 @@ func (r *Runtime) take(id string) error {
 	defer r.swap.RUnlock()
 	leased, shared := r.Store.(Leased)
 	if !shared {
+		if err := r.moveBehind(id); err != nil {
+			return err
+		}
 		return r.takeHeld(id)
 	}
-	lease := r.Lease
-	if lease <= 0 {
-		lease = 30 * time.Second
-	}
+	lease := r.lease()
 	now := time.Now()
 	held, err := leased.Claim(id, now.UnixMilli(), now.Add(lease).UnixMilli())
 	if err != nil || !held {
@@ -1035,7 +1038,10 @@ func (r *Runtime) take(id string) error {
 			}
 		}
 	}()
-	err = r.takeHeld(id)
+	// On an older version, it moves first if it may
+	if err = r.moveBehind(id); err == nil {
+		err = r.takeHeld(id)
+	}
 	close(done)
 	<-renewed
 	unclaimed := leased.Unclaim(id)
@@ -1511,7 +1517,14 @@ func (r *Runtime) takeHeld(id string) error {
 			return nil
 		}
 		if r.dry != nil {
-			// Nothing leaves in a dry run: what would is said
+			// Nothing leaves in a dry run: what would is said, and where the
+			// replay is, for a move
+			for _, t := range taking {
+				r.dry.took = append(r.dry.took, t.Seq)
+			}
+			if replaying {
+				r.dry.left = r.untaken(inst, pass, taken)
+			}
 			for _, s := range wave {
 				r.dry.Next = append(r.dry.Next, dryNext(m, s.call))
 			}

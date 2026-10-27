@@ -32,6 +32,7 @@ export interface View {
   pass?: number;
   version?: string; // the bytecode it runs, by its fingerprint
   replaying?: boolean; // resumed, and not yet at its next stage
+  behind?: boolean; // alive on an older version than the one served
   ended?: string; // why a person ended it as it was
 }
 
@@ -72,6 +73,7 @@ export interface Detail extends View {
   output: Line[];
   unanswered?: string[]; // the steps that left, their answer not kept: a person may answer them
   sending?: Sending[]; // the steps by a queue on their way
+  stays?: string; // behind: why it stays on its version until its next stage
 }
 
 /** A step on its way to its queue: its last attempt, and what became of it. */
@@ -209,7 +211,8 @@ export interface DeployView {
   flows: string[] | null;
   files?: string[];
   changes?: string[]; // what it changed of the stages of the version before
-  moving: number; // instances that were to move to it when it was deployed
+  moved: number; // instances that moved to it when it was deployed
+  moving: number; // and that were to move to it at their next stage
   alive: number; // instances alive that run it now
   serving: boolean; // the version a new instance starts on
   removed?: boolean; // the program taken away, here
@@ -329,7 +332,18 @@ export interface Report {
   same?: boolean;
   changes?: string[];
   said?: string[];
-  moving: number;
+  moved: number; // moved to it while they waited
+  moving: number; // move to it at their next stage, staying says why
+  staying?: Move[];
+}
+
+/** What became of an instance on an older version, at a deploy. */
+export interface Move {
+  id: string;
+  flow: string;
+  from: string; // the version it runs
+  moved: boolean;
+  why?: string; // why it stays, until its next stage
 }
 
 export interface DraftDeploy extends Checked {

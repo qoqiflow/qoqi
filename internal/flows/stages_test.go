@@ -108,8 +108,8 @@ step fn ask(i: Int) -> Int {
     return i;
 }
 `,
-		"W0011 12: a loop of Poll.run waits with no stage in it: the instance keeps everything it did since it started, and never moves to a new version",
-		"W0011 8: a loop of Poll.run waits with no stage in it: the instance keeps everything it did since it started, and never moves to a new version")
+		"W0011 12: a loop of Poll.run waits with no stage in it: the instance keeps everything it did since it started, and moves to a new version only by being played again from its start",
+		"W0011 8: a loop of Poll.run waits with no stage in it: the instance keeps everything it did since it started, and moves to a new version only by being played again from its start")
 }
 
 // A migration gives the struct of a stage of this version, its fields

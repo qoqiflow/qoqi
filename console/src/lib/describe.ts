@@ -1,6 +1,6 @@
 import { qoqi } from './qoqi';
 import { relative } from './time';
-import type { Place, View } from './types';
+import type { Place, Report, View } from './types';
 
 // What an instance is doing now, in a few words: what the lists show
 // beside each one, and what the page of one says first.
@@ -23,6 +23,14 @@ export function awaited(inst: View): { instances: string[]; inboxes: string[] } 
     instances: all.filter((a) => !a.startsWith('inbox:')),
     inboxes: all.filter((a) => a.startsWith('inbox:')).map((a) => a.slice('inbox:'.length)),
   };
+}
+
+/** What a deploy did, or would, of the instances alive on the version before. */
+export function movesSaid(report: Report, dry: boolean): string {
+  const before = (report.before ?? '').replace(/^sha256:/, '').slice(0, 8);
+  const moved = report.moved ?? 0;
+  const plural = (n: number) => `${n} instance${n === 1 ? '' : 's'}`;
+  return `In place of version ${before}: ${plural(moved)} ${dry ? 'would move' : 'moved'} to it, ${report.moving} at their next stage.`;
 }
 
 /** What it waits for, in words. */

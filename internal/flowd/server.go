@@ -463,6 +463,7 @@ type View struct {
 	Awaits   []string `json:"awaits,omitempty"` // the instances it waits for
 
 	Version   string `json:"version,omitempty"`   // the bytecode it runs, by its fingerprint
+	Behind    bool   `json:"behind,omitempty"`    // alive on an older version than the one served
 	Replaying bool   `json:"replaying,omitempty"` // resumed, before its next stage
 	Ended     string `json:"ended,omitempty"`     // why a person ended it
 	Stage     string `json:"stage,omitempty"`     // the last stage it passed alone
@@ -508,8 +509,11 @@ func (d *Daemon) listInstances(w http.ResponseWriter, r *http.Request) {
 		if flow != "" && d.runtimeOf(flow) != p.Runtime {
 			continue
 		}
+		newest, _ := p.Runtime.Version()
 		for _, inst := range p.Runtime.Store.List(flow, status) {
-			views = append(views, viewOf(inst))
+			v := viewOf(inst)
+			v.Behind = behind(inst, newest)
+			views = append(views, v)
 		}
 	}
 	sort.Slice(views, func(i, j int) bool { return views[i].ID < views[j].ID })
@@ -640,6 +644,15 @@ type Detail struct {
 	// Sending are the steps by a queue on their way, their answer not
 	// kept: their last attempt, and what became of it
 	Sending []Sending `json:"sending,omitempty"`
+	// Stays is, for one behind, why it stays on its version until its
+	// next stage
+	Stays string `json:"stays,omitempty"`
+}
+
+// behind says whether an instance is alive on an older version than the
+// one served.
+func behind(inst *flowrt.Instance, newest string) bool {
+	return newest != "" && inst.Version != "" && inst.Version != newest && inst.Status != flowrt.Done && inst.Status != flowrt.Failed
 }
 
 // Sending is a step by a queue on its way.
@@ -655,6 +668,13 @@ type Sending struct {
 
 func (d *Daemon) detailOf(rt *flowrt.Runtime, inst *flowrt.Instance) Detail {
 	detail := Detail{View: viewOf(inst), Tasks: []vm.Place{}, Kept: []flowrt.Listed{}, Tries: inst.Tries, Output: d.hub.output(inst.ID, 200)}
+	if newest, _ := rt.Version(); behind(inst, newest) {
+		detail.Behind = true
+		// Asked, and not moved: what keeps it there
+		if move, err := rt.Move(inst.ID, true); err == nil && !move.Moved {
+			detail.Stays = move.Why
+		}
+	}
 	if len(inst.State) > 0 && inst.Status != flowrt.Done && inst.Status != flowrt.Failed {
 		// Read with the bytecode of the version it runs
 		if chunk, err := rt.ChunkOf(inst); err == nil {

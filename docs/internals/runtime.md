@@ -117,8 +117,9 @@ resume(id):                                                # a person asked; `re
     phase finish  ->  status waiting, a wait already over; the undo attempts that gave Err deleted,
                       so that finish(vm) runs them again and finds the rest by key
     phase run     ->  state = at_stage, version = the newest, status waiting, a wait already over,
-                      the messages taken since at_stage untaken   # UPDATE messages SET taken = NULL
-                                                                  # WHERE taken_pass >= at_stage.pass
+                      the messages taken since at_stage untaken, in the same write
+                                                                  # UPDATE messages SET taken = 0
+                                                                  # WHERE pass >= at_stage.pass
                       giving = drawn, the values read since at_stage, by task, to be given back
 
 run(id, ...), as for any instance:
@@ -132,15 +133,35 @@ run(id, ...), as for any instance:
         its next value, the same question (now, token 3, ...)  ->  given it
         another question, or none left    ->  read anew, and that task is given back no more
         either way it is kept in drawn, written with the instance; a stage where run is alone empties both
+    the keys it found are kept with the instance, `found`, at each write while it replays:
+    one that waits, or is taken up again after its process stopped, still knows them
     at the next stage, or the end, for any instance:
         attempts of this pass with a value that nothing took  ->  stopped(vm, F0101)
-        (nothing is marked: an attempt is untaken when its count
-         is past the task's counter for that name, in the state)
 ```
 
 A stopped instance whose stage no longer exists in the newest version is not resumed through a migration to another stage: what was done since the old stage was done on its path, and the new stage's keys would be another path's. It stays `stopped`, with `F0103` and the two stages named, until a person cancels it or pins its version and fixes that. An instance resumed is an instance whose state is its stage's, in the newest version (the JSON says which, so a daemon that dies between `lease` and its first `save` leaves nothing untrue), and the rules above hold for every instance. `qoqi resume` first runs **dry**: the daemon runs the instance in memory without a lease to write under, up to the first step that would leave or the first wait that would wait, and shows what it took by key and what it would do next; `--go` then resumes for real. A person reads what the new code would take and what it would do, and lets it go on or not.
 
-This is the one place an instance is played again. What was done since the stage is found by its key, what was read of the clock and of the random numbers since the stage is given back, and what is new runs; what was done and is no longer asked for stops it, with the list ([taking up a stopped instance](../concepts/failures.md#stopped-instances)). `asked` is what the step was given, as JSON, read into the newest shape of its types as any kept value is (a field the JSON lacks takes the default its struct declares, and a field with no default stops the instance with `F0102`), then compared, or for a wait its channels and cases in order, without its lengths of time: the new code asking `charge#1` for another invoice, or reading the cases of a `wait match` in another order, is not the same question, and gets no silent answer. A step whose attempts were spent gets new ones, numbered on from the last.
+Here, and when an instance moves while it waits (2c), an instance is played again. What was done since the stage is found by its key, what was read of the clock and of the random numbers since the stage is given back, and what is new runs; what was done and is no longer asked for stops it, with the list ([taking up a stopped instance](../concepts/failures.md#stopped-instances)). `asked` is what the step was given, as JSON, read into the newest shape of its types as any kept value is (a field the JSON lacks takes the default its struct declares, and a field with no default stops the instance with `F0102`), then compared, or for a wait its channels and cases in order, without its lengths of time: the new code asking `charge#1` for another invoice, or reading the cases of a `wait match` in another order, is not the same question, and gets no silent answer. A step whose attempts were spent gets new ones, numbered on from the last.
+
+### 2c. Moving an instance that waits
+
+```text
+move(id):                                       # at a deploy, for each instance alive on an older version,
+                                                # and by a worker, as it takes one up, before it runs it
+    held, by this daemon's workers and by its lease, or left: one running moves when it is next taken up
+    an instance waiting, run alone at its last stage, not ending nor cancelled:
+        w = the instance as resume (2b) writes it: at_stage, in the newest version, a wait already over
+        dry(w), in memory, as `qoqi resume` runs: the messages taken since the stage there to take again,
+        up to the first step that would leave, the first wait that would wait, or the end
+        it moves when the dry run
+            did not stop (F0102, F0101 at a stage or the end),
+            took every step kept since the stage before it got there,
+            and took again every message taken since the stage
+        moves  ->  save(w), the messages since untaken in the same write: the next turn plays it again, for real
+        else   ->  nothing written; why, for deploy and show; it moves at its next stage (5)
+```
+
+Played for real, the instance is the dry run again: the same results by key, the same messages in the order they came, the same clock given back, so the same branches of its waits, and a wait for a time waits to the moment it waited for (`time.after` reads the clock when it is made, and that read is given back). What it does after the point the dry run reached is the new version's own, as for any instance. A message come since only adds to its inboxes: the replay takes the old ones first, as they came first.
 
 ### 3. Turns: everything that can go on, goes on
 
@@ -239,7 +260,7 @@ stage(vm, name):
     go on
 ```
 
-While other tasks of the instance are alive, they have calls under way in the version they started in: the instance stays in that version until a stage where `run` is alone.
+While other tasks of the instance are alive, they have calls under way in the version they started in: the instance stays in that version until a stage where `run` is alone. One that waits moves before its stage when it may (2c).
 
 ### 6. The end
 
@@ -578,7 +599,8 @@ type Store interface {
 *   **The whole state is written each time**, at most once per ten milliseconds while steps are under way. Writing only what changed is for when it is needed.
 *   **A step has a time limit**, a minute by default, which its declaration says otherwise, `within d` after its signature, and nothing moves. A daemon that takes an instance up waits for the limit of a step under way before it runs it again.
 *   **A step's key names what was asked**, `charge#1`; a new version that adds a step does not move the keys of the others.
-*   **A replay is an instance whose state is its stage's**, in the newest version, its messages since untaken; nothing else marks it. `qoqi resume` runs it dry first, and `--go` for real; the `F0101` check at the next stage holds for every instance.
+*   **A replay is an instance whose state is its stage's**, in the newest version, its messages since untaken in the same write, and the keys it found kept with it. `qoqi resume` runs it dry first, and `--go` for real; the `F0101` check at the next stage holds for every instance.
+*   **An instance that waits moves when the new version, played again from its stage, did what it did**, and only then: a dry run first, the move one write. One that may not stays, and the deploy says why.
 *   **Lengths of time are not in a key**, nor compared: a deadline computed each round asks the same question.
 *   **Every step and wait looks for its key before it is noted**, replay or not.
 *   **A late answer is not given, and not lost**: an attempt is a row made before the step leaves, and its three writes each say `WHERE result IS NULL`; the first to land stands, and what comes after is kept aside for people.

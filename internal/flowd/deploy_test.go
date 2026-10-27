@@ -265,7 +265,7 @@ func TestADaemonStartedEmptyIsGivenItsPrograms(t *testing.T) {
 	// A second version, the stage as it was: the instance asleep takes its
 	// next note with the new step, with no restart
 	status, body = e.deploy(t, false, packageOf(t, "tally", tally(2)))
-	if status != http.StatusOK || !strings.Contains(body, `"moving": 1`) {
+	if status != http.StatusOK || !strings.Contains(body, `"moved": 1`) {
 		t.Fatalf("second deploy: %d %s", status, body)
 	}
 	e.send(t, "t", "b", "k2")
@@ -284,7 +284,7 @@ func TestADaemonStartedEmptyIsGivenItsPrograms(t *testing.T) {
 
 	// Dry with its migration: said, not done
 	status, body = e.deploy(t, true, packageOf(t, "tally", tally(3)))
-	if status != http.StatusOK || !strings.Contains(body, `"dry": true`) || !strings.Contains(body, "last: String is new") {
+	if status != http.StatusOK || !strings.Contains(body, `"dry": true`) || !strings.Contains(body, "last: String is new") || !strings.Contains(body, `"moved": 1`) {
 		t.Fatalf("a dry deploy: %d %s", status, body)
 	}
 	e.send(t, "t", "d", "k4")
@@ -298,10 +298,9 @@ func TestADaemonStartedEmptyIsGivenItsPrograms(t *testing.T) {
 	e.send(t, "t", "stop", "k6")
 	_, result := call(t, e.d, e.server, "GET", "/api/instances/t/result?wait=10s", "")
 	// 1 from v1, 2 for each of b, c, d from v2, 3 from v3. The instance
-	// waited for e in v2's run, which took it: its step ran in v3, the
-	// newest that has it, and the instance moved at the stage after,
-	// through the migration, which knew no last note
-	if strings.TrimSpace(result) != `"ada 10 after none yet"` {
+	// waited for e in v2's run: it moved to v3 as it was deployed, through
+	// the migration, and v3 took e, its last note
+	if strings.TrimSpace(result) != `"ada 10 after e"` {
 		t.Errorf("expected the notes counted by the version that took each, got %s; printed %v", result, e.out.seen)
 	}
 
@@ -314,8 +313,8 @@ func TestADaemonStartedEmptyIsGivenItsPrograms(t *testing.T) {
 	if !history[0].Serving || history[1].Serving || history[0].Seq <= history[1].Seq || history[2].Changes != nil {
 		t.Errorf("the last serves, the first changed nothing before it: %s", body)
 	}
-	if len(history[0].Changes) == 0 || history[0].Moving != 1 || history[1].Moving != 1 {
-		t.Errorf("what each changed, and how many were to move: %s", body)
+	if len(history[0].Changes) == 0 || history[0].Moved != 1 || history[1].Moved != 1 {
+		t.Errorf("what each changed, and how many moved: %s", body)
 	}
 
 	// What the third changed of the second: the source, and the stage

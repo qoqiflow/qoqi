@@ -56,7 +56,7 @@ The first time, the console has one user: `admin`, password `admin`, which is ch
 $ qoqi deploy <program or folder> [--dry] [--watch]
 ```
 
-A new version to the daemon, served at once: what runs ends its turn, and each instance moves at its next [stage](../concepts/versioning.md). The program is compiled here, and sent. `--dry` says what it would do; `--watch` deploys again each time a file of the program is saved, the modules it imports with it, and says what does not compile or is refused while the version before goes on. Writes `flow.lock` next to the program.
+A new version to the daemon, served at once: what runs ends its turn, an instance that waits moves to it at once when the new version would have done what it did, and the others at their next [stage](../concepts/versioning.md); it says which stay, and why. The program is compiled here, and sent. `--dry` says what it would do; `--watch` deploys again each time a file of the program is saved, the modules it imports with it, and says what does not compile or is refused while the version before goes on. Writes `flow.lock` next to the program.
 
 A program is a file with a `main`, and the modules it imports. Its flows are those of its file and of those modules, each started by its name: `qoqi start Easy` for a flow `Easy` of the module `easy`, which `qoqi ls` and the console show as `easy.Easy`. Two modules of one program with a flow of one name are refused. A module that has a `main` of its own is a program, and its flows are served when it is deployed, not by a program that imports it to try them.
 

@@ -360,8 +360,8 @@ fn main() {}
 }
 
 // A new version deployed while an instance sleeps: the daemon started on
-// it takes the instance up in its own version, and the instance moves to
-// the new one at its next stage. flow.lock says the shapes of the stages.
+// it moves the instance to the new one as it takes it up, played again
+// from its stage. flow.lock says the shapes of the stages.
 func TestAnInstanceMovesToANewVersion(t *testing.T) {
 	dir := t.TempDir()
 	write := func(version string) {
@@ -447,9 +447,11 @@ impl Sub {
     }
 }
 `)
+	// The instance, asleep in its first month, moves as it is deployed,
+	// through the migration: that month too counts 1
 	deployIn(t, dir, "shop.qi", second)
 	got, code := flowCommand(t, dir, "result", "sub:1", "--wait", "20s")
-	if code != 0 || strings.TrimSpace(got) != "302" {
+	if code != 0 || strings.TrimSpace(got) != "303" {
 		t.Fatalf("result: %d %s\nfirst:\n%s\nsecond:\n%s", code, got, first.String(), second.String())
 	}
 }

@@ -53,9 +53,12 @@ type Report struct {
 	Changes []string `json:"changes,omitempty"`
 	Said    []string `json:"said,omitempty"`
 
-	// Moving is how many instances alive run another version: they move
-	// to this one at their next stage
-	Moving int `json:"moving"`
+	// Moved is how many instances alive on another version moved to this
+	// one while they waited; Moving, how many did not, and move at their
+	// next stage, Staying saying why. Dry, those that would
+	Moved   int           `json:"moved"`
+	Moving  int           `json:"moving"`
+	Staying []flowrt.Move `json:"staying,omitempty"`
 
 	// Lock is what the version leaves, to be kept with its source
 	Lock *flowrt.Lock `json:"lock"`
@@ -177,6 +180,9 @@ func (d *Daemon) Deploy(pkg *Package, dry bool) (*Report, error) {
 		return nil, &Refused{Program: pkg.Name, Why: []string{err.Error()}}
 	}
 	if dry {
+		if !report.New && !report.Same {
+			report.moves(flowrt.WouldMove(chunk, store))
+		}
 		return report, nil
 	}
 
@@ -202,6 +208,10 @@ func (d *Daemon) Deploy(pkg *Package, dry bool) (*Report, error) {
 		}
 		served = &Program{Name: pkg.Name, Runtime: rt}
 	}
+
+	// The instances that wait on another version move to this one now,
+	// when it does what they did since their stage
+	report.moves(served.Runtime.MoveAll(false))
 
 	d.pmu.Lock()
 	served.Flows = append([]string(nil), pkg.Flows...)
@@ -265,10 +275,29 @@ func (d *Daemon) Deploy(pkg *Package, dry bool) (*Report, error) {
 	case report.Same:
 		fmt.Fprintf(d.Log, "qoqi: %s is version %s already\n", pkg.Name, shortVersion(version))
 	default:
-		fmt.Fprintf(d.Log, "qoqi: %s deployed, version %s; %d instances move to it at their next stage\n", pkg.Name, shortVersion(version), report.Moving)
+		fmt.Fprintf(d.Log, "qoqi: %s deployed, version %s; %d instances moved to it, %d move at their next stage\n", pkg.Name, shortVersion(version), report.Moved, report.Moving)
 	}
 	d.poke()
 	return report, nil
+}
+
+// maxStaying is how many instances that stay a report says why of.
+const maxStaying = 50
+
+// moves counts what became of the instances on another version.
+func (r *Report) moves(moves []flowrt.Move) {
+	r.Moved, r.Moving, r.Staying = 0, 0, nil
+	for _, m := range moves {
+		if m.Moved {
+			r.Moved++
+			continue
+		}
+		r.Moving++
+		// Why, for the first: the report is kept with the deploy
+		if len(r.Staying) < maxStaying {
+			r.Staying = append(r.Staying, m)
+		}
+	}
 }
 
 // lastDeployed is the last deploy of a program the store keeps, or nil.

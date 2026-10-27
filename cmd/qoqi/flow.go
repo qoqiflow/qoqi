@@ -45,7 +45,8 @@ const flowUsage = `Usage:
                               reached by from elsewhere. Its console is at its address
   qoqi deploy <program or folder> [--dry] [--watch]
                               A new version to the daemon, served at once: what runs ends
-                              its turn, and each instance moves at its next stage; --watch
+                              its turn, an instance that waits moves to it at once when it
+                              may, the others at their next stage; --watch
                               deploys again each change saved. A folder is each file of it
                               with a main and flows, and its qoqi.json's entry: a file
                               without a main is a module of the program that imports it
@@ -628,6 +629,9 @@ func flowList(path string, raw bool) {
 		if v.Replaying {
 			stage += " (replaying)"
 		}
+		if v.Behind {
+			stage += " (version " + shortVersion(v.Version) + ")"
+		}
 		rows = append(rows, []string{v.ID, v.Flow, v.Status, stage, flowd.Doing(v, now)})
 	}
 	printColumns(rows)
@@ -670,13 +674,20 @@ func flowShow(id string) {
 	}
 	head := []string{detail.Flow, detail.ID}
 	if detail.Version != "" {
-		head = append(head, "version "+shortVersion(detail.Version))
+		version := "version " + shortVersion(detail.Version)
+		if detail.Behind {
+			version += ", an older one"
+		}
+		head = append(head, version)
 	}
 	fmt.Println(strings.Join(head, "   "))
 
 	var rows [][]string
 	row := func(name, value string) { rows = append(rows, []string{"  " + name, value}) }
 	row(detail.Status, flowd.Doing(detail.View, time.Now()))
+	if detail.Stays != "" {
+		row("stays", detail.Stays)
+	}
 	if detail.Stage != "" {
 		stage := fmt.Sprintf("%s, pass %d", detail.Stage, detail.Pass)
 		if detail.Replaying {

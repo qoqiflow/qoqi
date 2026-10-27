@@ -45,7 +45,7 @@ $ qoqi versions
 $ qoqi diff shop
 ```
 
-A deploy is served at once, with no restart: what runs ends its turn, and instances move at their next stage ([versions](../concepts/versioning.md)). Commit the `flow.lock` it writes. `qoqi deploy shop/ --watch` deploys again on every save, for development.
+A deploy is served at once, with no restart: what runs ends its turn, instances that wait move to it at once when it would have done what they did, and the others at their next stage; the deploy says which stay, and why ([versions](../concepts/versioning.md)). `--dry` says it before. Commit the `flow.lock` it writes. `qoqi deploy shop/ --watch` deploys again on every save, for development.
 
 ## Instances that need a person
 

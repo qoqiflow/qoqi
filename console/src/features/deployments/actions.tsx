@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
+import { movesSaid } from '@/lib/describe';
 import type { DeployView, Report } from '@/lib/types';
 
 // What a person does with a version: open its program in the editor,
@@ -82,7 +83,7 @@ function RedeployDialog({ deploy, open, onOpenChange }: { deploy: DeployView; op
         ) : (
           <div className="grid gap-2 text-sm">
             <p>
-              In place of {short(report?.before ?? '')}: {report?.moving ?? 0} instance{report?.moving === 1 ? '' : 's'} alive move to it at their next stage.
+              {report && movesSaid(report, true)}
             </p>
             {(report?.changes?.length ?? 0) > 0 && (
               <ul className="grid gap-1 rounded-lg bg-muted p-3 font-mono text-xs">

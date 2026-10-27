@@ -167,8 +167,18 @@ func said(report *flowd.Report, dry bool) {
 	case report.Same:
 		fmt.Printf("%s is version %s already\n", report.Program, version)
 	default:
-		fmt.Printf("%s %s, version %s in place of %s: %d instances move to it at their next stage\n",
-			report.Program, verb, version, shortVersion(report.Before), report.Moving)
+		moved := "moved to it"
+		if dry {
+			moved = "would move to it"
+		}
+		fmt.Printf("%s %s, version %s in place of %s: %d instances %s, %d at their next stage\n",
+			report.Program, verb, version, shortVersion(report.Before), report.Moved, moved, report.Moving)
+		for _, m := range report.Staying {
+			fmt.Printf("  %s (%s, version %s): %s\n", m.ID, m.Flow, shortVersion(m.From), m.Why)
+		}
+		if left := report.Moving - len(report.Staying); left > 0 {
+			fmt.Printf("  and %d more\n", left)
+		}
 	}
 	for _, change := range report.Changes {
 		fmt.Printf("  %s\n", change)

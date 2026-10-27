@@ -116,7 +116,14 @@ function InstanceView({ detail, flow, program }: { detail: Detail; flow?: FlowIn
                 <span aria-hidden="true">·</span>
                 <span title={detail.version}>
                   version <span className="font-mono">{detail.version.replace(/^sha256:/, '').slice(0, 8)}</span>
+                  {detail.behind && ', an older one'}
                 </span>
+              </>
+            )}
+            {detail.stays && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="text-warning">stays on it: {detail.stays}</span>
               </>
             )}
             {detail.phase === 'finish' && (

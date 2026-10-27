@@ -64,7 +64,7 @@ $ qoqi send expense:1 answers '{"approved": true, "why": ""}' --key mail-1
 
 `qoqi cancel expense:1 "paid already"` withdraws it: the expense hears its own cancellation, tells the manager, and ends `Withdrawn`. Without an answer, the next manager is asked a minute later; `'{"approved": false, "why": "not a business trip"}'` refuses it. The key makes a message sent twice, a mail clicked twice, one answer.
 
-Change the code and deploy it again: an instance asleep goes on in the version it started in, and moves to the new one at its next stage, `stage asking` in the approvals, if the stage holds the same variables. `approvals.flow.lock` keeps the shape of each stage; the daemon says what a new version changed of them.
+Change the code and deploy it again: an instance asleep moves to the new version at once, when the new code, played again from its last stage, does what it did; otherwise it goes on in its version and moves at its next stage, `stage asking` in the approvals, if the stage holds the same variables. `approvals.flow.lock` keeps the shape of each stage; the daemon says what a new version changed of them.
 
 The fields are JSON as a person writes it: the daemon types them from the program, a struct inside them needs no `"$type"`, a variant is written by its name, `"Approved"` or `{"Refused": "why"}`, and a `Duration` as a text with its unit, `"1m"`, `"3s"`, `"1h30m"`. `qoqi ui` gives the same start as a form made from the types.
 

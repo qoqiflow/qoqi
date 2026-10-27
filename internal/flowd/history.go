@@ -22,7 +22,8 @@ type DeployView struct {
 	Flows   []string `json:"flows"`
 	Files   []string `json:"files,omitempty"`
 	Changes []string `json:"changes,omitempty"` // what it changed of the stages of the version before
-	Moving  int      `json:"moving"`            // instances that were to move to it when it was deployed
+	Moved   int      `json:"moved"`             // instances that moved to it when it was deployed
+	Moving  int      `json:"moving"`            // and that were to move to it at their next stage
 
 	// Alive is how many instances alive run it now; Serving, whether it is
 	// the version a new instance starts on
@@ -47,7 +48,7 @@ func (d *Daemon) view(dep flowrt.Deployed, sources bool) *DeployView {
 	v := &DeployView{Seq: dep.Seq, Program: dep.Name, Version: dep.Version, At: time.UnixMilli(dep.At).UTC().Format(time.RFC3339Nano)}
 	var report Report
 	if json.Unmarshal(dep.Report, &report) == nil {
-		v.Changes, v.Moving = report.Changes, report.Moving
+		v.Changes, v.Moved, v.Moving = report.Changes, report.Moved, report.Moving
 	}
 	v.Removed = dep.Version == ""
 	if v.Removed {

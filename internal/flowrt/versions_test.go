@@ -70,9 +70,11 @@ func started(t *testing.T, store flowrt.Store, out *bytes.Buffer) *flowrt.Instan
 	return inst
 }
 
-// A newer version with the stage as it was: the instance finishes its
-// month in its own, and goes on in the newer one from the next stage.
-func TestAnInstanceMovesAtAStage(t *testing.T) {
+// A newer version with the stage as it was: the instance, asleep in its
+// first month, moves as it is taken up. Played again from the stage in
+// the newer version, it finds its first bill by its key, and its month
+// is the newer version's: 100 + 1, then 200 + 1 twice.
+func TestAnInstanceMovesWhileItWaits(t *testing.T) {
 	var out bytes.Buffer
 	store := flowrt.NewMemory()
 	started(t, store, &out)
@@ -83,8 +85,8 @@ func TestAnInstanceMovesAtAStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	inst, _, _ := store.Get("sub")
-	if inst.Status != flowrt.Done || string(inst.Result) != "502" || inst.Version != vm.Fingerprint(newer) {
-		t.Fatalf("expected done with 100 + 201 + 201 in the newer version, got %s %s %q %s", inst.Status, inst.Result, inst.Stopped, inst.Version)
+	if inst.Status != flowrt.Done || string(inst.Result) != "503" || inst.Version != vm.Fingerprint(newer) {
+		t.Fatalf("expected done with 101 + 201 + 201 in the newer version, got %s %s %q %s", inst.Status, inst.Result, inst.Stopped, inst.Version)
 	}
 	want := []string{"WORLD v1 bill 0", "WORLD v2 bill 1", "WORLD v2 bill 2"}
 	if got := worldLines(out.String()); strings.Join(got, "|") != strings.Join(want, "|") {
@@ -152,8 +154,8 @@ func TestMovingSurvivesAStopAtEveryWrite(t *testing.T) {
 			t.Fatalf("after stopping at write %d: %v", k, err)
 		}
 		inst, _, _ := store.Get("sub")
-		if inst.Status != flowrt.Done || string(inst.Result) != "502" {
-			t.Errorf("after stopping at write %d of %d: expected done with 502, got %s %s %q\n%s", k, count, inst.Status, inst.Result, inst.Stopped, out.String())
+		if inst.Status != flowrt.Done || string(inst.Result) != "503" {
+			t.Errorf("after stopping at write %d of %d: expected done with 503, got %s %s %q\n%s", k, count, inst.Status, inst.Result, inst.Stopped, out.String())
 		}
 	}
 }
@@ -226,7 +228,7 @@ func TestAnInstanceMigratesAtAStage(t *testing.T) {
 		name, src, result string
 		world             []string
 	}{
-		{"a variable made by the migration", v4, "800", []string{"WORLD v1 bill 0", "WORLD v4 bill 1", "WORLD v4 bill 2"}},
+		{"a variable made by the migration", v4, "850", []string{"WORLD v1 bill 0", "WORLD v4 bill 1", "WORLD v4 bill 2"}},
 		{"a stage named otherwise", v5, "1900", []string{"WORLD v1 bill 0", "WORLD v5 bill 1", "WORLD v5 bill 2"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -297,8 +299,10 @@ fn main() {}
 }
 
 // A step fixed in a newer version runs fixed for an instance of the
-// older one at its next call, before any stage; one whose signature
-// changed runs as the instance's version has it.
+// older one at its next call, before any stage. One whose signature
+// changed runs as the newer version calls it, for an instance that moves
+// to it while it waits; as the instance's version has it, for one that
+// cannot move, its stage changed.
 func TestStepsRunInTheNewestVersion(t *testing.T) {
 	old := billAfterWait("month: Int", "bill(month)", `println("WORLD old bill", month); return 1;`)
 	for _, c := range []struct {
@@ -308,7 +312,9 @@ func TestStepsRunInTheNewestVersion(t *testing.T) {
 		{"the same step, fixed", billAfterWait("month: Int", "bill(month)", `println("WORLD fixed bill", month); return 10;`),
 			[]string{"WORLD fixed bill 0", "WORLD fixed bill 1"}},
 		{"a step that takes more", billAfterWait("month: Int, rate: Int", "bill(month, 2)", `println("WORLD rated bill", month, rate); return 10 * rate;`),
-			[]string{"WORLD old bill 0", "WORLD rated bill 1 2"}},
+			[]string{"WORLD rated bill 0 2", "WORLD rated bill 1 2"}},
+		{"a step that takes more, the stage changed", strings.Replace(billAfterWait("month: Int, rate: Int", "bill(month, 2)", `println("WORLD rated bill", month, rate); return 10 * rate;`), "let paid = 0;", "let paid = 0;\n        let extra = 0;", 1),
+			[]string{"WORLD old bill 0", "WORLD old bill 1"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			var out bytes.Buffer
@@ -352,8 +358,9 @@ func TestFieldsMigrate(t *testing.T) {
 	for _, c := range []struct {
 		name, src, result string
 	}{
-		// 100, then 300 + "basic".len() twice
-		{"a field added", planned(``, ``, fieldsMigration), "710"},
+		// 100 + "basic".len(), month 0 played again in the newer version,
+		// then 300 + 5 twice
+		{"a field added", planned(``, ``, fieldsMigration), "715"},
 		// and the stage keeps a count, made by its own migration
 		{"a field added and a stage changed", planned(`let count = 0;`, ` + count`, fieldsMigration+`
 struct Month { paid: Int; count: Int; month: Int; }
@@ -363,7 +370,7 @@ impl Sub {
         return Month { paid: paid, count: 50, month: month };
     }
 }
-`), "810"},
+`), "865"},
 		// with no migrate fn fields, it stays on its version, run as that
 		// one had it; its bills, the same step, the newer's
 		{"no migration of the fields", planned(``, ``, ``), "700"},
