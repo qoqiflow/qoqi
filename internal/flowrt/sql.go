@@ -45,10 +45,9 @@ type SQL struct {
 	// the store's saves of that instance are refused meanwhile
 	holds map[string]string
 
-	mu        sync.Mutex
-	writes    int
-	FailAt    int
-	ResultLog []string
+	mu     sync.Mutex
+	writes int
+	FailAt int
 }
 
 // OpenSQLite opens a store in a file, made if it is not there.
@@ -627,16 +626,8 @@ func (s *SQL) PutResult(key string, kept Kept) error {
 		}
 		undo = string(encoded)
 	}
-	n, err := s.exec(s.q(`INSERT INTO steps (key, result, undo, asked) VALUES (?, ?, ?, ?) ON CONFLICT (key) DO NOTHING`), key, string(kept.Data), undo, string(kept.Asked))
-	if err != nil {
-		return err
-	}
-	if n == 1 {
-		s.mu.Lock()
-		s.ResultLog = append(s.ResultLog, key)
-		s.mu.Unlock()
-	}
-	return nil
+	_, err := s.exec(s.q(`INSERT INTO steps (key, result, undo, asked) VALUES (?, ?, ?, ?) ON CONFLICT (key) DO NOTHING`), key, string(kept.Data), undo, string(kept.Asked))
+	return err
 }
 
 func (s *SQL) Result(key string) (Kept, bool, error) {
@@ -910,11 +901,5 @@ func (s *SQL) KeepIn(tx *sql.Tx, key string, kept Kept) error {
 	if n, _ := result.RowsAffected(); n == 0 {
 		return nil
 	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	s.ResultLog = append(s.ResultLog, key)
-	s.mu.Unlock()
-	return nil
+	return tx.Commit()
 }

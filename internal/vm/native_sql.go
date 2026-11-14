@@ -73,6 +73,16 @@ func (vm *VM) sqlDBs() *sqlState {
 	return state.(*sqlState)
 }
 
+// sqlOpen is what the machine has open, nil when it has nothing: a look
+// that leaves nothing behind it, where sqlDBs keeps the machine, and all
+// it holds, until what it opens is closed
+func (vm *VM) sqlOpen() *sqlState {
+	if state, ok := sqlStates.Load(vm); ok {
+		return state.(*sqlState)
+	}
+	return nil
+}
+
 func (s *sqlState) add(h *sqlHandle) int64 {
 	id := sqlLast.Add(1)
 	s.mu.Lock()
@@ -85,6 +95,9 @@ func (s *sqlState) add(h *sqlHandle) int64 {
 }
 
 func (s *sqlState) get(id int64) *sqlHandle {
+	if s == nil {
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.handles[id]
@@ -116,7 +129,11 @@ func (vm *VM) SetStore(open func() (*sql.DB, sqldb.Kind, error)) {
 // database ended it for another transaction: what the step wrote is
 // gone, and the step is to run again, whatever it gave.
 func (vm *VM) TakeStoreTx(key string) (tx *sql.Tx, ended bool) {
-	s := vm.sqlDBs()
+	// Asked after every step: one that opened nothing finds nothing here
+	s := vm.sqlOpen()
+	if s == nil {
+		return nil, false
+	}
 	s.mu.Lock()
 	id, ok := s.steps[key]
 	s.mu.Unlock()
@@ -611,7 +628,7 @@ func sqlStatement(rows bool) func(vm *VM, args []Value) (Value, error) {
 		if err != nil {
 			return NewNull(), err
 		}
-		h := vm.sqlDBs().get(id)
+		h := vm.sqlOpen().get(id)
 		if h == nil {
 			return vm.refused("closed", "the database or the transaction is closed")
 		}
@@ -659,7 +676,7 @@ func init() {
 			if err != nil {
 				return NewNull(), err
 			}
-			if h := vm.sqlDBs().get(id); h != nil {
+			if h := vm.sqlOpen().get(id); h != nil {
 				return vm.newString(h.kind.String())
 			}
 			return vm.newString("")
@@ -672,7 +689,7 @@ func init() {
 			if err != nil {
 				return NewNull(), err
 			}
-			h := vm.sqlDBs().get(id)
+			h := vm.sqlOpen().get(id)
 			if h == nil || h.db == nil {
 				return vm.refused("closed", "the database is closed")
 			}
@@ -697,7 +714,7 @@ func init() {
 				return NewNull(), err
 			}
 			commit := args[1].IsBool() && args[1].AsBool()
-			s := vm.sqlDBs()
+			s := vm.sqlOpen()
 			h := s.get(id)
 			if h != nil && h.step != "" {
 				_, err := vm.refused("other", "the store's transaction of a step ends with the step: it is committed with what the step gives")
@@ -735,7 +752,7 @@ func init() {
 			if err != nil {
 				return NewNull(), err
 			}
-			s := vm.sqlDBs()
+			s := vm.sqlOpen()
 			h := s.get(id)
 			if h == nil || h.db == nil {
 				return NewNull(), nil
@@ -755,12 +772,13 @@ func init() {
 				return NewNull(), fmt.Errorf("flow.store() is asked for in a runtime of flows that has no database")
 			}
 			key := vm.stepKey
-			s := vm.sqlDBs()
-			s.mu.Lock()
-			id, ok := s.steps[key]
-			s.mu.Unlock()
-			if ok {
-				return NewInt(id), nil
+			if s := vm.sqlOpen(); s != nil {
+				s.mu.Lock()
+				id, ok := s.steps[key]
+				s.mu.Unlock()
+				if ok {
+					return NewInt(id), nil
+				}
 			}
 			var tx *sql.Tx
 			var db *sql.DB
@@ -780,7 +798,7 @@ func init() {
 			if failed != nil {
 				return vm.sqlRefused(failed)
 			}
-			return NewInt(s.add(&sqlHandle{tx: tx, pool: db, kind: kind, step: key})), nil
+			return NewInt(vm.sqlDBs().add(&sqlHandle{tx: tx, pool: db, kind: kind, step: key})), nil
 		}},
 		problemNative,
 	)
